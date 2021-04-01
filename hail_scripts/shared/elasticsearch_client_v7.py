@@ -39,7 +39,7 @@ class ElasticsearchClient:
 
         http_auth =  (self._es_username, self._es_password) if self._es_password else None
 
-        self.es = elasticsearch.Elasticsearch(host, port=port, http_auth=http_auth)
+        self.es = elasticsearch.Elasticsearch(host, port=port, http_auth=http_auth, scheme='https')
 
         # check connection
         logger.info(pformat(self.es.info()))
