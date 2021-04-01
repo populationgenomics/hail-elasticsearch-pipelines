@@ -125,6 +125,9 @@ class ElasticsearchClient(BaseElasticsearchClient):
                 'es.net.http.auth.pass': self._es_password,
             })
 
+        elasticsearch_config["es.nodes.wan.only"] = "true"
+        elasticsearch_config["es.net.ssl"] = "true"
+
         # encode any special chars in column names
         rename_dict = {}
         for field_name in table.row_value.dtype.fields:
