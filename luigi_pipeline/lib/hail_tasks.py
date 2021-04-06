@@ -200,7 +200,7 @@ class HailElasticSearchTask(luigi.Task):
     use_temp_loading_nodes = luigi.BoolParameter(default=True, description='Whether to use temporary loading nodes.')
     es_host = luigi.Parameter(description='ElasticSearch host.', default='localhost')
     es_port = luigi.IntParameter(description='ElasticSearch port.', default=9200)
-    es_scheme = luigi.Parameter(description='ElastisSearch scheme (http or https)', default='http')
+    es_scheme = luigi.Parameter(description='ElasticSearch scheme (http or https)', default='http')
     es_index = luigi.Parameter(description='ElasticSearch index.', default='data')
     es_username = luigi.Parameter(description='ElasticSearch username.', default='pipeline')
     es_password = luigi.Parameter(description='ElasticSearch password.', visibility=ParameterVisibility.PRIVATE, default=None)
