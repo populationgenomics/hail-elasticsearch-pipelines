@@ -125,9 +125,9 @@ class ElasticsearchClient(BaseElasticsearchClient):
                 'es.net.http.auth.pass': self._es_password,
             })
 
-        if self._es_scheme == 'https':
+        if self._es_use_ssl:
             elasticsearch_config['es.net.ssl'] = 'true'
-            # If using HTTPS, the instance is likely managed, in which case we
+            # If using SSL, the instance is likely managed, in which case we
             # can't discover nodes.
             elasticsearch_config['es.nodes.wan.only'] = 'true'
 
