@@ -22,7 +22,7 @@ LOADING_NODES_NAME = 'elasticsearch-es-data-loading*'
 
 class ElasticsearchClient:
 
-    def __init__(self, host='localhost', port='9200', es_username='pipeline', es_password=None):
+    def __init__(self, host='localhost', port='9200', es_username='pipeline', es_password=None, es_scheme='http'):
         """Constructor.
 
         Args:
@@ -30,16 +30,18 @@ class ElasticsearchClient:
             port (str): Elasticsearch server port
             es_username (str): Elasticsearch username
             es_password (str): Elasticsearch password
+            es_scheme (str): Whether to use http or https
         """
 
         self._host = host
         self._port = port
         self._es_username = es_username
         self._es_password = es_password
+        self._es_scheme = es_scheme
 
         http_auth =  (self._es_username, self._es_password) if self._es_password else None
 
-        self.es = elasticsearch.Elasticsearch(host, port=port, http_auth=http_auth, scheme='https')
+        self.es = elasticsearch.Elasticsearch(host, port=port, http_auth=http_auth, scheme=es_scheme)
 
         # check connection
         logger.info(pformat(self.es.info()))

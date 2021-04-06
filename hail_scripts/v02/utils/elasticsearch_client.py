@@ -125,8 +125,10 @@ class ElasticsearchClient(BaseElasticsearchClient):
                 'es.net.http.auth.pass': self._es_password,
             })
 
-        elasticsearch_config["es.nodes.wan.only"] = "true"
-        elasticsearch_config["es.net.ssl"] = "true"
+        # If using HTTPS, the instance is likely managed, in which case we can't
+        # discover nodes.
+        if self._es_scheme == 'https':
+            elasticsearch_config["es.nodes.wan.only"] = "true"
 
         # encode any special chars in column names
         rename_dict = {}
