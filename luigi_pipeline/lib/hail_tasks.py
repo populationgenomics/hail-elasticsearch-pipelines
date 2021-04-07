@@ -200,6 +200,7 @@ class HailElasticSearchTask(luigi.Task):
     use_temp_loading_nodes = luigi.BoolParameter(default=True, description='Whether to use temporary loading nodes.')
     es_host = luigi.Parameter(description='ElasticSearch host.', default='localhost')
     es_port = luigi.IntParameter(description='ElasticSearch port.', default=9200)
+    es_use_ssl = luigi.BoolParameter(description='Use SSL for ElasticSearch', default=False)
     es_index = luigi.Parameter(description='ElasticSearch index.', default='data')
     es_username = luigi.Parameter(description='ElasticSearch username.', default='pipeline')
     es_password = luigi.Parameter(description='ElasticSearch password.', visibility=ParameterVisibility.PRIVATE, default=None)
@@ -213,7 +214,7 @@ class HailElasticSearchTask(luigi.Task):
             raise Exception(f"Invalid es_index name [{self.es_index}], must be lowercase")
 
         self._es = ElasticsearchClient(
-            host=self.es_host, port=self.es_port, es_username=self.es_username, es_password=self.es_password)
+            host=self.es_host, port=self.es_port, es_username=self.es_username, es_password=self.es_password, es_use_ssl=self.es_use_ssl)
 
     def requires(self):
         return [VcfFile(filename=self.source_path)]
