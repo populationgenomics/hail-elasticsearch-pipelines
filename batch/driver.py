@@ -121,6 +121,7 @@ def main(
         packages=DATAPROC_PACKAGES,
         num_secondary_workers=2,
         job_name='Load to Seqr',
+        vep=True,
     )
     j.always_run()
 
