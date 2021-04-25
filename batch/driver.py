@@ -9,6 +9,7 @@ See the README for more information. This is WIP.
 
 import logging
 import os
+import subprocess
 from os.path import join
 from typing import Optional, List
 
@@ -17,7 +18,6 @@ import hailtop.batch as hb
 from analysis_runner import dataproc
 
 DATAPROC_PACKAGES = [
-    'hail-loading-pipeline',
     'click',
     'cpg-gnomad',
     'google',
@@ -117,6 +117,9 @@ def main(
     )
     b = hb.Batch('Seqr loader', backend=backend)
     sp_cmdl = ' '.join([f'--source-path {sp}' for sp in source_paths])
+    subprocess.run(
+        f'pwd; ls', check=False, shell=True
+    )
     j = dataproc.hail_dataproc_job(
         b,
         f'batch/load.py {sp_cmdl} --dest-path {dest_path} --',
