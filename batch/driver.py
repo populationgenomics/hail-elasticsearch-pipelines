@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 """
 Let this be the entrypoint / driver for loading data into SEQR for the CPG
 See the README for more information. This is WIP.
@@ -81,8 +83,9 @@ def main(
     dry_run: bool,
     billing_project: str,
     genome_version: str,
-    disable_validation: bool = False,
-    dataset_type: str = "VARIANTS",
+    disable_validation: bool,
+    dataset_type: str,
+    sample_type: str,
     remap_path: str = None,
     subset_path: str = None,
     vep_config_json_path: Optional[str] = None,
@@ -121,8 +124,12 @@ def main(
         packages=DATAPROC_PACKAGES,
         num_secondary_workers=2,
         job_name='Load to Seqr',
-        vep=True,
+        vep='GRCh38',
     )
     j.always_run()
 
     b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch)
+
+
+if __name__ == '__main__':
+    main()  # pylint: disable=E1120
