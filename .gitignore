@@ -10,3 +10,5 @@ temp
 *.vcf.gz
 download_and_create_reference_datasets/*.txt
 download_and_create_reference_datasets/*.gz
+
+playground

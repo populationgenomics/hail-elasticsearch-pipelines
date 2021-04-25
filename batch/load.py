@@ -1,12 +1,11 @@
 import logging
 from typing import Optional, List
 
+import click
 import hail as hl
 
 from hail_scripts.v02.utils.elasticsearch_client import ElasticsearchClient
 from model.seqr_mt_schema import SeqrVariantsAndGenotypesSchema
-
-import click
 
 logger = logging.getLogger()
 
