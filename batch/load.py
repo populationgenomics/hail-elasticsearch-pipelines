@@ -7,8 +7,8 @@ import hail as hl
 import os
 print(f'pwd: {os.getcwd()}')
 print(f'ls: {os.listdir()}')
-print('unzip pyfiles.zip')
-os.system('unzip pyfiles.zip')
+print('unzip pyscripts_*.zip')
+os.system('unzip pyscripts_*.zip')
 print(f'ls: {os.listdir()}')
 from hail_scripts.v02.utils.elasticsearch_client import ElasticsearchClient
 from model.seqr_mt_schema import SeqrVariantsAndGenotypesSchema
