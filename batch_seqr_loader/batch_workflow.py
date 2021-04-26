@@ -117,10 +117,9 @@ def main(
     )
     b = hb.Batch('Seqr loader', backend=backend)
     sp_cmdl = ' '.join([f'--source-path {sp}' for sp in source_paths])
-    subprocess.run(f'pwd; ls', check=False, shell=True)
     j = dataproc.hail_dataproc_job(
         b,
-        f'seqr_load {sp_cmdl} --dest-path {dest_path} --',
+        f'seqr_load.py {sp_cmdl} --dest-path {dest_path} --',
         max_age='8h',
         packages=DATAPROC_PACKAGES,
         num_secondary_workers=2,
