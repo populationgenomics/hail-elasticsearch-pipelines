@@ -9,7 +9,6 @@ See the README for more information. This is WIP.
 
 import logging
 import os
-import subprocess
 from os.path import join
 from typing import Optional, List
 
@@ -119,7 +118,7 @@ def main(
     sp_cmdl = ' '.join([f'--source-path {sp}' for sp in source_paths])
     j = dataproc.hail_dataproc_job(
         b,
-        f'seqr_load.py {sp_cmdl} --dest-path {dest_path} --',
+        f'batch_seqr_loader/seqr_load.py {sp_cmdl} --dest-path {dest_path} --',
         max_age='8h',
         packages=DATAPROC_PACKAGES,
         num_secondary_workers=2,
