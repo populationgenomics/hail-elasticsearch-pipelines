@@ -59,7 +59,8 @@ logger = logging.getLogger()
 )
 @click.option(
     '--vep-config', 'vep_config_json_path',
-    help='Path of hail vep config .json file'
+    help='Path of hail vep config .json file',
+    #default='gs://cpg-reference/hg38/v0/vep-config.json',
 )
 @click.option(
     '--vep-block-size', 'vep_block_size'
@@ -80,6 +81,7 @@ def main(
     vep_block_size: Optional[int] = None,
 ):
     print('Running')
+    genome_version = genome_version.replace('GRCh', '')
     mt = import_vcf(source_paths, genome_version)
     mt = annotate_old_and_split_multi_hts(mt)
     if not disable_validation:
@@ -143,7 +145,6 @@ def dump_to_estask(mt, es_credentials: ElasticSearchCredentials):
 def import_vcf(source_paths, genome_version):
     # https://github.com/populationgenomics/hail-elasticsearch-pipelines/blob/e41582d4842bc0d2e06b1d1e348eb071e00e01b3/luigi_pipeline/lib/hail_tasks.py#L77-L89
     # Import the VCFs from inputs. Set min partitions so that local pipeline execution takes advantage of all CPUs.
-    genome_version = genome_version.replace('GRCh', '')
     recode = {}
     if genome_version == "38":
         recode = {f"{i}": f"chr{i}" for i in (list(range(1, 23)) + ["X", "Y"])}
@@ -245,8 +246,8 @@ def run_vep(
     mt: hl.MatrixTable,
     genome_version: str,
     name: str = "vep",
-    block_size: int = 1000,
-    vep_config_json_path = None,
+    vep_config_json_path: str = None,
+    block_size: Optional[int] = None,
 ) -> hl.MatrixTable:
     """Runs VEP.
 
@@ -267,10 +268,10 @@ def run_vep(
         if genome_version not in ["37", "38"]:
             raise ValueError(f"Invalid genome version: {genome_version}")
 
-        # I think this is a default config when you start the VEP cluster on spark
+        # Default config when you start the VEP cluster on spark
         config = "file:///vep_data/vep-gcloud.json"
 
-    mt = hl.vep(mt, config=config, name=name, block_size=block_size)
+    mt = hl.vep(mt, config=config, name=name, block_size=block_size or 1000)
 
     logger.info("==> Done with VEP")
     return mt
