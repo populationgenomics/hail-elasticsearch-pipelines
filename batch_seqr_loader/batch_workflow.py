@@ -18,6 +18,7 @@ import hailtop.batch as hb
 from analysis_runner import dataproc
 
 DATAPROC_PACKAGES = [
+    'seqr-loader',
     'click',
     'google',
     'slackclient',
@@ -26,7 +27,7 @@ DATAPROC_PACKAGES = [
     'gcloud',
 ]
 
-logger = logging.getLogger('seqr_loader')
+logger = logging.getLogger('seqr-loader')
 logger.setLevel('INFO')
 
 
@@ -119,13 +120,12 @@ def main(
     subprocess.run(f'pwd; ls', check=False, shell=True)
     j = dataproc.hail_dataproc_job(
         b,
-        f'batch/load.py {sp_cmdl} --dest-path {dest_path} --',
+        f'seqr_load {sp_cmdl} --dest-path {dest_path} --',
         max_age='8h',
         packages=DATAPROC_PACKAGES,
         num_secondary_workers=2,
         job_name='Load to Seqr',
         vep='GRCh38',
-        pyfiles=['batch/model', 'hail_scripts'],
     )
     j.always_run()
 

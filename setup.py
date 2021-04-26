@@ -8,10 +8,10 @@ Setup script for the Python package
 
 import setuptools
 
-PKG = 'seqr_loader_batch'
+PKG = 'seqr-loader'
 
 setuptools.setup(
-    name='seqr_loader_batch',
+    name='seqr-loader',
     # This tag is automatically updated by bump2version
     version='1.0.2',
     description='The hail scripts in this repo can be used to pre-process variant callsets and export them to elasticsearch',
@@ -19,10 +19,10 @@ setuptools.setup(
     long_description_content_type='text/markdown',
     url=f'https://github.com/populationgenomics/hail-elasticsearch-pipelines',
     license='MIT',
-    packages=['hail_scripts', 'seqr_loader_batch'],
+    packages=['hail_scripts', 'batch_seqr_loader'],
     include_package_data=True,
     zip_safe=False,
-    scripts=['seqr_loader_batch/load.py'],
+    scripts=['batch_seqr_loader/seqr_load.py'],
     keywords='bioinformatics',
     classifiers=[
         'Environment :: Console',
