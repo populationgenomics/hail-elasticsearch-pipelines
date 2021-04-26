@@ -13,7 +13,7 @@ PKG = 'seqr_loader_batch'
 setuptools.setup(
     name='seqr_loader_batch',
     # This tag is automatically updated by bump2version
-    version='1.0.0',
+    version='1.0.1',
     description='The hail scripts in this repo can be used to pre-process variant callsets and export them to elasticsearch',
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',
