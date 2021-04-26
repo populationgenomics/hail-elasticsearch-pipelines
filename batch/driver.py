@@ -19,7 +19,6 @@ from analysis_runner import dataproc
 
 DATAPROC_PACKAGES = [
     'click',
-    'cpg-gnomad',
     'google',
     'slackclient',
     'fsspec',

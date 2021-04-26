@@ -7,6 +7,9 @@ import hail as hl
 import os
 print(f'pwd: {os.getcwd()}')
 print(f'ls: {os.listdir()}')
+print('unzip pyfiles.zip')
+os.system('unzip pyfiles.zip')
+print(f'ls: {os.listdir()}')
 from hail_scripts.v02.utils.elasticsearch_client import ElasticsearchClient
 from model.seqr_mt_schema import SeqrVariantsAndGenotypesSchema
 
@@ -61,7 +64,7 @@ logger = logging.getLogger()
 @click.option(
     '--vep-block-size', 'vep_block_size'
 )
-def parse_and_annotate_vcfs(
+def main(
     source_paths: List[str],
     dest_path: str,
     genome_version: str,
@@ -76,6 +79,7 @@ def parse_and_annotate_vcfs(
     vep_config_json_path: Optional[str] = None,
     vep_block_size: Optional[int] = None,
 ):
+    print('Running')
     mt = import_vcf(source_paths, genome_version)
     mt = annotate_old_and_split_multi_hts(mt)
     if not disable_validation:
@@ -139,6 +143,7 @@ def dump_to_estask(mt, es_credentials: ElasticSearchCredentials):
 def import_vcf(source_paths, genome_version):
     # https://github.com/populationgenomics/hail-elasticsearch-pipelines/blob/e41582d4842bc0d2e06b1d1e348eb071e00e01b3/luigi_pipeline/lib/hail_tasks.py#L77-L89
     # Import the VCFs from inputs. Set min partitions so that local pipeline execution takes advantage of all CPUs.
+    genome_version = genome_version.replace('GRCh', '')
     recode = {}
     if genome_version == "38":
         recode = {f"{i}": f"chr{i}" for i in (list(range(1, 23)) + ["X", "Y"])}
@@ -413,3 +418,7 @@ def add_37_coordinates(mt):
     rg38.add_liftover('gs://hail-common/references/grch38_to_grch37.over.chain.gz', rg37)
     mt = mt.annotate_rows(rg37_locus=hl.liftover(mt.locus, 'GRCh37'))
     return mt
+
+
+if __name__ == '__main__':
+    main()  # pylint: disable=E1120
