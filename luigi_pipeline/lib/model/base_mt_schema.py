@@ -11,6 +11,10 @@ class RowAnnotationOmit(Exception):
     pass
 
 
+class RowAnnotationFailed(Exception):
+    pass
+
+
 class RowAnnotation:
     def __init__(self, fn, name=None, requirements: List[str]=None):
         self.fn = fn
@@ -174,6 +178,15 @@ class BaseMTSchema:
             called_annotations = called_annotations.union(set(annotations_to_apply.keys()))
 
             if len(next_round) > 0:
+                if len(next_round) == len(rnd):
+                    # something has got stuck and it's requirements can't be fulfilled
+                    failed_annotations = ', '.join(an.name for an in next_round)
+                    flattened_reqs = [inner for an in next_round for inner in (an.requirements or [])]
+                    requirements = ', '.join(set(flattened_reqs))
+                    raise RowAnnotationFailed(
+                        f"Couldn't apply annotations {failed_annotations}, "
+                        f"their dependencies could not be fulfilled: {requirements}"
+                    )
                 rounds.append(next_round)
 
         return self
