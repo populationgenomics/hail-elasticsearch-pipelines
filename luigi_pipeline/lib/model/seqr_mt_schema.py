@@ -9,10 +9,15 @@ class SeqrSchema(BaseMTSchema):
 
     def __init__(self, *args, ref_data, clinvar_data, hgmd_data=None, **kwargs):
         self._ref_data = ref_data
-        # gets set by the set_mt in super().__init__
-        self._selected_ref_data = None 
         self._clinvar_data = clinvar_data
         self._hgmd_data = hgmd_data
+
+        # reuse:
+        #   self._ref_data[self.mt.row_key]
+        # for all annotations, so store it in _selected_ref_data
+        # note it gets set by the set_mt in super().__init__
+        # so that it updates after each update to self.mt
+        self._selected_ref_data = None
 
         super().__init__(*args, **kwargs)
 
