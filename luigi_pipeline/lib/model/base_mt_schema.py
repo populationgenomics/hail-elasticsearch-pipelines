@@ -53,13 +53,11 @@ def row_annotation(name=None, fn_require=None):
     def mt_prop_wrapper(func):
         requirements = None
         if fn_require is not None:
-            if not isinstance(fn_require, list):
-                fn_require = [fn_require]
-
-            for fn in fn_require:
+            fn_requirements = fn_require if isinstance(fn_require, list) else [fn_require]
+            for fn in fn_requirements:
                 if not isinstance(fn, RowAnnotation):
                     raise ValueError('Schema: dependency %s is not a row annotation method.' % fn_require.__name__)
-            requirements = [fn.name for fn in fn_require]
+            requirements = [fn.name for fn in fn_requirements]
 
         return RowAnnotation(func, name=name, requirements=requirements)
 
@@ -127,7 +125,7 @@ class BaseMTSchema:
         """
         called_annotations = set()
         rounds: List[List[RowAnnotation]] = [self.all_annotation_fns()]
-        print(f'Will attempt to apply {len(rounds)} row annotations')
+        print(f'Will attempt to apply {len(rounds[0])} row annotations')
 
         while len(rounds) > 0:
             rnd = rounds.pop(0)
