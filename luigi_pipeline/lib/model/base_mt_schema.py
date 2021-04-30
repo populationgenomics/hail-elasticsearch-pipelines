@@ -107,7 +107,9 @@ class BaseMTSchema:
 
     @property
     def mt(self):
-        """Don't allow """
+        """
+        Don't allow direct sets to self.mt to ensure some references are updated
+        """
         return self._mt
 
     # Don't use @mt.setter as it makes inheritance harder
