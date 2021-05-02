@@ -14,16 +14,24 @@ class SeqrSchema(BaseMTSchema):
 
         # reuse:
         #   self._ref_data[self.mt.row_key]
-        # for all annotations, so store it in _selected_ref_data
-        # note it gets set by the set_mt in super().__init__
-        # so that it updates after each update to self.mt
-        self._selected_ref_data = None
+        # for all annotations. We'll use the @property _selected_ref_data
+        # to access this value, and lazily cache it (so as not to compute
+        # it if it doesn't get get accessed after an update to self.mt
+        self._selected_ref_data_cache = None
 
         super().__init__(*args, **kwargs)
 
     def set_mt(self, mt):
         super().set_mt(mt)
-        self._selected_ref_data = self._ref_data[self.mt.row_key]
+        # set this to None, and the @property _selected_ref_data
+        # can populate it if it gets used after each MT update.
+        self._selected_ref_data_cache = None
+
+    @property
+    def _selected_ref_data(self):
+        if not self._selected_ref_data_cache:
+            self._selected_ref_data_cache = self._ref_data[self.mt.row_key]
+        return self._selected_ref_data_cache
 
     @row_annotation()
     def vep(self):
