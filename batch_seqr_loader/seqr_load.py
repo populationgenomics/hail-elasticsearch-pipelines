@@ -17,7 +17,10 @@ logger = logging.getLogger()
     '--source-path', 'source_paths', multiple=True, required=True,
 )
 @click.option(
-    '--dest-path', 'dest_path', required=True,
+    '--dest-mt-path', 'dest_path', required=True,
+)
+@click.option(
+    '--bucket', 'bucket', required=True,
 )
 @click.option('--genome-version', 'genome_version', default='GRCh38')
 @click.option(
@@ -64,6 +67,7 @@ logger = logging.getLogger()
 def main(
     source_paths: List[str],
     dest_path: str,
+    bucket: str,
     genome_version: str,
     reference_path: str,
     clinvar_path: str,
@@ -80,6 +84,7 @@ def main(
     genome_version = genome_version.replace('GRCh', '')
     mt = import_vcf(source_paths, genome_version)
     mt = annotate_old_and_split_multi_hts(mt)
+    mt.write(f'{bucket}/annotate_old_and_split_multi_hts.mt', overwrite=True)
     if not disable_validation:
         validate_mt(mt, sample_type)
     if remap_path:
@@ -88,19 +93,21 @@ def main(
         mt = subset_samples_and_variants(mt, subset_path)
     if genome_version == '38':
         mt = add_37_coordinates(mt)
-
+        mt.write(f'{bucket}/add_37_coordinates.mt', overwrite=True)
     mt = run_vep(
         mt,
         genome_version=genome_version,
         vep_config_json_path=vep_config_json_path,
         block_size=vep_block_size,
     )
+    mt.write(f'{bucket}/run_vep.mt', overwrite=True)
 
     ref_data = hl.read_table(reference_path)
     clinvar = hl.read_table(clinvar_path)
     hgmd = hl.read_table(hgmd_path) if hgmd_path else None
 
     mt = compute_annotated_vcf(mt, ref_data=ref_data, clinvar=clinvar, hgmd=hgmd)
+    mt.write(f'{bucket}/compute_annotated_vcf.mt', overwrite=True)
 
     mt = mt.annotate_globals(
         sourceFilePath=",".join(source_paths),

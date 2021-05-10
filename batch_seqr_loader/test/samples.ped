@@ -1,0 +1,3 @@
+Family.ID	Individual.ID	Paternal.ID	Maternal.ID	Gender
+MYFAM	TOB1520	0	0	2
+MYFAM	TOB1521	0	TOB1520	1

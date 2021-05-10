@@ -8,8 +8,16 @@ Example:
 
 ```
 analysis-runner \
-    --dataset <dataset> \
-    batch/load.py --
+    --dataset seqr \
+    --output-dir "gs://cpg-seqr-temporary/loader-test" \
+    --description "test seqr loader" \
+    --access-level test batch_seqr_loader/batch_workflow.py \
+batch_workflow.py \
+    --gvcf-bucket gs://playground-au/seqr/gvcf/ \
+    --ped-file gs://playground-au/seqr/samples.ped \
+    --dest-mt-path gs://cpg-seqr-temporary/loader-test/NA12878_trio.mt \
+    --work-bucket gs://cpg-seqr-temporary/loader-test/work \
+    --keep-scratch
 ```
 
 This script will automatically start a Dataproc cluster where relevant.
