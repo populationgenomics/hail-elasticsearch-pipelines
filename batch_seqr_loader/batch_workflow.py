@@ -209,7 +209,7 @@ def find_inputs(
             for line in subprocess.check_output(cmd, shell=True).decode().split()
         )
 
-    df = pd.read_csv(ped_fpath, delimeter='\t')
+    df = pd.read_csv(ped_fpath, delimiter='\t')
     df['gvcf'] = ''
     df = df.set_index('Individual.ID', drop=False)
     df = df.rename(columns={'Individual.ID': 's'})
