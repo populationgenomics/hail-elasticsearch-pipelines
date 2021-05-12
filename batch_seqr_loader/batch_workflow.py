@@ -152,7 +152,6 @@ def main(
     samples_df[['s', 'gvcf']].to_csv(sample_map_fpath, 
                                      sep='\t', header=False, index=False)
 
-
     genotype_vcf_jobs = []
     for idx in range(scatter_count):
         import_gvcfs_job = add_import_gvcfs_job(
@@ -187,6 +186,7 @@ def main(
         num_secondary_workers=2,
         job_name='seqr_load.py',
         vep='GRCh38',
+        depends_on=[final_gathered_vcf_job],
     )
 
     b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch)
