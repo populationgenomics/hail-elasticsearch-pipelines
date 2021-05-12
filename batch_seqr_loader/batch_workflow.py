@@ -48,7 +48,7 @@ logger.setLevel('INFO')
     '--ped-file', 'ped_fpath', required=True,
 )
 @click.option(
-    '--callset', 'callset_name', required=True,
+    '--dataset', 'dataset_name', required=True,
 )
 @click.option(
     '--dest-mt-path', 'dest_mt_path', required=True,
@@ -93,7 +93,7 @@ logger.setLevel('INFO')
 def main(
     gvcf_buckets: List[str],
     ped_fpath: str,
-    callset_name: str,
+    dataset_name: str,
     dest_mt_path: str,
     work_bucket: str,
     keep_scratch: bool,
@@ -173,7 +173,7 @@ def main(
         b,
         input_vcfs=[j.output_vcf for j in genotype_vcf_jobs],
         disk_size=200,
-        output_vcf_path=join(work_bucket, f'{callset_name}.vcf'),
+        output_vcf_path=join(work_bucket, f'{dataset_name}.vcf'),
     )
 
     j = dataproc.hail_dataproc_job(
