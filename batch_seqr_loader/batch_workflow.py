@@ -54,7 +54,7 @@ logger.setLevel('INFO')
     '--dest-mt-path', 'dest_mt_path', required=True,
 )
 @click.option(
-    '--work-bucket', 'work_bucket', required=True,
+    '--work-bucket', '--bucket', 'work_bucket', required=True,
 )
 @click.option('--keep-scratch', 'keep_scratch', is_flag=True)
 @click.option('--dry-run', 'dry_run', is_flag=True)
