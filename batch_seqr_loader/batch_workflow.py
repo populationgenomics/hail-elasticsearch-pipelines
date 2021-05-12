@@ -162,7 +162,7 @@ def main(
         )
         genotype_vcf_job = add_gatk_genotype_gvcf_job(
             b,
-            workspace_tar=import_gvcfs_job.tar,
+            workspace_tar=import_gvcfs_job.genomicsdb_tar,
             interval=intervals[f'interval_{idx}'],
             reference=reference,
             dbsnp=dbsnp,
@@ -215,8 +215,8 @@ def find_inputs(
     subprocess.run(
         f'gsutil cp {ped_fpath} {local_ped_fpath}', check=False, shell=True
     )
-    shutil.rmtree(local_tmp_dir)
     df = pd.read_csv(local_ped_fpath, delimiter='\t')
+    shutil.rmtree(local_tmp_dir)
     df['gvcf'] = ''
     df = df.set_index('Individual.ID', drop=False)
     df = df.rename(columns={'Individual.ID': 's'})
@@ -297,12 +297,8 @@ def add_import_gvcfs_job(
     mem_gb = 26
     j.memory(f'{mem_gb}G')
     j.storage(f'{disk_size}G')
-    workspace_dir_name = 'genomicsdb_workspace'
-    j.declare_resource_group(tar=f'{workspace_dir_name}.tar')
     j.command(
         f"""set -e
-
-    rm -rf {workspace_dir_name}
 
     # We've seen some GenomicsDB performance regressions related to intervals, 
     # so we're going to pretend we only have a single interval
@@ -330,7 +326,7 @@ def add_import_gvcfs_job(
       --merge-input-intervals \
       --consolidate
 
-    tar -cf {j.tar} {workspace_dir_name}"""
+    tar -cf {j.genomicsdb_tar} /genomicsdb_workspace"""
     )
     return j
 
@@ -349,8 +345,8 @@ def add_gatk_genotype_gvcf_job(
     j.storage(f'{disk_size}G')
     j.declare_resource_group(
         output_vcf={
-            'g.vcf.gz': '{root}.g.vcf.gz',
-            'g.vcf.gz.tbi': '{root}.g.vcf.gz.tbi',
+            'vcf.gz': '{root}.vcf.gz',
+            'vcf.gz.tbi': '{root}.vcf.gz.tbi',
         }
     )
 
