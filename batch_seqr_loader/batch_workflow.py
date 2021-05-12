@@ -9,9 +9,10 @@ See the README for more information. This is WIP.
 
 import logging
 import os
+import shutil
 import subprocess
 import tempfile
-from os.path import join
+from os.path import join, basename
 from typing import Optional, List
 import pandas as pd
 import click
@@ -209,7 +210,13 @@ def find_inputs(
             for line in subprocess.check_output(cmd, shell=True).decode().split()
         )
 
-    df = pd.read_csv(ped_fpath, delimiter='\t')
+    local_tmp_dir = tempfile.mkdtemp()
+    local_ped_fpath = join(local_tmp_dir, basename(ped_fpath))
+    subprocess.run(
+        f'gsutil cp {ped_fpath} {local_ped_fpath}', check=False, shell=True
+    )
+    shutil.rmtree(local_tmp_dir)
+    df = pd.read_csv(local_ped_fpath, delimiter='\t')
     df['gvcf'] = ''
     df = df.set_index('Individual.ID', drop=False)
     df = df.rename(columns={'Individual.ID': 's'})
