@@ -294,7 +294,7 @@ def add_import_gvcfs_job(
 ):
     j = b.new_job('ImportGVCFs')
     j.image(GATK_CONTAINER)
-    mem_gb = 26
+    mem_gb = 16
     j.memory(f'{mem_gb}G')
     j.storage(f'{disk_size}G')
     j.command(
