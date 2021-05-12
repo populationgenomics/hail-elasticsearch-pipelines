@@ -203,7 +203,7 @@ def find_inputs(
     """
     gvcf_paths: List[str] = []
     for ib in input_buckets:
-        cmd = f'gsutil ls \'{ib}/*.g.vcf.gz\''
+        cmd = f'gsutil ls \'{join(ib, "*.g.vcf.gz")}\''
         gvcf_paths.extend(
             line.strip()
             for line in subprocess.check_output(cmd, shell=True).decode().split()
