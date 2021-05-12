@@ -150,8 +150,8 @@ def main(
     sample_map_fpath = tempfile.mktemp(suffix='.tsv')
     samples_df[['s', 'gvcf']].to_csv(sample_map_fpath, 
                                      sep='\t', header=False, index=False)
-    
-    
+
+
     genotype_vcf_jobs = []
     for idx in range(scatter_count):
         import_gvcfs_job = add_import_gvcfs_job(
@@ -297,9 +297,10 @@ def add_import_gvcfs_job(
 
     rm -rf {workspace_dir_name}
 
-    # We've seen some GenomicsDB performance regressions related to intervals, so we're going to pretend we only have a single interval
-    # using the --merge-input-intervals arg
-    # There's no data in between since we didn't run HaplotypeCaller over those loci so we're not wasting any compute
+    # We've seen some GenomicsDB performance regressions related to intervals, 
+    # so we're going to pretend we only have a single interval
+    # using the --merge-input-intervals arg. There's no data in between since 
+    # we didn't run HaplotypeCaller over those loci so we're not wasting any compute
 
     # The memory setting here is very important and must be several GiB lower
     # than the total memory allocated to the VM because this tool uses
@@ -310,8 +311,8 @@ def add_import_gvcfs_job(
     # The batch_size value was carefully chosen here as it
     # is the optimal value for the amount of memory allocated
     # within the task; please do not change it without consulting
-    # the Hellbender (GATK engine) team!   
-     
+    # the Hellbender (GATK engine) team!
+
     gatk --java-options -Xms{mem_gb - 1}g \
       GenomicsDBImport \
       --genomicsdb-workspace-path /genomicsdb_workspace \
@@ -325,7 +326,6 @@ def add_import_gvcfs_job(
     tar -cf {j.tar} {workspace_dir_name}"""
     )
     return j
-
 
 
 def add_gatk_genotype_gvcf_job(
@@ -352,7 +352,7 @@ def add_gatk_genotype_gvcf_job(
         
     tar -xf {workspace_tar}
     WORKSPACE=$(basename {workspace_tar} .tar)
-    
+
     gatk \\
       --java-options -Xms8g \\
       --java-options '-DGATK_STACKTRACE_ON_USER_EXCEPTION=true' \\
