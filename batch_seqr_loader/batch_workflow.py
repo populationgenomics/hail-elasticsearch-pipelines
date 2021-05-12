@@ -148,11 +148,10 @@ def main(
     )
     intervals = split_intervals_job.intervals
 
-    sample_map_fpath = tempfile.mktemp(suffix='.tsv')
-    samples_df[['s', 'gvcf']].to_csv(sample_map_fpath, 
-                                     sep='\t', header=False, index=False)
-
     genotype_vcf_jobs = []
+    sample_map_fpath = join(work_bucket, 'work', 'sample_name.csv')
+    samples_df[['s', 'gvcf']].to_csv(sample_map_fpath,
+                                     sep='\t', header=False, index=False)
     for idx in range(scatter_count):
         import_gvcfs_job = add_import_gvcfs_job(
             b=b,

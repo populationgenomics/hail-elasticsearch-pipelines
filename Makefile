@@ -1,5 +1,11 @@
 VERSION := v0
 
+.PHONY: commit
+commit:
+	git all
+	git commit -m "$(msg)"
+	git push
+
 .PHONY: run_test
 run_test:
 	analysis-runner \
