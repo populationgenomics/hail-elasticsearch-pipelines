@@ -19,4 +19,4 @@ run_test:
 	--dataset seqr \
 	--work-bucket "gs://cpg-seqr-temporary/batch-loader-output/$(VERSION)/work" \
 	--dest-mt-path "gs://cpg-seqr-temporary/batch-loader-output/$(VERSION)/annotated.mt" \
-        --keep-scratch
+        --keep-scratch --batch-id-to-reuse-scratch 71f2b9

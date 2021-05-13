@@ -70,6 +70,7 @@ logger.setLevel('INFO')
     required=True,
 )
 @click.option('--keep-scratch', 'keep_scratch', is_flag=True)
+@click.option('--batch-id-to-reuse-scratch', 'batch_id_to_reuse_scratch')
 @click.option('--dry-run', 'dry_run', is_flag=True)
 @click.option(
     '--billing-project',
@@ -109,6 +110,7 @@ def main(
     dest_mt_path: str,
     work_bucket: str,
     keep_scratch: bool,
+    batch_id_to_reuse_scratch: Optional[str],
     dry_run: bool,
     billing_project: Optional[str],
     genome_version: str,
@@ -150,55 +152,104 @@ def main(
     scatter_count_scale_factor = 0.15
     scatter_count = int(round(scatter_count_scale_factor * len(gvcfs)))
     scatter_count = max(scatter_count, 2)
-    split_intervals_job = add_split_intervals_job(
-        b,
-        UNPADDED_INTERVALS,
-        scatter_count,
-        reference,
-    )
-    intervals = split_intervals_job.intervals
+
+    batch_to_reuse_bucket = None
+    if batch_id_to_reuse_scratch:
+        batch_to_reuse_bucket = f'{hail_bucket}/batch/{batch_id_to_reuse_scratch}'
+    
+    paths = None
+    if batch_to_reuse_bucket:
+        job_id = 1  # 0-based to 1-based index
+        paths = {
+            f'interval_{idx}': f'{batch_to_reuse_bucket}/{job_id}/intervals/{str(idx).zfill(4)}-scattered.interval_list'
+            for idx in range(scatter_count)
+        }
+    if paths and all(utils.file_exists(path) for path in paths.values()):
+        intervals = b.read_input_group(**paths)
+    else:
+        split_intervals_job = add_split_intervals_job(
+            b,
+            UNPADDED_INTERVALS,
+            scatter_count,
+            reference,
+        )
+        intervals = split_intervals_job.intervals
 
     genotype_vcf_jobs = []
+    genotyped_vcfs = []
     sample_map_fpath = join(work_bucket, 'work', 'sample_name.csv')
     samples_df[['s', 'gvcf']].to_csv(
         sample_map_fpath, sep='\t', header=False, index=False
     )
     for idx in range(scatter_count):
-        import_gvcfs_job = add_import_gvcfs_job(
-            b=b,
-            sample_name_map=b.read_input(sample_map_fpath),
-            interval=intervals[f'interval_{idx}'],
-        )
-        workspace_tar = import_gvcfs_job["genomicsdb.tar"]
-        # workspace_tar = b.read_input('gs://cpg-seqr-hail/batch/409be0/2/genomicsdb.tar')
-        genotype_vcf_job = add_gatk_genotype_gvcf_job(
-            b,
-            workspace_tar=workspace_tar,
-            interval=intervals[f'interval_{idx}'],
-            reference=reference,
-            dbsnp=dbsnp,
-            disk_size=100,
-        )
-        genotype_vcf_jobs.append(genotype_vcf_job)
+        path = None
+        if batch_id_to_reuse_scratch:
+            job_id = (
+                1 +  # 0-based to 1-based index
+                1 +  # split intervals job
+                idx * 2  # 2 jobs for each interval
+            )
+            path = f'{hail_bucket}/batch/{batch_id_to_reuse_scratch}/{job_id}/genomicsdb.tar'
+        if path and utils.file_exists(path):
+            workspace_tar = b.read_input(path)
+        else:
+            import_gvcfs_job = add_import_gvcfs_job(
+                b=b,
+                sample_name_map=b.read_input(sample_map_fpath),
+                interval=intervals[f'interval_{idx}'],
+            )
+            workspace_tar = import_gvcfs_job["genomicsdb.tar"]
 
-    final_gathered_vcf_job = add_final_gather_vcf_step(
-        b,
-        input_vcfs=[j.output_vcf for j in genotype_vcf_jobs],
-        disk_size=200,
-        output_vcf_path=join(work_bucket, f'{dataset_name}.vcf'),
-    )
+        paths = None
+        if batch_id_to_reuse_scratch:
+            job_id = (
+                1 +  # 0-based to 1-based index
+                1 +  # split_intervals job
+                1 +  # import_gvcfs job
+                idx * 2  # 2 jobs for each interval
+            )
+            gvcf_path = f'{hail_bucket}/batch/{batch_id_to_reuse_scratch}/{job_id}/output_vcf.vcf.gz'
+            paths = {
+                'vcf.gz': gvcf_path,
+                'vcf.gz.tbi': gvcf_path + '.tbi',
+            }
+        if paths and all(utils.file_exists(path) for path in paths.values()):
+            genotyped_vcfs.append(b.read_input_group(**paths))
+        else:
+            genotype_vcf_job = add_gatk_genotype_gvcf_job(
+                b,
+                workspace_tar=workspace_tar,
+                interval=intervals[f'interval_{idx}'],
+                reference=reference,
+                dbsnp=dbsnp,
+                disk_size=100,
+            )
+            genotype_vcf_jobs.append(genotype_vcf_job)
+            genotyped_vcfs.append(genotype_vcf_job.output_vcf)
+
+    final_gathered_vcf_job = None
+    gathered_vcf_path = join(work_bucket, f'{dataset_name}.vcf')
+    if batch_id_to_reuse_scratch and utils.file_exists(gathered_vcf):
+        pass
+    else:
+        final_gathered_vcf_job = add_final_gather_vcf_step(
+            b,
+            input_vcfs=genotyped_vcfs,
+            disk_size=200,
+            output_vcf_path=gathered_vcf_path,
+        )
 
     j = dataproc.hail_dataproc_job(
         b,
         f'batch_seqr_loader/seqr_load.py '
-        f'--source-path {final_gathered_vcf_job.output_vcf} '
+        f'--source-path {gathered_vcf_path} '
         f'--dest-mt-path {dest_mt_path} --',
         max_age='8h',
         packages=DATAPROC_PACKAGES,
         num_secondary_workers=2,
         job_name='seqr_load.py',
         vep='GRCh38',
-        depends_on=[final_gathered_vcf_job],
+        depends_on=[final_gathered_vcf_job] if final_gathered_vcf_job else [],
     )
 
     b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch)
