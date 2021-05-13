@@ -171,7 +171,7 @@ def main(
         )
         genotype_vcf_job = add_gatk_genotype_gvcf_job(
             b,
-            workspace_tar=import_gvcfs_job.genomicsdb_tar,
+            workspace_tar=import_gvcfs_job["genomicsdb.tar"],
             interval=intervals[f'interval_{idx}'],
             reference=reference,
             dbsnp=dbsnp,
@@ -334,14 +334,14 @@ def add_import_gvcfs_job(
       --merge-input-intervals \
       --consolidate
 
-    tar -cf {j.genomicsdb_tar} /genomicsdb_workspace"""
+    tar -cf {j["genomicsdb.tar"]} /genomicsdb_workspace"""
     )
     return j
 
 
 def add_gatk_genotype_gvcf_job(
     b: hb.Batch,
-    workspace_tar: hb.ResourceGroup,
+    workspace_tar: hb.ResourceFile,
     interval: hb.ResourceFile,
     reference: hb.ResourceGroup,
     dbsnp: hb.ResourceGroup,
