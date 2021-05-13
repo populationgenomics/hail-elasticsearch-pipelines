@@ -19,6 +19,7 @@ import click
 import hailtop.batch as hb
 from analysis_runner import dataproc
 from hailtop.batch.job import Job
+import hail as hl
 
 GATK_CONTAINER = 'broadinstitute/gatk:4.1.8.0'
 
@@ -164,7 +165,7 @@ def main(
             f'interval_{idx}': f'{batch_to_reuse_bucket}/{job_id}/intervals/{str(idx).zfill(4)}-scattered.interval_list'
             for idx in range(scatter_count)
         }
-    if paths and all(utils.file_exists(path) for path in paths.values()):
+    if paths and all(hl.hadoop_exists(path) for path in paths.values()):
         intervals = b.read_input_group(**paths)
     else:
         split_intervals_job = add_split_intervals_job(
@@ -190,7 +191,7 @@ def main(
                 idx * 2  # 2 jobs for each interval
             )
             path = f'{hail_bucket}/batch/{batch_id_to_reuse_scratch}/{job_id}/genomicsdb.tar'
-        if path and utils.file_exists(path):
+        if path and hl.hadoop_exists(path):
             workspace_tar = b.read_input(path)
         else:
             import_gvcfs_job = add_import_gvcfs_job(
@@ -213,7 +214,7 @@ def main(
                 'vcf.gz': gvcf_path,
                 'vcf.gz.tbi': gvcf_path + '.tbi',
             }
-        if paths and all(utils.file_exists(path) for path in paths.values()):
+        if paths and all(hl.hadoop_exists(path) for path in paths.values()):
             genotyped_vcfs.append(b.read_input_group(**paths))
         else:
             genotype_vcf_job = add_gatk_genotype_gvcf_job(
@@ -229,7 +230,7 @@ def main(
 
     final_gathered_vcf_job = None
     gathered_vcf_path = join(work_bucket, f'{dataset_name}.vcf')
-    if batch_id_to_reuse_scratch and utils.file_exists(gathered_vcf):
+    if batch_id_to_reuse_scratch and hl.hadoop_exists(gathered_vcf):
         pass
     else:
         final_gathered_vcf_job = add_final_gather_vcf_step(
