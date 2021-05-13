@@ -230,7 +230,7 @@ def main(
 
     final_gathered_vcf_job = None
     gathered_vcf_path = join(work_bucket, f'{dataset_name}.vcf')
-    if batch_id_to_reuse_scratch and hl.hadoop_exists(gathered_vcf):
+    if batch_id_to_reuse_scratch and hl.hadoop_exists(gathered_vcf_path):
         pass
     else:
         final_gathered_vcf_job = add_final_gather_vcf_step(
