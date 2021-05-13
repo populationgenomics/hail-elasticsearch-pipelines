@@ -43,19 +43,31 @@ logger.setLevel('INFO')
 
 @click.command()
 @click.option(
-    '--gvcf-bucket', 'gvcf_buckets', multiple=True, required=True,
+    '--gvcf-bucket',
+    'gvcf_buckets',
+    multiple=True,
+    required=True,
 )
 @click.option(
-    '--ped-file', 'ped_fpath', required=True,
+    '--ped-file',
+    'ped_fpath',
+    required=True,
 )
 @click.option(
-    '--dataset', 'dataset_name', required=True,
+    '--dataset',
+    'dataset_name',
+    required=True,
 )
 @click.option(
-    '--dest-mt-path', 'dest_mt_path', required=True,
+    '--dest-mt-path',
+    'dest_mt_path',
+    required=True,
 )
 @click.option(
-    '--work-bucket', '--bucket', 'work_bucket', required=True,
+    '--work-bucket',
+    '--bucket',
+    'work_bucket',
+    required=True,
 )
 @click.option('--keep-scratch', 'keep_scratch', is_flag=True)
 @click.option('--dry-run', 'dry_run', is_flag=True)
@@ -66,31 +78,30 @@ logger.setLevel('INFO')
     default=os.getenv('HAIL_BILLING_PROJECT'),
 )
 @click.option('--genome-version', 'genome_version', default='GRCh38')
-@click.option(
-    '--disable-validation', 'disable_validation', is_flag=True
-)
+@click.option('--disable-validation', 'disable_validation', is_flag=True)
 @click.option(
     '--sample-type', 'sample_type', type=click.Choice(['WGS', 'WES']), default='WGS'
 )
 @click.option(
-    '--dataset-type', 'dataset_type', type=click.Choice(['VARIANTS', 'SV']), 
-    default='VARIANTS'
+    '--dataset-type',
+    'dataset_type',
+    type=click.Choice(['VARIANTS', 'SV']),
+    default='VARIANTS',
 )
 @click.option(
-    '--remap-tsv', 'remap_path',
-    help='Path to a TSV file with two columns: s and seqr_id.'
+    '--remap-tsv',
+    'remap_path',
+    help='Path to a TSV file with two columns: s and seqr_id.',
 )
 @click.option(
-    '--subset-tsv', 'subset_path',
-    help='Path to a TSV file with one column of sample IDs: s.'
+    '--subset-tsv',
+    'subset_path',
+    help='Path to a TSV file with one column of sample IDs: s.',
 )
 @click.option(
-    '--vep-config', 'vep_config_json_path',
-    help='Path of hail vep config .json file'
+    '--vep-config', 'vep_config_json_path', help='Path of hail vep config .json file'
 )
-@click.option(
-    '--vep-block-size', 'vep_block_size'
-)
+@click.option('--vep-block-size', 'vep_block_size')
 def main(
     gvcf_buckets: List[str],
     ped_fpath: str,
@@ -113,9 +124,7 @@ def main(
     Entry point for a batch workflow
     """
     if not billing_project:
-        raise click.BadParameter(
-            '--billing-project has to be specified'
-        )
+        raise click.BadParameter('--billing-project has to be specified')
 
     hail_bucket = os.environ.get('HAIL_BUCKET') or join(work_bucket, 'hail')
     backend = hb.ServiceBackend(
@@ -133,7 +142,8 @@ def main(
     reference = b.read_input_group(
         base=REF_FASTA,
         fai=REF_FASTA + '.fai',
-        dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '') + '.dict',
+        dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
+        + '.dict',
     )
     dbsnp = b.read_input_group(base=DBSNP_VCF, idx=DBSNP_VCF + '.idx')
 
@@ -150,8 +160,9 @@ def main(
 
     genotype_vcf_jobs = []
     sample_map_fpath = join(work_bucket, 'work', 'sample_name.csv')
-    samples_df[['s', 'gvcf']].to_csv(sample_map_fpath,
-                                     sep='\t', header=False, index=False)
+    samples_df[['s', 'gvcf']].to_csv(
+        sample_map_fpath, sep='\t', header=False, index=False
+    )
     for idx in range(scatter_count):
         import_gvcfs_job = add_import_gvcfs_job(
             b=b,
@@ -211,9 +222,7 @@ def find_inputs(
 
     local_tmp_dir = tempfile.mkdtemp()
     local_ped_fpath = join(local_tmp_dir, basename(ped_fpath))
-    subprocess.run(
-        f'gsutil cp {ped_fpath} {local_ped_fpath}', check=False, shell=True
-    )
+    subprocess.run(f'gsutil cp {ped_fpath} {local_ped_fpath}', check=False, shell=True)
     df = pd.read_csv(local_ped_fpath, delimiter='\t')
     shutil.rmtree(local_tmp_dir)
     df['gvcf'] = ''
@@ -355,9 +364,7 @@ def add_gatk_genotype_gvcf_job(
     tar -xf {workspace_tar}
     WORKSPACE=$(basename {workspace_tar} .tar)
 
-    gatk \\
-      --java-options -Xms8g \\
-      --java-options '-DGATK_STACKTRACE_ON_USER_EXCEPTION=true' \\
+    gatk --java-options -Xms8g \\
       GenotypeGVCFs \\
       -R {reference.base} \\
       -O {j.output_vcf} \\
