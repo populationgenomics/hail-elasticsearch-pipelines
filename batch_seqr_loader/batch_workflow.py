@@ -164,14 +164,16 @@ def main(
         sample_map_fpath, sep='\t', header=False, index=False
     )
     for idx in range(scatter_count):
-        import_gvcfs_job = add_import_gvcfs_job(
-            b=b,
-            sample_name_map=b.read_input(sample_map_fpath),
-            interval=intervals[f'interval_{idx}'],
-        )
+        # import_gvcfs_job = add_import_gvcfs_job(
+        #     b=b,
+        #     sample_name_map=b.read_input(sample_map_fpath),
+        #     interval=intervals[f'interval_{idx}'],
+        # )
+        # workspace_tar = import_gvcfs_job["genomicsdb.tar"]
+        workspace_tar = b.read_input('gs://cpg-seqr-hail/batch/409be0/2/genomicsdb.tar')
         genotype_vcf_job = add_gatk_genotype_gvcf_job(
             b,
-            workspace_tar=import_gvcfs_job["genomicsdb.tar"],
+            workspace_tar=workspace_tar,
             interval=intervals[f'interval_{idx}'],
             reference=reference,
             dbsnp=dbsnp,
@@ -362,7 +364,6 @@ def add_gatk_genotype_gvcf_job(
         f"""set -e
         
     tar -xf {workspace_tar}
-    WORKSPACE=$(basename {workspace_tar} .tar)
 
     gatk --java-options -Xms8g \\
       GenotypeGVCFs \\
@@ -371,12 +372,114 @@ def add_gatk_genotype_gvcf_job(
       -D {dbsnp.base} \\
       -G StandardAnnotation -G AS_StandardAnnotation \\
       --only-output-calls-starting-in-intervals \\
-      -V gendb://$WORKSPACE \\
+      -V gendb://genomicsdb_workspace \\
       -L {interval} \\
       --merge-input-intervals
     """
     )
     return j
+
+
+def add_import_gvcfs_step(
+    b,
+    sample_name_map,
+    interval,
+    ref_fasta,
+    ref_fasta_index,
+    ref_dict,
+    workspace_dir_name,
+    disk_size,
+    batch_size,
+):
+    j = b.new_job("ImportGVCFs")
+    j.image(container)
+    j.memory(f"24.214398G")
+    j.storage(f'{(("local-disk " + disk_size) + " HDD")}G')
+
+    j.command(
+        f"""set -euo pipefail
+
+    rm -rf workspace_dir_name
+
+    # We've seen some GenomicsDB performance regressions related to intervals, so we're going to pretend we only have a single interval
+    # using the --merge-input-intervals arg
+    # There's no data in between since we didn't run HaplotypeCaller over those loci so we're not wasting any compute
+
+    # The memory setting here is very important and must be several GiB lower
+    # than the total memory allocated to the VM because this tool uses
+    # a significant amount of non-heap memory for native libraries.
+    # Also, testing has shown that the multithreaded reader initialization
+    # does not scale well beyond 5 threads, so don't increase beyond that.
+    gatk --java-options -Xms8g \
+      GenomicsDBImport \
+      --genomicsdb-workspace-path workspace_dir_name \
+      --batch-size batch_size \
+      -L interval \
+      --sample-name-map sample_name_map \
+      --reader-threads 5 \
+      --merge-input-intervals \
+      --consolidate
+
+    tar -cf workspace_dir_name.tar workspace_dir_name"""
+    )
+
+    j.command(
+        'ln "{value}" {dest}'.format(
+            value=f"workspace_dir_name.tar", dest=j.output_genomicsdb
+        )
+    )
+    return j
+
+
+def add_genotype_gvcfs_step(
+    b,
+    workspace_tar,
+    interval,
+    output_vcf_filename,
+    ref_fasta,
+    ref_fasta_index,
+    ref_dict,
+    dbsnp_vcf,
+    disk_size,
+    allow_old_rms_mapping_quality_annotation_data=False,
+    gatk_docker="us.gcr.io/broad-gatk/gatk:4.1.8.0",
+    container="us.gcr.io/broad-gatk/gatk:4.1.8.0",
+):
+    j = b.new_job("GenotypeGVCFs")
+    j.image(container)
+    j.memory(f"24.214398G")
+    j.storage(f'{(("local-disk " + disk_size) + " HDD")}G')
+
+    j.command(
+        f"""set -euo pipefail
+
+    tar -xf workspace_tar
+    WORKSPACE=$(basename workspace_tar .tar)
+
+    gatk --java-options -Xms8g \
+      GenotypeGVCFs \
+      -R ref_fasta \
+      -O output_vcf_filename \
+      -D dbsnp_vcf \
+      -G StandardAnnotation -G AS_StandardAnnotation \
+      --only-output-calls-starting-in-intervals \
+      -V gendb://$WORKSPACE \
+      -L interval \
+      allow_old_rms_mapping_quality_annotation_data \
+      --merge-input-intervals"""
+    )
+
+    j.command(
+        'ln "{value}" {dest}'.format(value=f"output_vcf_filename", dest=j.output_vcf)
+    )
+    j.command(
+        'ln "{value}" {dest}'.format(
+            value=f"output_vcf_filename.tbi", dest=j.output_vcf_index
+        )
+    )
+
+    return j
+    b.run(dry_run=True)
 
 
 def add_final_gather_vcf_step(
