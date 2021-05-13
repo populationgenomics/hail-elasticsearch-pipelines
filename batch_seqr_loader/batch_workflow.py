@@ -164,13 +164,13 @@ def main(
         sample_map_fpath, sep='\t', header=False, index=False
     )
     for idx in range(scatter_count):
-        # import_gvcfs_job = add_import_gvcfs_job(
-        #     b=b,
-        #     sample_name_map=b.read_input(sample_map_fpath),
-        #     interval=intervals[f'interval_{idx}'],
-        # )
-        # workspace_tar = import_gvcfs_job["genomicsdb.tar"]
-        workspace_tar = b.read_input('gs://cpg-seqr-hail/batch/409be0/2/genomicsdb.tar')
+        import_gvcfs_job = add_import_gvcfs_job(
+            b=b,
+            sample_name_map=b.read_input(sample_map_fpath),
+            interval=intervals[f'interval_{idx}'],
+        )
+        workspace_tar = import_gvcfs_job["genomicsdb.tar"]
+        # workspace_tar = b.read_input('gs://cpg-seqr-hail/batch/409be0/2/genomicsdb.tar')
         genotype_vcf_job = add_gatk_genotype_gvcf_job(
             b,
             workspace_tar=workspace_tar,

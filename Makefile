@@ -18,4 +18,5 @@ run_test:
 	--ped-file gs://cpg-seqr-temporary/gvcf/pedigree.ped \
 	--dataset seqr \
 	--work-bucket "gs://cpg-seqr-temporary/batch-loader-output/$(VERSION)/work" \
-	--dest-mt-path "gs://cpg-seqr-temporary/batch-loader-output/$(VERSION)/annotated.mt"
+	--dest-mt-path "gs://cpg-seqr-temporary/batch-loader-output/$(VERSION)/annotated.mt" \
+        --keep-scratch
