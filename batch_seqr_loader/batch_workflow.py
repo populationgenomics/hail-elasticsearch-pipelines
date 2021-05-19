@@ -23,7 +23,7 @@ from google.cloud import storage
 
 GATK_CONTAINER = 'broadinstitute/gatk:4.1.8.0'
 GATK_GCSFUSE_CONTAINER = (
-    'australia-southeast1-docker.pkg.dev/cpg-common/images/gatk_gcsfuse:v0'
+    'australia-southeast1-docker.pkg.dev/vlad-dev/seqr/gatk_gcsfuse:v0'
 )
 
 BROAD_REF_BUCKET = 'gs://gcp-public-data--broad-references/hg38/v0'
