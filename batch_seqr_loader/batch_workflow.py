@@ -80,7 +80,7 @@ logger.setLevel('INFO')
     required=True,
 )
 @click.option('--keep-scratch', 'keep_scratch', is_flag=True)
-@click.option('--batch-id-to-reuse-scratch', 'batch_id_to_reuse_scratch')
+@click.option('--reuse-scratch-run-id', 'reuse_scratch_run_id')
 @click.option('--dry-run', 'dry_run', is_flag=True)
 @click.option(
     '--billing-project',
@@ -121,7 +121,7 @@ def main(
     dest_mt_path: str,
     work_bucket: str,
     keep_scratch: bool,
-    batch_id_to_reuse_scratch: Optional[str],
+    reuse_scratch_run_id: Optional[str],
     dry_run: bool,
     billing_project: Optional[str],
     genome_version: str,  # pylint: disable=unused-argument
@@ -136,10 +136,16 @@ def main(
     """
     Entry point for a batch workflow
     """
-    if not billing_project:
-        raise click.BadParameter('--billing-project has to be specified')
+    billing_project = os.getenv('HAIL_BILLING_PROJECT') or 'seqr'
 
-    hail_bucket = join(work_bucket, 'hail')
+    hail_bucket = os.environ.get('HAIL_BUCKET')
+    if not hail_bucket or keep_scratch or reuse_scratch_run_id:
+        # Scratch files are large, so we want to use the temporary bucket for them
+        hail_bucket = f'{work_bucket}/hail'
+    logger.info(
+        f'Starting hail Batch with the project {billing_project}, '
+        f'bucket {hail_bucket}'
+    )
     backend = hb.ServiceBackend(
         billing_project=billing_project,
         bucket=hail_bucket.replace('gs://', ''),
@@ -161,8 +167,8 @@ def main(
     dbsnp = b.read_input_group(base=DBSNP_VCF, idx=DBSNP_VCF + '.idx')
 
     batch_to_reuse_bucket = None
-    if batch_id_to_reuse_scratch:
-        batch_to_reuse_bucket = f'{hail_bucket}/batch/{batch_id_to_reuse_scratch}'
+    if reuse_scratch_run_id:
+        batch_to_reuse_bucket = f'{hail_bucket}/batch/{reuse_scratch_run_id}'
 
     paths = None
     if batch_to_reuse_bucket:
@@ -201,14 +207,16 @@ def main(
         )
 
         paths = None
-        if batch_id_to_reuse_scratch:
+        if reuse_scratch_run_id:
             job_id = (
                 1
                 + 1  # 0-based to 1-based index
                 + 1  # split_intervals job
                 + idx * 2  # import_gvcfs job  # 2 jobs for each interval
             )
-            gvcf_path = f'{hail_bucket}/batch/{batch_id_to_reuse_scratch}/{job_id}/output_vcf.vcf.gz'
+            gvcf_path = (
+                f'{hail_bucket}/batch/{reuse_scratch_run_id}/{job_id}/output_vcf.vcf.gz'
+            )
             paths = {
                 'vcf.gz': gvcf_path,
                 'vcf.gz.tbi': gvcf_path + '.tbi',
@@ -230,7 +238,7 @@ def main(
 
     final_gathered_vcf_job = None
     gathered_vcf_path = join(work_bucket, f'{dataset_name}.vcf')
-    if batch_id_to_reuse_scratch and file_exists(gathered_vcf_path):
+    if reuse_scratch_run_id and file_exists(gathered_vcf_path):
         pass
     else:
         final_gathered_vcf_job = _add_final_gather_vcf_step(
