@@ -4,7 +4,7 @@
 Let this be the entrypoint / driver for loading data into SEQR for the CPG
 See the README for more information. This is WIP.
 
-    - 2021/04/16 Michael Franklin
+    - 2021/04/16 Michael Franklin and Vlad Savelyev
 """
 
 import logging
@@ -22,9 +22,9 @@ from hailtop.batch.job import Job
 from google.cloud import storage
 
 GATK_CONTAINER = 'broadinstitute/gatk:4.1.8.0'
-GATK_GCSFUSE_CONTAINER = (
-    'australia-southeast1-docker.pkg.dev/vlad-dev/seqr/gatk_gcsfuse:v0'
-)
+
+# Fixed scatter count, because we are storing a genomics DB per each interval
+NUMBER_OF_INTERVALS = 100
 
 BROAD_REF_BUCKET = 'gs://gcp-public-data--broad-references/hg38/v0'
 REF_FASTA = join(BROAD_REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
@@ -53,10 +53,10 @@ logger.setLevel('INFO')
     required=True,
 )
 @click.option(
-    '--genomicsdb',
-    'genomicsdb_path',
+    '--genomicsdb-bucket',
+    'genomicsdb_bucket',
     required=True,
-    help='Bucket path to the genomics DB. If doesn\'t exist, a new one will be created',
+    help='Base bucket path to store per-interval genomics DBs',
 )
 @click.option(
     '--ped-file',
@@ -115,7 +115,7 @@ logger.setLevel('INFO')
 @click.option('--vep-block-size', 'vep_block_size')
 def main(
     gvcf_buckets: List[str],
-    genomicsdb_path: str,
+    genomicsdb_bucket: str,
     ped_fpath: str,
     dataset_name: str,
     dest_mt_path: str,
@@ -147,10 +147,10 @@ def main(
     b = hb.Batch('Seqr loader', backend=backend)
 
     samples_df = find_inputs(gvcf_buckets, ped_fpath=ped_fpath)
-    gvcfs = [
-        b.read_input_group(**{'g.vcf.gz': gvcf, 'g.vcf.gz.tbi': gvcf + '.tbi'})
-        for gvcf in list(samples_df.gvcf)
-    ]
+    # gvcfs = [
+    #     b.read_input_group(**{'g.vcf.gz': gvcf, 'g.vcf.gz.tbi': gvcf + '.tbi'})
+    #     for gvcf in list(samples_df.gvcf)
+    # ]
 
     reference = b.read_input_group(
         base=REF_FASTA,
@@ -159,10 +159,6 @@ def main(
         + '.dict',
     )
     dbsnp = b.read_input_group(base=DBSNP_VCF, idx=DBSNP_VCF + '.idx')
-
-    scatter_count_scale_factor = 0.15
-    scatter_count = int(round(scatter_count_scale_factor * len(gvcfs)))
-    scatter_count = max(scatter_count, 2)
 
     batch_to_reuse_bucket = None
     if batch_id_to_reuse_scratch:
@@ -173,7 +169,7 @@ def main(
         job_id = 1  # 0-based to 1-based index
         paths = {
             f'interval_{idx}': f'{batch_to_reuse_bucket}/{job_id}/intervals/{str(idx).zfill(4)}-scattered.interval_list'
-            for idx in range(scatter_count)
+            for idx in range(NUMBER_OF_INTERVALS)
         }
     if paths and all(file_exists(path) for path in paths.values()):
         intervals = b.read_input_group(**paths)
@@ -181,7 +177,7 @@ def main(
         split_intervals_job = add_split_intervals_job(
             b,
             UNPADDED_INTERVALS,
-            scatter_count,
+            NUMBER_OF_INTERVALS,
             reference,
         )
         intervals = split_intervals_job.intervals
@@ -192,10 +188,14 @@ def main(
     samples_df[['s', 'gvcf']].to_csv(
         sample_map_fpath, sep='\t', header=False, index=False
     )
-    for idx in range(scatter_count):
+    for idx in range(NUMBER_OF_INTERVALS):
+        genomicsdb_gcs_path = join(
+            genomicsdb_bucket, f'interval_{idx}_outof_{NUMBER_OF_INTERVALS}'
+        )
+
         import_gvcfs_job = _add_import_gvcfs_job(
             b=b,
-            genomicsdb_path=genomicsdb_path,
+            genomicsdb_gcs_path=genomicsdb_gcs_path,
             sample_name_map=b.read_input(sample_map_fpath),
             interval=intervals[f'interval_{idx}'],
         )
@@ -218,7 +218,7 @@ def main(
         else:
             genotype_vcf_job = _add_gatk_genotype_gvcf_job(
                 b,
-                genomicsdb_path=genomicsdb_path,
+                genomicsdb_gcs_path=genomicsdb_gcs_path,
                 interval=intervals[f'interval_{idx}'],
                 reference=reference,
                 dbsnp=dbsnp,
@@ -350,7 +350,7 @@ def add_split_intervals_job(
 
 def _add_import_gvcfs_job(
     b: hb.Batch,
-    genomicsdb_path: str,
+    genomicsdb_gcs_path: str,
     sample_name_map: hb.ResourceFile,
     interval: hb.ResourceFile,
     disk_size: int = 30,
@@ -361,17 +361,20 @@ def _add_import_gvcfs_job(
     Uses gcsfuse to mount the database to a local disk on an instance
     """
     j = b.new_job('ImportGVCFs')
-    j.image(GATK_GCSFUSE_CONTAINER)
+    j.image(GATK_CONTAINER)
     mem_gb = 16
     j.memory(f'{mem_gb}G')
     j.storage(f'{disk_size}G')
 
-    if file_exists(genomicsdb_path):
+    if file_exists(genomicsdb_gcs_path):
         # Update existing DB
-        genomicsdb_cmd = '--genomicsdb-update-workspace-path /genomicsdb_workspace'
+        genomicsdb_param = '--genomicsdb-update-workspace-path /workspace'
+        genomicsdb = b.read_input(genomicsdb_gcs_path)
+        untar_genomicsdb_cmd = f'tar -xf {genomicsdb}'
     else:
         # Initiate new DB
-        genomicsdb_cmd = '--genomicsdb-workspace-path /genomicsdb_workspace'
+        genomicsdb_param = '--genomicsdb-workspace-path /workspace'
+        untar_genomicsdb_cmd = ''
 
     j.command(
         f"""set -e
@@ -391,25 +394,28 @@ def _add_import_gvcfs_job(
     # is the optimal value for the amount of memory allocated
     # within the task; please do not change it without consulting
     # the Hellbender (GATK engine) team!
-
-    gcsfuse {genomicsdb_path} /genomicsdb_workspace
+    
+    {untar_genomicsdb_cmd}
 
     gatk --java-options -Xms{mem_gb - 1}g \
       GenomicsDBImport \
-      {genomicsdb_cmd} \
+      {genomicsdb_param} \
       --batch-size 50 \
       -L {interval} \
       --sample-name-map {sample_name_map} \
       --reader-threads 5 \
       --merge-input-intervals \
-      --consolidate"""
+      --consolidate
+
+    tar -cf workspace.tar /workspace
+    gsutil cp workspace.tar {genomicsdb_gcs_path}"""
     )
     return j
 
 
 def _add_gatk_genotype_gvcf_job(
     b: hb.Batch,
-    genomicsdb_path: str,
+    genomicsdb_gcs_path: str,
     interval: hb.ResourceFile,
     reference: hb.ResourceGroup,
     dbsnp: hb.ResourceGroup,
@@ -433,8 +439,9 @@ def _add_gatk_genotype_gvcf_job(
 
     j.command(
         f"""set -e
-
-    gcsfuse {genomicsdb_path} /genomicsdb_workspace
+        
+    gsutil cp {genomicsdb_gcs_path} workspace.tar
+    tar -xf workspace.tar
 
     gatk --java-options -Xms8g \\
       GenotypeGVCFs \\
@@ -442,7 +449,7 @@ def _add_gatk_genotype_gvcf_job(
       -O {j.output_vcf['vcf.gz']} \\
       -D {dbsnp.base} \\
       --only-output-calls-starting-in-intervals \\
-      -V gendb://genomicsdb_workspace \\
+      -V gendb://workspace \\
       -L {interval} \\
       --merge-input-intervals
     """
