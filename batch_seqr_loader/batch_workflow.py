@@ -185,9 +185,9 @@ def main(
     else:
         split_intervals_job = add_split_intervals_job(
             b,
-            b.read_input(UNPADDED_INTERVALS),
+            UNPADDED_INTERVALS,
             NUMBER_OF_INTERVALS,
-            reference,
+            REF_FASTA,
         )
         intervals = split_intervals_job.intervals
 
@@ -231,8 +231,8 @@ def main(
                 b,
                 genomicsdb_gcs_path=genomicsdb_gcs_path,
                 interval=intervals[f'interval_{idx}'],
-                reference=reference,
-                dbsnp=dbsnp,
+                reference=REF_FASTA,
+                dbsnp=DBSNP_VCF,
                 disk_size=100,
             )
             genotype_vcf_job.depends_on(import_gvcfs_job)
@@ -323,9 +323,9 @@ def find_inputs(
 
 def add_split_intervals_job(
     b: hb.Batch,
-    interval_list: hb.ResourceFile,
+    interval_list: str,
     scatter_count: int,
-    ref_fasta: hb.ResourceGroup,
+    ref_fasta: str,
     disk_size: int = 30,
 ) -> Job:
     """
@@ -355,7 +355,7 @@ def add_split_intervals_job(
       -L {interval_list} \\
       -O {j.intervals} \\
       -scatter {scatter_count} \\
-      -R {ref_fasta.base} \\
+      -R {ref_fasta} \\
       -mode INTERVAL_SUBDIVISION
       """
     )
@@ -431,8 +431,8 @@ def _add_gatk_genotype_gvcf_job(
     b: hb.Batch,
     genomicsdb_gcs_path: str,
     interval: hb.ResourceFile,
-    reference: hb.ResourceGroup,
-    dbsnp: hb.ResourceGroup,
+    reference: str,
+    dbsnp: str,
     disk_size: int = 100,
 ) -> Job:
     """
@@ -459,9 +459,9 @@ def _add_gatk_genotype_gvcf_job(
 
     gatk --java-options -Xms8g \\
       GenotypeGVCFs \\
-      -R {reference.base} \\
+      -R {reference} \\
       -O {j.output_vcf['vcf.gz']} \\
-      -D {dbsnp.base} \\
+      -D {dbsnp} \\
       --only-output-calls-starting-in-intervals \\
       -V gendb://workspace \\
       -L {interval} \\
