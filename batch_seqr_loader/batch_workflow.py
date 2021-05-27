@@ -231,8 +231,8 @@ def main(
                 b,
                 genomicsdb=b.read_input(genomicsdb_gcs_path),
                 interval=intervals[f'interval_{idx}'],
-                reference=REF_FASTA,
-                dbsnp=DBSNP_VCF,
+                reference=reference,
+                dbsnp=dbsnp,
                 disk_size=100,
             )
             genotype_vcf_job.depends_on(import_gvcfs_job)
@@ -434,8 +434,8 @@ def _add_gatk_genotype_gvcf_job(
     b: hb.Batch,
     genomicsdb: hb.ResourceFile,
     interval: hb.ResourceFile,
-    reference: str,
-    dbsnp: str,
+    reference: hb.ResourceGroup,
+    dbsnp: hb.ResourceGroup,
     disk_size: int = 100,
 ) -> Job:
     """
@@ -461,9 +461,9 @@ def _add_gatk_genotype_gvcf_job(
 
     gatk --java-options -Xms8g \\
       GenotypeGVCFs \\
-      -R {reference} \\
+      -R {reference.base} \\
       -O {j.output_vcf['vcf.gz']} \\
-      -D {dbsnp} \\
+      -D {dbsnp.base} \\
       --only-output-calls-starting-in-intervals \\
       -V gendb://workspace \\
       -L {interval} \\
