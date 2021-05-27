@@ -199,7 +199,7 @@ def main(
     )
     for idx in range(NUMBER_OF_INTERVALS):
         genomicsdb_gcs_path = join(
-            genomicsdb_bucket, f'interval_{idx}_outof_{NUMBER_OF_INTERVALS}'
+            genomicsdb_bucket, f'interval_{idx}_outof_{NUMBER_OF_INTERVALS}.tar'
         )
 
         import_gvcfs_job = _add_import_gvcfs_job(
