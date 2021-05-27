@@ -185,7 +185,7 @@ def main(
     else:
         split_intervals_job = add_split_intervals_job(
             b,
-            UNPADDED_INTERVALS,
+            b.read_input(UNPADDED_INTERVALS),
             NUMBER_OF_INTERVALS,
             reference,
         )
