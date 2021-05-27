@@ -21,15 +21,18 @@ from analysis_runner import dataproc
 from hailtop.batch.job import Job
 from google.cloud import storage
 
-GATK_CONTAINER = 'broadinstitute/gatk:4.1.8.0'
+GATK_VERSION = '4.2.0.0'
+GATK_CONTAINER = (
+    f'australia-southeast1-docker.pkg.dev/cpg-common/images/gatk:{GATK_VERSION}'
+)
 
 # Fixed scatter count, because we are storing a genomics DB per each interval
 NUMBER_OF_INTERVALS = 100
 
-BROAD_REF_BUCKET = 'gs://gcp-public-data--broad-references/hg38/v0'
-REF_FASTA = join(BROAD_REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
-DBSNP_VCF = join(BROAD_REF_BUCKET, 'Homo_sapiens_assembly38.dbsnp138.vcf')
-UNPADDED_INTERVALS = join(BROAD_REF_BUCKET, 'hg38.even.handcurated.20k.intervals')
+REF_BUCKET = 'gs://cpg-reference/hg38/v0'
+REF_FASTA = join(REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
+DBSNP_VCF = join(REF_BUCKET, 'Homo_sapiens_assembly38.dbsnp138.vcf')
+UNPADDED_INTERVALS = join(REF_BUCKET, 'hg38.even.handcurated.20k.intervals')
 
 DATAPROC_PACKAGES = [
     'seqr-loader',
