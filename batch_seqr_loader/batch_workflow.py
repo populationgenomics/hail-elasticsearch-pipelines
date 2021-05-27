@@ -27,7 +27,7 @@ GATK_CONTAINER = (
 )
 
 # Fixed scatter count, because we are storing a genomics DB per each interval
-NUMBER_OF_INTERVALS = 100
+NUMBER_OF_INTERVALS = 10
 
 REF_BUCKET = 'gs://cpg-reference/hg38/v0'
 REF_FASTA = join(REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
@@ -382,13 +382,15 @@ def _add_import_gvcfs_job(
 
     if file_exists(genomicsdb_gcs_path):
         # Update existing DB
-        genomicsdb_param = '--genomicsdb-update-workspace-path /workspace'
+        genomicsdb_param = '--genomicsdb-update-workspace-path workspace'
         genomicsdb = b.read_input(genomicsdb_gcs_path)
         untar_genomicsdb_cmd = f'tar -xf {genomicsdb}'
     else:
         # Initiate new DB
-        genomicsdb_param = '--genomicsdb-workspace-path /workspace'
+        genomicsdb_param = '--genomicsdb-workspace-path workspace'
         untar_genomicsdb_cmd = ''
+        
+    j.declare_resource_group(output={'tar': '{root}.tar'})
 
     j.command(
         f"""set -e
@@ -421,9 +423,10 @@ def _add_import_gvcfs_job(
       --merge-input-intervals \
       --consolidate
 
-    tar -cf workspace.tar /workspace
-    gsutil cp workspace.tar {genomicsdb_gcs_path}"""
+    tar -cf {j.output['tar']} workspace
+    """
     )
+    b.write_output(j.output, genomicsdb_gcs_path.replace('.tar', ''))
     return j
 
 
