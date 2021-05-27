@@ -204,7 +204,7 @@ def main(
 
         import_gvcfs_job = _add_import_gvcfs_job(
             b=b,
-            genomicsdb_gcs_path=genomicsdb_gcs_path,
+            genomicsdb_gcs_path=b.read_input(genomicsdb_gcs_path),
             sample_name_map=b.read_input(sample_map_fpath),
             interval=intervals[f'interval_{idx}'],
         )
@@ -229,7 +229,7 @@ def main(
         else:
             genotype_vcf_job = _add_gatk_genotype_gvcf_job(
                 b,
-                genomicsdb_gcs_path=genomicsdb_gcs_path,
+                genomicsdb=b.read_input(genomicsdb_gcs_path),
                 interval=intervals[f'interval_{idx}'],
                 reference=REF_FASTA,
                 dbsnp=DBSNP_VCF,
@@ -389,7 +389,7 @@ def _add_import_gvcfs_job(
         # Initiate new DB
         genomicsdb_param = '--genomicsdb-workspace-path workspace'
         untar_genomicsdb_cmd = ''
-        
+
     j.declare_resource_group(output={'tar': '{root}.tar'})
 
     j.command(
@@ -432,7 +432,7 @@ def _add_import_gvcfs_job(
 
 def _add_gatk_genotype_gvcf_job(
     b: hb.Batch,
-    genomicsdb_gcs_path: str,
+    genomicsdb: hb.ResourceFile,
     interval: hb.ResourceFile,
     reference: str,
     dbsnp: str,
@@ -457,8 +457,7 @@ def _add_gatk_genotype_gvcf_job(
     j.command(
         f"""set -e
         
-    gsutil cp {genomicsdb_gcs_path} workspace.tar
-    tar -xf workspace.tar
+    tar -xf {genomicsdb}
 
     gatk --java-options -Xms8g \\
       GenotypeGVCFs \\
