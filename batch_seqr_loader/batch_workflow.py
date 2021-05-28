@@ -169,6 +169,50 @@ def main(
     )
     dbsnp = b.read_input_group(base=DBSNP_VCF, idx=DBSNP_VCF + '.idx')
 
+    gathered_vcf_path = join(work_bucket, f'{dataset_name}.vcf')
+    if not file_exists(gathered_vcf_path):
+        gather_job = _make_jobs_that_produce_vcf(
+            b=b,
+            genomicsdb_bucket=genomicsdb_bucket,
+            samples_df=samples_df,
+            output_vcf_path=gathered_vcf_path,
+            reference=reference,
+            dbsnp=dbsnp,
+            hail_bucket=hail_bucket,
+            work_bucket=work_bucket,
+            reuse_scratch_run_id=reuse_scratch_run_id,
+        )
+    else:
+        gather_job = b.new_job('Joint-call VCF')
+
+    dataproc.hail_dataproc_job(
+        b,
+        f'batch_seqr_loader/seqr_load.py '
+        f'--source-path {gathered_vcf_path} '
+        f'--dest-mt-path {dest_mt_path} --',
+        max_age='8h',
+        packages=DATAPROC_PACKAGES,
+        num_secondary_workers=2,
+        job_name='seqr_load.py',
+        vep='GRCh38',
+        depends_on=[gather_job],
+    )
+
+    b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch)
+
+
+def _make_jobs_that_produce_vcf(
+    b: hb.Batch,
+    genomicsdb_bucket: str,
+    samples_df: pd.DataFrame,
+    output_vcf_path: str,
+    reference: hb.ResourceGroup,
+    dbsnp: hb.ResourceGroup,
+    hail_bucket: str,
+    work_bucket: str,
+    reuse_scratch_run_id: Optional[str],
+) -> Job:
+
     batch_to_reuse_bucket = None
     if reuse_scratch_run_id:
         batch_to_reuse_bucket = f'{hail_bucket}/batch/{reuse_scratch_run_id}'
@@ -240,31 +284,17 @@ def main(
             genotyped_vcfs.append(genotype_vcf_job.output_vcf)
 
     final_gathered_vcf_job = None
-    gathered_vcf_path = join(work_bucket, f'{dataset_name}.vcf')
-    if reuse_scratch_run_id and file_exists(gathered_vcf_path):
+    if reuse_scratch_run_id and file_exists(output_vcf_path):
         pass
     else:
         final_gathered_vcf_job = _add_final_gather_vcf_step(
             b,
             input_vcfs=genotyped_vcfs,
             disk_size=200,
-            output_vcf_path=gathered_vcf_path,
+            output_vcf_path=output_vcf_path,
         )
 
-    dataproc.hail_dataproc_job(
-        b,
-        f'batch_seqr_loader/seqr_load.py '
-        f'--source-path {gathered_vcf_path} '
-        f'--dest-mt-path {dest_mt_path} --',
-        max_age='8h',
-        packages=DATAPROC_PACKAGES,
-        num_secondary_workers=2,
-        job_name='seqr_load.py',
-        vep='GRCh38',
-        depends_on=[final_gathered_vcf_job] if final_gathered_vcf_job else [],
-    )
-
-    b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch)
+    return final_gathered_vcf_job
 
 
 def find_inputs(
