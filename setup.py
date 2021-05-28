@@ -27,7 +27,7 @@ def find_package_files(dirpath, package, skip_exts=None):
 setuptools.setup(
     name='seqr-loader',
     # This tag is automatically updated by bump2version
-    version='1.0.4',
+    version='1.0.5',
     description='The hail scripts in this repo can be used to pre-process variant callsets and export them to elasticsearch',
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',
