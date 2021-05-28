@@ -169,7 +169,7 @@ def main(
     )
     dbsnp = b.read_input_group(base=DBSNP_VCF, idx=DBSNP_VCF + '.idx')
 
-    gathered_vcf_path = join(work_bucket, f'{dataset_name}.vcf')
+    gathered_vcf_path = join(work_bucket, f'{dataset_name}.vcf.gz')
     if not file_exists(gathered_vcf_path):
         gather_job = _make_jobs_that_produce_vcf(
             b=b,
