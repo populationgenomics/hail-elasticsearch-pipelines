@@ -12,6 +12,7 @@ from os.path import join, relpath
 
 PKG = 'seqr-loader'
 
+
 def find_package_files(dirpath, package, skip_exts=None):
     paths = []
     for (path, _dirs, fnames) in os.walk(join(package, dirpath)):
@@ -32,11 +33,8 @@ setuptools.setup(
     long_description_content_type='text/markdown',
     url=f'https://github.com/populationgenomics/hail-elasticsearch-pipelines',
     license='MIT',
-    packages=['hail_scripts', 'batch_seqr_loader'],
-    package_data={
-        'hail_scripts': find_package_files('', 'hail_scripts'),
-        'batch_seqr_loader': find_package_files('', 'batch_seqr_loader'),
-    },
+    packages=['hail_scripts', 'model'],
+    package_dir={'model': 'batch_seqr_loader/model', 'hail_scripts': 'hail_scripts'},
     include_package_data=True,
     zip_safe=False,
     scripts=['batch_seqr_loader/seqr_load.py'],
