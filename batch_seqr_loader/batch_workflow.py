@@ -189,7 +189,8 @@ def main(
         b,
         f'batch_seqr_loader/seqr_load.py '
         f'--source-path {gathered_vcf_path} '
-        f'--dest-mt-path {dest_mt_path} --',
+        f'--dest-mt-path {dest_mt_path} '
+        f'--bucket {join(work_bucket, "seqr_load")} ',
         max_age='8h',
         packages=DATAPROC_PACKAGES,
         num_secondary_workers=2,
