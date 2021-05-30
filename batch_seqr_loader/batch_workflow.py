@@ -156,10 +156,6 @@ def main(
     b = hb.Batch('Seqr loader', backend=backend)
 
     samples_df = find_inputs(gvcf_buckets, ped_fpath=ped_fpath)
-    # gvcfs = [
-    #     b.read_input_group(**{'g.vcf.gz': gvcf, 'g.vcf.gz.tbi': gvcf + '.tbi'})
-    #     for gvcf in list(samples_df.gvcf)
-    # ]
 
     reference = b.read_input_group(
         base=REF_FASTA,
