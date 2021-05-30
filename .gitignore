@@ -16,3 +16,5 @@ playground
 *.egg-info/
 build/
 dist/
+
+.eggs
