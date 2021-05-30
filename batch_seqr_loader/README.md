@@ -1,23 +1,25 @@
 # Batch loading pipeline
 
-Loading pipeline, but formatted for Hail Batch, ultimately for automated ingestion of data into SEQR.
+A loading pipeline, but formatted for Hail Batch, ultimately for automated ingestion of data into Seqr.
 
-For the purposes of this, we'll say you can only run it through the analysis-runner.
+The input is a set of GVCFs. It iteratively adds them into a [GenomicsDB](https://github.com/Intel-HLS/GenomicsDB/wiki) located on a bucket specified with `--genomicsdb-bucket`, jointly re-genotypes, converts into a Hail MatrixTable and annotates.
 
-Example:
+To run, use the analysis runner:
 
-```
+```sh
+VERSION=v1
 analysis-runner \
     --dataset seqr \
-    --output-dir "gs://cpg-seqr-temporary/loader-test" \
+    --access-level test \
+    --output-dir "gs://cpg-seqr-temporary/seqr_${VERSION}/hail" \
     --description "test seqr loader" \
-    --access-level test batch_seqr_loader/batch_workflow.py \
-batch_workflow.py \
-    --gvcf-bucket gs://playground-au/seqr/gvcf/ \
-    --ped-file gs://playground-au/seqr/samples.ped \
-    --dest-mt-path gs://cpg-seqr-temporary/loader-test/NA12878_trio.mt \
-    --work-bucket gs://cpg-seqr-temporary/loader-test/work \
-    --keep-scratch
+batch_seqr_loader/batch_workflow.py \
+    --gvcf-bucket gs://cpg-seqr-temporary/gvcf \
+    --ped-file gs://cpg-seqr-temporary/gvcf/pedigree.ped \
+    --dataset seqr \
+    --work-bucket "gs://cpg-seqr-temporary/seqr_${VERSION}/work" \
+    --dest-mt-path "gs://cpg-seqr-temporary/seqr_${VERSION}/output/annotated.mt" \
+    --genomicsdb-bucket gs://cpg-seqr-temporary/seqr_${VERSION}/genomicsdb
 ```
 
 This script will automatically start a Dataproc cluster where relevant.
@@ -26,7 +28,6 @@ This script will automatically start a Dataproc cluster where relevant.
 
 This pipeline should be fairly configurable in a few ways:
 
-- Start from the sparse matrix instead of a well-formed VCF
 - Upload to ElasticSearch if elastic search credentials have been provided.
 
 Later additions:
