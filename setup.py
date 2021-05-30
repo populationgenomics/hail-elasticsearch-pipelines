@@ -7,22 +7,8 @@ Setup script for the Python package
 """
 
 import setuptools
-import os
-from os.path import join, relpath
 
 PKG = 'seqr-loader'
-
-
-def find_package_files(dirpath, package, skip_exts=None):
-    paths = []
-    for (path, _dirs, fnames) in os.walk(join(package, dirpath)):
-        for fname in fnames:
-            if skip_exts and any(fname.endswith(ext) for ext in skip_exts):
-                continue
-            fpath = join(path, fname)
-            paths.append(relpath(fpath, package))
-    return paths
-
 
 setuptools.setup(
     name='seqr-loader',
