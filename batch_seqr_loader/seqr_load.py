@@ -1,69 +1,81 @@
 #!/usr/bin/env python3
 
+"""
+Hail script to submit on a dataproc cluster. Converts input multi-sample VCFs
+into a matrix table, which annotates and prepares to load into ES.
+"""
+
 import logging
 from typing import Optional, List
 
 import click
 import hail as hl
 
-from hail_scripts.v02.utils.elasticsearch_client import ElasticsearchClient
 from model.seqr_mt_schema import SeqrVariantsAndGenotypesSchema
+from hail_scripts.v02.utils.elasticsearch_client import ElasticsearchClient
 
 logger = logging.getLogger()
 
 
 @click.command()
 @click.option(
-    '--source-path', 'source_paths', multiple=True, required=True,
+    '--source-path',
+    'source_paths',
+    multiple=True,
+    required=True,
 )
 @click.option(
-    '--dest-mt-path', 'dest_path', required=True,
+    '--dest-mt-path',
+    'dest_path',
+    required=True,
 )
 @click.option(
-    '--bucket', 'bucket', required=True,
+    '--bucket',
+    'bucket',
+    required=True,
 )
 @click.option('--genome-version', 'genome_version', default='GRCh38')
 @click.option(
-    '--reference-ht', 'reference_path', required=True,
+    '--reference-ht',
+    'reference_path',
+    required=True,
     help='Path to the Hail table storing the reference variants.',
     default='gs://seqr-reference-data/GRCh38/all_reference_data/v2/combined_reference_data_grch38-2.0.2.ht',
 )
 @click.option(
-    '--clinvar-ht', 'clinvar_path', required=True,
+    '--clinvar-ht',
+    'clinvar_path',
+    required=True,
     help='Path to the Hail table storing the clinvar variants.',
     default='gs://seqr-reference-data/GRCh38/clinvar/clinvar.GRCh38.ht',
 )
 @click.option(
-    '--hgmd-ht', 'hgmd_path',
+    '--hgmd-ht',
+    'hgmd_path',
     help='Path to the Hail table storing the hgmd variants.',
     # default='gs://seqr-reference-data-private/GRCh38/HGMD/hgmd_pro_2018.4_hg38_without_db_field.vds'
 )
-@click.option(
-    '--disable-validation', 'disable_validation', is_flag=True
-)
+@click.option('--disable-validation', 'disable_validation', is_flag=True)
 @click.option(
     '--sample-type', 'sample_type', type=click.Choice(['WGS', 'WES']), default='WGS'
 )
 @click.option(
-    '--dataset-type', 'dataset_type', type=click.Choice(['VARIANTS', 'SV']), 
-    default='VARIANTS'
+    '--dataset-type',
+    'dataset_type',
+    type=click.Choice(['VARIANTS', 'SV']),
+    default='VARIANTS',
 )
 @click.option(
-    '--remap-tsv', 'remap_path',
-    help='Path to a TSV file with two columns: s and seqr_id.'
+    '--remap-tsv',
+    'remap_path',
+    help='Path to a TSV file with two columns: s and seqr_id.',
 )
 @click.option(
-    '--subset-tsv', 'subset_path',
-    help='Path to a TSV file with one column of sample IDs: s.'
+    '--subset-tsv',
+    'subset_path',
+    help='Path to a TSV file with one column of sample IDs: s.',
 )
-@click.option(
-    '--vep-config', 'vep_config_json_path',
-    help='Path of hail vep config .json file',
-    #default='gs://cpg-reference/hg38/v0/vep-config.json',
-)
-@click.option(
-    '--vep-block-size', 'vep_block_size'
-)
+@click.option('--vep-block-size', 'vep_block_size')
 def main(
     source_paths: List[str],
     dest_path: str,
@@ -77,9 +89,8 @@ def main(
     dataset_type: str,  # pylint: disable=unused-argument
     remap_path: str = None,  # pylint: disable=unused-argument
     subset_path: str = None,  # pylint: disable=unused-argument
-    vep_config_json_path: Optional[str] = None,
     vep_block_size: Optional[int] = None,
-):
+):  # pylint: disable=missing-function-docstring
     print('Running')
     genome_version = genome_version.replace('GRCh', '')
     mt = import_vcf(source_paths, genome_version)
@@ -94,12 +105,8 @@ def main(
     if genome_version == '38':
         mt = add_37_coordinates(mt)
         mt.write(f'{bucket}/add_37_coordinates.mt', overwrite=True)
-    mt = run_vep(
-        mt,
-        genome_version=genome_version,
-        vep_config_json_path=vep_config_json_path,
-        block_size=vep_block_size,
-    )
+
+    mt = hl.vep(mt, block_size=vep_block_size or 1000)
     mt.write(f'{bucket}/run_vep.mt', overwrite=True)
 
     ref_data = hl.read_table(reference_path)
@@ -110,7 +117,7 @@ def main(
     mt.write(f'{bucket}/compute_annotated_vcf.mt', overwrite=True)
 
     mt = mt.annotate_globals(
-        sourceFilePath=",".join(source_paths),
+        sourceFilePath=','.join(source_paths),
         genomeVersion=genome_version,
         sampleType=sample_type,
         hail_version=hl.version(),
@@ -121,7 +128,20 @@ def main(
 
 
 class ElasticSearchCredentials:
-    def __init__(self, host="localhost", port=9200, index="data", username="pipeline", password=None, index_min_num_shards=6, use_ssl=None):
+    """
+    Describes elastic search credentials. Used in _dump_to_estask
+    """
+
+    def __init__(
+        self,
+        host='localhost',
+        port=9200,
+        index='data',
+        username='pipeline',
+        password=None,
+        index_min_num_shards=6,
+        use_ssl=None,
+    ):
         self.host = host
         self.port = port
         self.index = index
@@ -130,15 +150,17 @@ class ElasticSearchCredentials:
         self.index_min_num_shards = index_min_num_shards
         self.use_ssl = use_ssl
         if self.use_ssl is None:
-            self.use_ssl = host != "localhost"
+            self.use_ssl = host != 'localhost'
 
 
-def dump_to_estask(mt, es_credentials: ElasticSearchCredentials):
+def _dump_to_estask(mt, es_credentials: ElasticSearchCredentials):
     row_table = elasticsearch_row(mt)
     es = ElasticsearchClient(
-        host=es_credentials.host, port=str(es_credentials.port),
-        es_username=es_credentials.username, es_password=es_credentials.password,
-        es_use_ssl=es_credentials.use_ssl
+        host=es_credentials.host,
+        port=str(es_credentials.port),
+        es_username=es_credentials.username,
+        es_password=es_credentials.password,
+        es_use_ssl=es_credentials.use_ssl,
     )
     es.export_table_to_elasticsearch(row_table)
 
@@ -146,17 +168,23 @@ def dump_to_estask(mt, es_credentials: ElasticSearchCredentials):
 
 
 def import_vcf(source_paths, genome_version):
-    # https://github.com/populationgenomics/hail-elasticsearch-pipelines/blob/e41582d4842bc0d2e06b1d1e348eb071e00e01b3/luigi_pipeline/lib/hail_tasks.py#L77-L89
-    # Import the VCFs from inputs. Set min partitions so that local pipeline execution takes advantage of all CPUs.
+    """
+    https://github.com/populationgenomics/hail-elasticsearch-pipelines/blob/e41582d4842bc0d2e06b1d1e348eb071e00e01b3/luigi_pipeline/lib/hail_tasks.py#L77-L89
+    Import the VCFs from inputs. Set min partitions so that local pipeline execution
+    takes advantage of all CPUs.
+    :source_paths: list of paths to multi-sample VCFs
+    :genome_version: 37 or 38
+    :return a MatrixTable
+    """
     recode = {}
-    if genome_version == "38":
-        recode = {f"{i}": f"chr{i}" for i in (list(range(1, 23)) + ["X", "Y"])}
-    elif genome_version == "37":
-        recode = {f"chr{i}": f"{i}" for i in (list(range(1, 23)) + ["X", "Y"])}
+    if genome_version == '38':
+        recode = {f'{i}': f'chr{i}' for i in (list(range(1, 23)) + ['X', 'Y'])}
+    elif genome_version == '37':
+        recode = {f'chr{i}': f'{i}' for i in (list(range(1, 23)) + ['X', 'Y'])}
 
     return hl.import_vcf(
-        [vcf_file for vcf_file in source_paths],
-        reference_genome="GRCh" + genome_version,
+        source_paths,
+        reference_genome=f'GRCh{genome_version}',
         skip_invalid_loci=True,
         contig_recoding=recode,
         force_bgz=True,
@@ -245,41 +273,6 @@ def elasticsearch_row(ds):
     return table
 
 
-def run_vep(
-    mt: hl.MatrixTable,
-    genome_version: str,
-    name: str = "vep",
-    vep_config_json_path: str = None,
-    block_size: Optional[int] = None,
-) -> hl.MatrixTable:
-    """Runs VEP.
-
-    https://github.com/populationgenomics/hail-elasticsearch-pipelines/blob/e41582d4842bc0d2e06b1d1e348eb071e00e01b3/hail_scripts/v02/utils/hail_utils.py#L103-L129
-
-    :param MatrixTable mt: MT to annotate with VEP
-    :param str genome_version: "37" or "38"
-    :param str name: Name for resulting row field
-    :param int block_size: Number of rows to process per VEP invocation.
-    :param str vep_config_json_path: JSON config path for VEP
-    :return: annotated MT
-    :rtype: MatrixTable
-    """
-    if vep_config_json_path is not None:
-        config = vep_config_json_path
-        mt = mt.annotate_globals(gencodeVersion="unknown")
-    else:
-        if genome_version not in ["37", "38"]:
-            raise ValueError(f"Invalid genome version: {genome_version}")
-
-        # Default config when you start the VEP cluster on spark
-        config = "file:///vep_data/vep-gcloud.json"
-
-    mt = hl.vep(mt, config=config, name=name, block_size=block_size or 1000)
-
-    logger.info("==> Done with VEP")
-    return mt
-
-
 def get_sample_type_stats(mt, threshold=0.3):
     """
     Calculate stats for sample type by checking against a list of common coding and non-coding variants.
@@ -292,20 +285,25 @@ def get_sample_type_stats(mt, threshold=0.3):
     stats = {}
     types_to_ht_path = {
         'noncoding': 'gs://seqr-reference-data/GRCh38/validate_ht/common_noncoding_variants.grch38.ht',
-        'coding': 'gs://seqr-reference-data/GRCh38/validate_ht/common_coding_variants.grch38.ht'
+        'coding': 'gs://seqr-reference-data/GRCh38/validate_ht/common_coding_variants.grch38.ht',
     }
     for sample_type, ht_path in types_to_ht_path.items():
         ht = hl.read_table(ht_path)
         stats[sample_type] = ht_stats = {
             'matched_count': mt.semi_join_rows(ht).count_rows(),
             'total_count': ht.count(),
-
         }
-        ht_stats['match'] = (ht_stats['matched_count']/ht_stats['total_count']) >= threshold
+        ht_stats['match'] = (
+            ht_stats['matched_count'] / ht_stats['total_count']
+        ) >= threshold
     return stats
 
 
 class SeqrValidationError(Exception):
+    """
+    Thrown when the MatrixTable is failed
+    """
+
     pass
 
 
@@ -315,15 +313,16 @@ def validate_mt(mt, sample_type):
     genome version. This validates genome_version, variants, and the reported sample type.
 
     :param mt: mt to validate
-    :param genome_version: reference genome version
     :param sample_type: WGS or WES
     :return: True or Exception
     """
     sample_type_stats = get_sample_type_stats(mt)
 
     for name, stat in sample_type_stats.items():
-        logger.info('Table contains %i out of %i common %s variants.' %
-                    (stat['matched_count'], stat['total_count'], name))
+        logger.info(
+            'Table contains %i out of %i common %s variants.'
+            % (stat['matched_count'], stat['total_count'], name)
+        )
 
     has_coding = sample_type_stats['coding']['match']
     has_noncoding = sample_type_stats['noncoding']['match']
@@ -331,21 +330,22 @@ def validate_mt(mt, sample_type):
     if not has_coding and not has_noncoding:
         # No common variants detected.
         raise SeqrValidationError(
-            'Genome version validation error: dataset specified but doesn\'t contain the expected number of common variants')
-    elif has_noncoding and not has_coding:
+            'Genome version validation error: dataset specified but doesn\'t contain the expected number of common variants'
+        )
+    if has_noncoding and not has_coding:
         # Non coding only.
         raise SeqrValidationError(
             'Sample type validation error: Dataset contains noncoding variants but is missing common coding '
             'variants. Please verify that the dataset contains coding variants.'
         )
-    elif has_coding and not has_noncoding:
+    if has_coding and not has_noncoding:
         # Only coding should be WES.
         if sample_type != 'WES':
             raise SeqrValidationError(
                 f'Sample type validation error: dataset sample-type is specified as {sample_type} but appears to be '
                 'WGS because it contains many common coding variants'
             )
-    elif has_noncoding and has_coding:
+    if has_noncoding and has_coding:
         # Both should be WGS.
         if sample_type != 'WGS':
             raise SeqrValidationError(
@@ -372,7 +372,8 @@ def remap_sample_ids(mt, remap_path):
             f'Only {remap_ht.semi_join(mt.cols()).count()} out of {remap_count} '
             'remap IDs matched IDs in the variant callset.\n'
             f'IDs that aren\'t in the callset: {missing_samples}\n'
-            f'All callset sample IDs:{mt.s.collect()}', missing_samples
+            f'All callset sample IDs:{mt.s.collect()}',
+            missing_samples,
         )
 
     mt = mt.annotate_cols(**remap_ht[mt.s])
@@ -401,14 +402,17 @@ def subset_samples_and_variants(mt, subset_path):
             f'Only {subset_count-anti_join_ht_count} out of {subset_count} '
             'subsetting-table IDs matched IDs in the variant callset.\n'
             f'IDs that aren\'t in the callset: {missing_samples}\n'
-            f'All callset sample IDs:{mt.s.collect()}', missing_samples
+            f'All callset sample IDs:{mt.s.collect()}',
+            missing_samples,
         )
 
     mt = mt.semi_join_cols(subset_ht)
     mt = mt.filter_rows(hl.agg.any(mt.GT.is_non_ref()))
 
-    logger.info(f'Finished subsetting samples. Kept {subset_count} '
-                f'out of {mt.count()} samples in vds')
+    logger.info(
+        f'Finished subsetting samples. Kept {subset_count} '
+        f'out of {mt.count()} samples in vds'
+    )
     return mt
 
 
@@ -419,7 +423,9 @@ def add_37_coordinates(mt):
     """
     rg37 = hl.get_reference('GRCh37')
     rg38 = hl.get_reference('GRCh38')
-    rg38.add_liftover('gs://hail-common/references/grch38_to_grch37.over.chain.gz', rg37)
+    rg38.add_liftover(
+        'gs://hail-common/references/grch38_to_grch37.over.chain.gz', rg37
+    )
     mt = mt.annotate_rows(rg37_locus=hl.liftover(mt.locus, 'GRCh37'))
     return mt
 
