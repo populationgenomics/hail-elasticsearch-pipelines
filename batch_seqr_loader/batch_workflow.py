@@ -245,7 +245,7 @@ def _make_jobs_that_produce_vcf(
 
         import_gvcfs_job = _add_import_gvcfs_job(
             b=b,
-            genomicsdb_gcs_path=b.read_input(genomicsdb_gcs_path),
+            genomicsdb_gcs_path=genomicsdb_gcs_path,
             sample_name_map=b.read_input(sample_map_fpath),
             interval=intervals[f'interval_{idx}'],
         )
