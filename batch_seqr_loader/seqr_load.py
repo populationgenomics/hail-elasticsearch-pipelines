@@ -11,7 +11,7 @@ from typing import Optional, List
 import click
 import hail as hl
 
-from luigi_pipeline.lib.model.seqr_mt_schema import SeqrVariantsAndGenotypesSchema
+from lib.model.seqr_mt_schema import SeqrVariantsAndGenotypesSchema
 from hail_scripts.v02.utils.elasticsearch_client import ElasticsearchClient
 
 logger = logging.getLogger()
