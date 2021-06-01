@@ -317,7 +317,6 @@ def find_inputs(
     subprocess.run(f'gsutil cp {ped_fpath} {local_ped_fpath}', check=False, shell=True)
     df = pd.read_csv(local_ped_fpath, delimiter='\t')
     shutil.rmtree(local_tmp_dir)
-    df['gvcf'] = ''
     df = df.set_index('Individual.ID', drop=False)
     df = df.rename(columns={'Individual.ID': 's'})
 
