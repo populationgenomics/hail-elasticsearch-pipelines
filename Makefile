@@ -28,7 +28,7 @@ run_test:
 	--output-dir "gs://cpg-seqr-test/seqr_$(VERSION)/hail" \
 	--description "test seqr loader" \
 	batch_seqr_loader/batch_workflow.py \
-	--gvcf-bucket gs://cpg-seqr-temporary/gvcf \
+	--gvcf-bucket gs://cpg-seqr-test/gvcf \
 	--ped-file gs://cpg-seqr-test/gvcf/samples.ped \
 	--dataset seqr \
 	--work-bucket "gs://cpg-seqr-test/seqr_$(VERSION)/work" \
