@@ -60,12 +60,6 @@ logger = logging.getLogger()
     '--sample-type', 'sample_type', type=click.Choice(['WGS', 'WES']), default='WGS'
 )
 @click.option(
-    '--dataset-type',
-    'dataset_type',
-    type=click.Choice(['VARIANTS', 'SV']),
-    default='VARIANTS',
-)
-@click.option(
     '--remap-tsv',
     'remap_path',
     help='Path to a TSV file with two columns: s and seqr_id.',
@@ -86,7 +80,6 @@ def main(
     hgmd_path: Optional[str],
     disable_validation: bool,
     sample_type: str,
-    dataset_type: str,  # pylint: disable=unused-argument
     remap_path: str = None,  # pylint: disable=unused-argument
     subset_path: str = None,  # pylint: disable=unused-argument
     vep_block_size: Optional[int] = None,
