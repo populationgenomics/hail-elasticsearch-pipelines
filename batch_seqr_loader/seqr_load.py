@@ -91,7 +91,7 @@ def main(
     subset_path: str = None,  # pylint: disable=unused-argument
     vep_block_size: Optional[int] = None,
 ):  # pylint: disable=missing-function-docstring
-    print('Running')
+    logger.info('Starting the seqr_load pipeline')
     genome_version = genome_version.replace('GRCh', '')
     mt = import_vcf(source_paths, genome_version)
     mt = annotate_old_and_split_multi_hts(mt)
