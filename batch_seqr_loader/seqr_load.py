@@ -40,7 +40,7 @@ logger = logging.getLogger()
     'reference_path',
     required=True,
     help='Path to the Hail table storing the reference variants.',
-    default='gs://seqr-reference-data/GRCh38/all_reference_data/v2/combined_reference_data_grch38-2.0.2.ht',
+    default='gs://cpg-seqr-reference-data/GRCh38/all_reference_data/v2/combined_reference_data_grch38-2.0.3.ht',
 )
 @click.option(
     '--clinvar-ht',
