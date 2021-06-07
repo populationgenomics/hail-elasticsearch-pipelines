@@ -88,7 +88,6 @@ def main(
     genome_version = genome_version.replace('GRCh', '')
     mt = import_vcf(source_paths, genome_version)
     mt = annotate_old_and_split_multi_hts(mt)
-    mt.write(f'{bucket}/annotate_old_and_split_multi_hts.mt', overwrite=True)
     if not disable_validation:
         validate_mt(mt, sample_type)
     if remap_path:
