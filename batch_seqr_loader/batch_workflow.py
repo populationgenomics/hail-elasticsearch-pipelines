@@ -35,7 +35,6 @@ DBSNP_VCF = join(REF_BUCKET, 'Homo_sapiens_assembly38.dbsnp138.vcf')
 UNPADDED_INTERVALS = join(REF_BUCKET, 'hg38.even.handcurated.20k.intervals')
 
 DATAPROC_PACKAGES = [
-    'seqr-loader',
     'click',
     'google',
     'slackclient',
@@ -183,12 +182,14 @@ def main(
 
     dataproc.hail_dataproc_job(
         b,
+        f'PYTHONPATH=$(pwd):$(pwd)/luigi_pipeline:$PYTHONPATH '
         f'batch_seqr_loader/seqr_load.py '
         f'--source-path {gathered_vcf_path} '
         f'--dest-mt-path {dest_mt_path} '
         f'--bucket {join(work_bucket, "seqr_load")} ',
         max_age='8h',
         packages=DATAPROC_PACKAGES,
+        pyfiles=['luigi_pipeline/lib', ''],
         num_secondary_workers=2,
         job_name='seqr_load.py',
         vep='GRCh38',
