@@ -47,7 +47,7 @@ logger = logging.getLogger()
     'clinvar_path',
     required=True,
     help='Path to the Hail table storing the clinvar variants.',
-    default='gs://seqr-reference-data/GRCh38/clinvar/clinvar.GRCh38.ht',
+    default='gs://cpg-seqr-reference-data/GRCh38/clinvar/clinvar.GRCh38.2020-06-15.ht',
 )
 @click.option(
     '--hgmd-ht',
