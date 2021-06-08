@@ -399,12 +399,15 @@ def find_inputs(
         for ib in buckets:
             for pattern in patterns:
                 cmd = f"gsutil ls '{join(ib, pattern)}'"
-                found_files_by_type[input_type].extend(
-                    line.strip()
-                    for line in subprocess.check_output(cmd, shell=True)
-                    .decode()
-                    .split()
-                )
+                try:
+                    found_files_by_type[input_type].extend(
+                        line.strip()
+                        for line in subprocess.check_output(cmd, shell=True)
+                        .decode()
+                        .split()
+                    )
+                except subprocess.CalledProcessError:
+                    pass
 
     def _get_base_name(file_path):
         return re.sub('(.bam|.cram|.g.vcf.gz)$', '', os.path.basename(file_path))
