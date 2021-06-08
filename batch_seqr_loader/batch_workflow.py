@@ -285,9 +285,13 @@ def _make_genotype_jobs(
         if can_reuse(output_gvcf_path, overwrite):
             merge_gvcf_jobs.append(b.new_job('Merge GVCFs [reuse]'))
         else:
+            if bam_fpath.endswith('.cram'):
+                index_path = bam_fpath.removesuffix('.cram') + '.crai'
+            else:
+                index_path = bam_fpath.removesuffix('.bam') + '.bai'
             input_bam = b.read_input_group(
                 bam=bam_fpath,
-                bai=re.sub(re.sub(bam_fpath, '.cram$', '.crai'), '.bam$', '.bai'),
+                bai=index_path,
             )
             haplotype_caller_jobs = []
             for idx in range(NUMBER_OF_INTERVALS):
