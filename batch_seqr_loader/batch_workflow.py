@@ -397,12 +397,14 @@ def find_inputs(
     for input_type, buckets in input_buckets_by_type.items():
         patterns = ['*.g.vcf.gz'] if input_type == 'gvcf' else ['*.bam', '*.cram']
         for ib in buckets:
-            path = ' '.join(join(ib, ptn) for ptn in patterns)
-            cmd = f"gsutil ls '{path}'"
-            found_files_by_type[input_type].extend(
-                line.strip()
-                for line in subprocess.check_output(cmd, shell=True).decode().split()
-            )
+            for pattern in patterns:
+                cmd = f"gsutil ls '{join(ib, pattern)}'"
+                found_files_by_type[input_type].extend(
+                    line.strip()
+                    for line in subprocess.check_output(cmd, shell=True)
+                    .decode()
+                    .split()
+                )
 
     def _get_base_name(file_path):
         return re.sub('(.bam|.cram|.g.vcf.gz)$', '', os.path.basename(file_path))
