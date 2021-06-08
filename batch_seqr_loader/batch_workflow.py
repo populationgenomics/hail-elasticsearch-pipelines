@@ -286,9 +286,9 @@ def _make_genotype_jobs(
             merge_gvcf_jobs.append(b.new_job('Merge GVCFs [reuse]'))
         else:
             if bam_fpath.endswith('.cram'):
-                index_path = bam_fpath.removesuffix('.cram') + '.crai'
+                index_path = os.path.splitext(bam_fpath)[0] + '.crai'
             else:
-                index_path = bam_fpath.removesuffix('.bam') + '.bai'
+                index_path = os.path.splitext(bam_fpath)[0] + '.bai'
             input_bam = b.read_input_group(
                 bam=bam_fpath,
                 bai=index_path,
