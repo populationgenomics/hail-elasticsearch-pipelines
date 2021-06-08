@@ -78,7 +78,6 @@ logger.setLevel('INFO')
 @click.option(
     '--ped-file',
     'ped_fpath',
-    required=True,
 )
 @click.option(
     '--dataset',
