@@ -59,7 +59,8 @@ logger.setLevel('INFO')
 )
 @click.option(
     '--bam-bucket',
-    '--cram-bucket' 'bam_buckets',
+    '--cram-bucket',
+    'bam_buckets',
     multiple=True,
 )
 @click.option(
