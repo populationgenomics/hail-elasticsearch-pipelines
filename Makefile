@@ -1,4 +1,4 @@
-VERSION := v0
+VERSION := v1-0
 
 .PHONY: package
 package:
@@ -29,7 +29,7 @@ run_test:
 	--description "test seqr loade - batch small1" \
 	batch_seqr_loader/batch_workflow.py \
 	--gvcf-bucket gs://cpg-seqr-test/gvcf/small1 \
-	--ped-file gs://cpg-seqr-test/gvcf/small1/samples.ped \
+	--cram-bucket gs://cpg-seqr-test/cram \
 	--dataset seqr \
 	--work-bucket "gs://cpg-seqr-test/seqr_$(VERSION)/work" \
 	--dest-mt-path "gs://cpg-seqr-test/seqr_$(VERSION)/output/annotated.mt" \

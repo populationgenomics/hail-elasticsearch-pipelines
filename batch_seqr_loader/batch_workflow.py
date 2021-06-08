@@ -59,11 +59,12 @@ logger.setLevel('INFO')
 )
 @click.option(
     '--bam-bucket',
-    'bam_buckets',
+    '--cram-bucket' 'bam_buckets',
     multiple=True,
 )
 @click.option(
     '--bam-to-realign-bucket',
+    '--cram-to-realign-bucket',
     'bam_to_realign_buckets',
     multiple=True,
 )
