@@ -85,23 +85,7 @@ logger.setLevel('INFO')
 @click.option('--keep-scratch', 'keep_scratch', is_flag=True)
 @click.option('--reuse-scratch-run-id', 'reuse_scratch_run_id')
 @click.option('--dry-run', 'dry_run', is_flag=True)
-@click.option(
-    '--billing-project',
-    'billing_project',
-    type=str,
-    default=os.getenv('HAIL_BILLING_PROJECT'),
-)
-@click.option('--genome-version', 'genome_version', default='GRCh38')
 @click.option('--disable-validation', 'disable_validation', is_flag=True)
-@click.option(
-    '--sample-type', 'sample_type', type=click.Choice(['WGS', 'WES']), default='WGS'
-)
-@click.option(
-    '--dataset-type',
-    'dataset_type',
-    type=click.Choice(['VARIANTS', 'SV']),
-    default='VARIANTS',
-)
 @click.option(
     '--remap-tsv',
     'remap_path',
@@ -112,9 +96,11 @@ logger.setLevel('INFO')
     'subset_path',
     help='Path to a TSV file with one column of sample IDs: s.',
 )
-@click.option('--run-vep/--skip-vep', 'run_vep', default=True)
 @click.option(
-    '--vep-config', 'vep_config_json_path', help='Path of hail vep config .json file'
+    '--make-checkpoints',
+    'make_checkpoints',
+    is_flag=True,
+    help='Create checkpoints for intermediate Hail data',
 )
 @click.option('--vep-block-size', 'vep_block_size')
 def main(
@@ -127,15 +113,10 @@ def main(
     keep_scratch: bool,
     reuse_scratch_run_id: Optional[str],
     dry_run: bool,
-    billing_project: Optional[str],
-    genome_version: str,  # pylint: disable=unused-argument
     disable_validation: bool,  # pylint: disable=unused-argument
-    dataset_type: str,  # pylint: disable=unused-argument
-    sample_type: str,  # pylint: disable=unused-argument
-    remap_path: str,  # pylint: disable=unused-argument
-    subset_path: str,  # pylint: disable=unused-argument
-    run_vep: bool,
-    vep_config_json_path: Optional[str] = None,  # pylint: disable=unused-argument
+    remap_path: str,
+    subset_path: str,
+    make_checkpoints: bool,
     vep_block_size: Optional[int] = None,  # pylint: disable=unused-argument
 ):
     """
@@ -188,14 +169,17 @@ def main(
         f'batch_seqr_loader/seqr_load.py '
         f'--source-path {gathered_vcf_path} '
         f'--dest-mt-path {dest_mt_path} '
+        f'--bucket {join(work_bucket, "seqr_load")} '
         + (f'--disable-validation ' if disable_validation else '')
-        + (f'--skip-vep ' if not run_vep else '')
-        + f'--bucket {join(work_bucket, "seqr_load")} ',
+        + (f'--make-checkpoints ' if not make_checkpoints else '')
+        + (f'--remap-tsv ' if not remap_path else '')
+        + (f'--subset-tsv ' if not subset_path else '')
+        + (f'--vep-block-size ' if not vep_block_size else ''),
         max_age='8h',
         packages=DATAPROC_PACKAGES,
         num_secondary_workers=2,
         job_name='seqr_load.py',
-        vep='GRCh38' if run_vep else None,
+        vep='GRCh38',
         depends_on=[gather_job],
     )
 
