@@ -531,7 +531,7 @@ def _add_haplotype_caller_job(
     input_bam: hb.ResourceGroup,
     interval: hb.ResourceFile,
     reference: hb.ResourceGroup,
-    sample_name: Optional[str] = None,
+    sample_name: str,
     interval_idx: Optional[int] = None,
     number_of_intervals: int = 1,
 ) -> Job:
@@ -549,10 +549,8 @@ def _add_haplotype_caller_job(
     disk_size = math.ceil(input_and_output_size / scatter_divisor) + reference_data_size
 
     job_name = 'HaplotypeCaller'
-    if sample_name:
-        job_name += f', {sample_name}'
     if interval_idx:
-        job_name += f' {interval_idx}/{number_of_intervals}'
+        job_name += f', {sample_name} {interval_idx}/{number_of_intervals}'
 
     j = b.new_job('HaplotypeCaller')
     j.image(GATK_CONTAINER)
@@ -562,8 +560,8 @@ def _add_haplotype_caller_job(
     j.storage(f'{disk_size}G')
     j.declare_resource_group(
         output_gvcf={
-            'g.vcf.gz': '{root}.g.vcf.gz',
-            'g.vcf.gz.tbi': '{root}.g.vcf.gz.tbi',
+            'g.vcf.gz': '{root}-' + sample_name + '.g.vcf.gz',
+            'g.vcf.gz.tbi': '{root}-' + sample_name + '.g.vcf.gz.tbi',
         }
     )
 
@@ -587,16 +585,13 @@ def _add_merge_gvcfs_job(
     b: hb.Batch,
     gvcfs: List[hb.ResourceGroup],
     output_gvcf_path: Optional[str],
-    sample_name: Optional[str] = None,
+    sample_name: str,
 ) -> Job:
     """
     Combine by-interval GVCFs into a single sample GVCF file
     """
 
-    job_name = f'Merge {len(gvcfs)} GVCFs'
-    if sample_name:
-        job_name += f', {sample_name}'
-
+    job_name = f'Merge {len(gvcfs)} GVCFs, {sample_name}'
     j = b.new_job(job_name)
     j.image(PICARD_CONTAINER)
     mem_gb = 8
@@ -604,8 +599,8 @@ def _add_merge_gvcfs_job(
     j.storage(f'25G')
     j.declare_resource_group(
         output_gvcf={
-            'g.vcf.gz': '{root}.g.vcf.gz',
-            'g.vcf.gz.tbi': '{root}.g.vcf.gz.tbi',
+            'g.vcf.gz': '{root}-' + sample_name + '.g.vcf.gz',
+            'g.vcf.gz.tbi': '{root}-' + sample_name + '.g.vcf.gz.tbi',
         }
     )
 
@@ -614,7 +609,7 @@ def _add_merge_gvcfs_job(
     j.command(
         f"""set -e
     java -Xms{mem_gb - 1}g -jar /usr/picard/picard.jar \
-      MergeVcfs {input_cmd} OUTPUT={j.output_gvcf}
+      MergeVcfs {input_cmd} OUTPUT={j.output_gvcf['g.vcf.gz']}
       """
     )
     if output_gvcf_path:
