@@ -16,6 +16,8 @@ from hail_scripts.v02.utils.elasticsearch_client import ElasticsearchClient
 
 logger = logging.getLogger()
 
+SEQR_REF_BUCKET = 'gs://seqr-reference-data'
+
 
 @click.command()
 @click.option(
@@ -40,14 +42,14 @@ logger = logging.getLogger()
     'reference_path',
     required=True,
     help='Path to the Hail table storing the reference variants.',
-    default='gs://cpg-seqr-reference-data/GRCh38/all_reference_data/v2/combined_reference_data_grch38-2.0.3.ht',
+    default=f'{SEQR_REF_BUCKET}/GRCh38/all_reference_data/v2/combined_reference_data_grch38-2.0.3.ht',
 )
 @click.option(
     '--clinvar-ht',
     'clinvar_path',
     required=True,
     help='Path to the Hail table storing the clinvar variants.',
-    default='gs://cpg-seqr-reference-data/GRCh38/clinvar/clinvar.GRCh38.2020-06-15.ht',
+    default=f'{SEQR_REF_BUCKET}/GRCh38/clinvar/clinvar.GRCh38.2020-06-15.ht',
 )
 @click.option(
     '--hgmd-ht',
