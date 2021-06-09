@@ -105,6 +105,9 @@ def main(
     if run_vep:
         mt = hl.vep(mt, block_size=vep_block_size or 1000)
         mt.write(f'{bucket}/run_vep.mt', overwrite=True)
+    else:
+        # Creating a missing vep field to avoid downstream processing fail
+        mt = mt.annotate_rows(vep=hl.missing(hl.tstruct))
 
     ref_data = hl.read_table(reference_path)
     clinvar = hl.read_table(clinvar_path)
