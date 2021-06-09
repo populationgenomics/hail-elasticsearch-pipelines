@@ -594,7 +594,7 @@ def _add_merge_gvcfs_job(
     j.command(
         f"""set -e
     java -Xms{mem_gb - 1}m -jar /usr/picard/picard.jar \
-      MergeVcfs {input_cmd} OUTPUT={j.output_vcf}
+      MergeVcfs {input_cmd} OUTPUT={j.output_gvcf}
       """
     )
     if output_gvcf_path:
