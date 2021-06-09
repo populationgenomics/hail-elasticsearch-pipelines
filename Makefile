@@ -26,7 +26,7 @@ run_test:
 	--dataset seqr \
 	--access-level test \
 	--output-dir "gs://cpg-seqr-test/seqr_$(VERSION)/hail" \
-	--description "test seqr loade - batch small1" \
+	--description "test seqr loader - batch small1" \
 	batch_seqr_loader/batch_workflow.py \
 	--gvcf-bucket gs://cpg-seqr-test/gvcf/small1 \
 	--cram-bucket gs://cpg-seqr-test/cram \
@@ -35,7 +35,7 @@ run_test:
 	--dest-mt-path "gs://cpg-seqr-test/seqr_$(VERSION)/output/annotated.mt" \
 	--genomicsdb-bucket gs://cpg-seqr-test/seqr_$(VERSION)/genomicsdb \
 	--keep-scratch \
-        --reuse
+	--reuse
 
 .PHONY: run_test_extend
 run_test_extend:
@@ -51,4 +51,5 @@ run_test_extend:
 	--work-bucket "gs://cpg-seqr-test/seqr_$(VERSION)/work-withsmall2" \
 	--dest-mt-path "gs://cpg-seqr-test/seqr_$(VERSION)/output/annotated-withsmall2.mt" \
 	--genomicsdb-bucket gs://cpg-seqr-test/seqr_$(VERSION)/genomicsdb \
-	--keep-scratch
+	--keep-scratch \
+	--reuse
