@@ -34,7 +34,8 @@ run_test:
 	--work-bucket "gs://cpg-seqr-test/seqr_$(VERSION)/work" \
 	--dest-mt-path "gs://cpg-seqr-test/seqr_$(VERSION)/output/annotated.mt" \
 	--genomicsdb-bucket gs://cpg-seqr-test/seqr_$(VERSION)/genomicsdb \
-	--keep-scratch
+	--keep-scratch \
+	--disable-validation
 
 .PHONY: run_test_extend
 run_test_extend:
@@ -50,4 +51,5 @@ run_test_extend:
 	--work-bucket "gs://cpg-seqr-test/seqr_$(VERSION)/work-withsmall2" \
 	--dest-mt-path "gs://cpg-seqr-test/seqr_$(VERSION)/output/annotated-withsmall2.mt" \
 	--genomicsdb-bucket gs://cpg-seqr-test/seqr_$(VERSION)/genomicsdb \
-	--keep-scratch
+	--keep-scratch \
+	--disable-validation
