@@ -283,7 +283,7 @@ def _make_genotype_jobs(
     for sn, bam_fpath in zip(bams_df['s'], bams_df['file']):
         output_gvcf_path = join(work_bucket, f'{sn}.g.vcf.gz')
         if can_reuse(output_gvcf_path, overwrite):
-            merge_gvcf_jobs.append(b.new_job('Merge GVCFs [reuse]'))
+            merge_gvcf_jobs.append(b.new_job(f'HaplotypeCaller, {sn} [reuse]'))
         else:
             if bam_fpath.endswith('.cram'):
                 index_path = os.path.splitext(bam_fpath)[0] + '.crai'
@@ -301,6 +301,8 @@ def _make_genotype_jobs(
                         input_bam,
                         interval=intervals[f'interval_{idx}'],
                         reference=reference,
+                        sample_name=sn,
+                        interval_idx=idx,
                         number_of_intervals=NUMBER_OF_INTERVALS,
                     )
                 )
@@ -309,6 +311,7 @@ def _make_genotype_jobs(
                     b,
                     gvcfs=[j.output_gvcf for j in haplotype_caller_jobs],
                     output_gvcf_path=output_gvcf_path,
+                    sample_name=sn,
                 )
             )
         samples_df.loc[sn, 'file'] = output_gvcf_path
@@ -350,6 +353,8 @@ def _make_joint_genotype_jobs(
             genomicsdb_gcs_path=genomicsdb_gcs_path,
             sample_name_map=b.read_input(sample_map_fpath),
             interval=intervals[f'interval_{idx}'],
+            interval_idx=idx,
+            number_of_intervals=NUMBER_OF_INTERVALS,
             depends_on=depends_on,
         )
 
@@ -359,7 +364,8 @@ def _make_joint_genotype_jobs(
             interval=intervals[f'interval_{idx}'],
             reference=reference,
             dbsnp=dbsnp,
-            disk_size=100,
+            interval_idx=idx,
+            number_of_intervals=NUMBER_OF_INTERVALS,
         )
         genotype_vcf_job.depends_on(import_gvcfs_job)
         genotype_vcf_jobs.append(genotype_vcf_job)
@@ -368,7 +374,6 @@ def _make_joint_genotype_jobs(
     final_gathered_vcf_job = _add_final_gather_vcf_step(
         b,
         input_vcfs=genotyped_vcfs,
-        disk_size=200,
         output_vcf_path=output_vcf_path,
     )
 
@@ -491,7 +496,7 @@ def _add_split_intervals_job(
 
     Returns: a Job object with a single output j.intervals of type ResourceGroup
     """
-    j = b.new_job('SplitIntervals')
+    j = b.new_job(f'Make {scatter_count} intervals')
     j.image(GATK_CONTAINER)
     mem_gb = 8
     j.memory(f'{mem_gb}G')
@@ -525,6 +530,8 @@ def _add_haplotype_caller_job(
     input_bam: hb.ResourceGroup,
     interval: hb.ResourceFile,
     reference: hb.ResourceGroup,
+    sample_name: Optional[str] = None,
+    interval_idx: Optional[int] = None,
     number_of_intervals: int = 1,
 ) -> Job:
     """
@@ -540,10 +547,17 @@ def _add_haplotype_caller_job(
     reference_data_size = 20
     disk_size = math.ceil(input_and_output_size / scatter_divisor) + reference_data_size
 
-    j = b.new_job('GenotypeGVCFs')
+    job_name = 'HaplotypeCaller'
+    if sample_name:
+        job_name += f', {sample_name}'
+    if interval_idx:
+        job_name += f' {interval_idx}/{number_of_intervals}'
+
+    j = b.new_job('HaplotypeCaller')
     j.image(GATK_CONTAINER)
     j.cpu(2)
-    j.memory(f'8G')
+    mem_gb = 16
+    j.memory(f'{mem_gb}G')
     j.storage(f'{disk_size}G')
     j.declare_resource_group(
         output_gvcf={
@@ -554,7 +568,7 @@ def _add_haplotype_caller_job(
 
     j.command(
         f"""set -e
-    gatk --java-options "-Xms6000m -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10" \
+    gatk --java-options "-Xms{mem_gb - 1}g -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10" \
       HaplotypeCaller \
       -R {reference.base} \
       -I {input_bam.bam} \
@@ -572,12 +586,17 @@ def _add_merge_gvcfs_job(
     b: hb.Batch,
     gvcfs: List[hb.ResourceGroup],
     output_gvcf_path: Optional[str],
+    sample_name: Optional[str] = None,
 ) -> Job:
     """
     Combine by-interval GVCFs into a single sample GVCF file
     """
 
-    j = b.new_job('Merge GVCFs')
+    job_name = f'Merge {len(gvcfs)} GVCFs'
+    if sample_name:
+        job_name += f', {sample_name}'
+
+    j = b.new_job(job_name)
     j.image(PICARD_CONTAINER)
     mem_gb = 8
     j.memory(f'{mem_gb}G')
@@ -593,7 +612,7 @@ def _add_merge_gvcfs_job(
 
     j.command(
         f"""set -e
-    java -Xms{mem_gb - 1}m -jar /usr/picard/picard.jar \
+    java -Xms{mem_gb - 1}g -jar /usr/picard/picard.jar \
       MergeVcfs {input_cmd} OUTPUT={j.output_gvcf}
       """
     )
@@ -607,29 +626,35 @@ def _add_import_gvcfs_job(
     genomicsdb_gcs_path: str,
     sample_name_map: hb.ResourceFile,
     interval: hb.ResourceFile,
-    disk_size: int = 30,
-    depends_on: List[Job] = None,
+    interval_idx: Optional[int] = None,
+    number_of_intervals: int = 1,
+    depends_on: Optional[List[Job]] = None,
 ) -> Job:
     """
     Add GVCFs to a genomics database (or create a new instance if it doesn't exist).
     """
-    j = b.new_job('GenomicsDBImport GVCFs')
-    j.image(GATK_CONTAINER)
-    mem_gb = 16
-    j.memory(f'{mem_gb}G')
-    j.storage(f'{disk_size}G')
-    if depends_on:
-        j.depends_on(*depends_on)
-
     if file_exists(genomicsdb_gcs_path):
         # Update existing DB
         genomicsdb_param = '--genomicsdb-update-workspace-path workspace'
         genomicsdb = b.read_input(genomicsdb_gcs_path)
         untar_genomicsdb_cmd = f'tar -xf {genomicsdb}'
+        job_name = 'Adding to GenomicsDB'
     else:
         # Initiate new DB
         genomicsdb_param = '--genomicsdb-workspace-path workspace'
         untar_genomicsdb_cmd = ''
+        job_name = 'Creating GenomicsDB'
+
+    if interval_idx:
+        job_name += f' {interval_idx}/{number_of_intervals}'
+
+    j = b.new_job(job_name)
+    j.image(GATK_CONTAINER)
+    mem_gb = 16
+    j.memory(f'{mem_gb}G')
+    j.storage(f'100G')
+    if depends_on:
+        j.depends_on(*depends_on)
 
     j.declare_resource_group(output={'tar': '{root}.tar'})
 
@@ -677,15 +702,21 @@ def _add_gatk_genotype_gvcf_job(
     interval: hb.ResourceFile,
     reference: hb.ResourceGroup,
     dbsnp: hb.ResourceGroup,
-    disk_size: int = 100,
+    interval_idx: Optional[int] = None,
+    number_of_intervals: int = 1,
 ) -> Job:
     """
     Run joint-calling on all samples in a genomics database
     """
-    j = b.new_job('GenotypeGVCFs')
+    job_name = 'Joint-genotype'
+    if interval_idx:
+        job_name += f' {interval_idx}/{number_of_intervals}'
+
+    j = b.new_job(job_name)
     j.image(GATK_CONTAINER)
-    j.memory(f'32G')
-    j.storage(f'{disk_size}G')
+    mem_gb = 16
+    j.memory(f'{mem_gb}G')
+    j.storage(f'200G')
     j.declare_resource_group(
         output_vcf={
             'vcf.gz': '{root}.vcf.gz',
@@ -698,7 +729,7 @@ def _add_gatk_genotype_gvcf_job(
         
     tar -xf {genomicsdb}
 
-    gatk --java-options -Xms8g \\
+    gatk --java-options -Xms{mem_gb - 1}g \\
       GenotypeGVCFs \\
       -R {reference.base} \\
       -O {j.output_vcf['vcf.gz']} \\
@@ -715,17 +746,17 @@ def _add_gatk_genotype_gvcf_job(
 def _add_final_gather_vcf_step(
     b: hb.Batch,
     input_vcfs: List[hb.ResourceGroup],
-    disk_size: int,
     output_vcf_path: str = None,
 ) -> Job:
     """
     Combines per-interval scattered VCFs into a single VCF.
     Saves the output VCF to a bucket `output_vcf_path`
     """
-    j = b.new_job('FinalGatherVcf')
+    j = b.new_job(f'Gather {len(input_vcfs)} VCFs')
     j.image(GATK_CONTAINER)
-    j.memory(f'8G')
-    j.storage(f'{disk_size}G')
+    mem_gb = 8
+    j.memory(f'{mem_gb}G')
+    j.storage(f'100G')
     j.declare_resource_group(
         output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
     )
@@ -738,7 +769,7 @@ def _add_final_gather_vcf_step(
     # our invocation. This argument disables expensive checks that the file headers 
     # contain the same set of genotyped samples and that files are in order 
     # by position of first record.
-    gatk --java-options -Xms6g \\
+    gatk --java-options -Xms{mem_gb - 1}g \\
       GatherVcfsCloud \\
       --ignore-safety-checks \\
       --gather-type BLOCK \\

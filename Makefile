@@ -1,4 +1,4 @@
-VERSION := v1-0
+VERSION := v1gvcf
 
 .PHONY: package
 package:
