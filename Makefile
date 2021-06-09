@@ -34,7 +34,8 @@ run_test:
 	--work-bucket "gs://cpg-seqr-test/seqr_$(VERSION)/work" \
 	--dest-mt-path "gs://cpg-seqr-test/seqr_$(VERSION)/output/annotated.mt" \
 	--genomicsdb-bucket gs://cpg-seqr-test/seqr_$(VERSION)/genomicsdb \
-	--keep-scratch
+	--keep-scratch \
+        --reuse
 
 .PHONY: run_test_extend
 run_test_extend:
