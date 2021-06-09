@@ -69,6 +69,7 @@ logger = logging.getLogger()
     'subset_path',
     help='Path to a TSV file with one column of sample IDs: s.',
 )
+@click.option('--run-vep/--skip-vep', 'run_vep', default=True)
 @click.option('--vep-block-size', 'vep_block_size')
 def main(
     source_paths: List[str],
@@ -80,8 +81,9 @@ def main(
     hgmd_path: Optional[str],
     disable_validation: bool,
     sample_type: str,
-    remap_path: str = None,  # pylint: disable=unused-argument
-    subset_path: str = None,  # pylint: disable=unused-argument
+    remap_path: str,  # pylint: disable=unused-argument
+    subset_path: str,  # pylint: disable=unused-argument
+    run_vep: bool,
     vep_block_size: Optional[int] = None,
 ):  # pylint: disable=missing-function-docstring
     logger.info('Starting the seqr_load pipeline')
@@ -98,8 +100,9 @@ def main(
         mt = add_37_coordinates(mt)
         mt.write(f'{bucket}/add_37_coordinates.mt', overwrite=True)
 
-    mt = hl.vep(mt, block_size=vep_block_size or 1000)
-    mt.write(f'{bucket}/run_vep.mt', overwrite=True)
+    if run_vep:
+        mt = hl.vep(mt, block_size=vep_block_size or 1000)
+        mt.write(f'{bucket}/run_vep.mt', overwrite=True)
 
     ref_data = hl.read_table(reference_path)
     clinvar = hl.read_table(clinvar_path)

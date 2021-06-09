@@ -112,6 +112,7 @@ logger.setLevel('INFO')
     'subset_path',
     help='Path to a TSV file with one column of sample IDs: s.',
 )
+@click.option('--run-vep/--skip-vep', 'run_vep', default=True)
 @click.option(
     '--vep-config', 'vep_config_json_path', help='Path of hail vep config .json file'
 )
@@ -131,8 +132,9 @@ def main(
     disable_validation: bool,  # pylint: disable=unused-argument
     dataset_type: str,  # pylint: disable=unused-argument
     sample_type: str,  # pylint: disable=unused-argument
-    remap_path: str = None,  # pylint: disable=unused-argument
-    subset_path: str = None,  # pylint: disable=unused-argument
+    remap_path: str,  # pylint: disable=unused-argument
+    subset_path: str,  # pylint: disable=unused-argument
+    run_vep: bool,
     vep_config_json_path: Optional[str] = None,  # pylint: disable=unused-argument
     vep_block_size: Optional[int] = None,  # pylint: disable=unused-argument
 ):
@@ -187,12 +189,13 @@ def main(
         f'--source-path {gathered_vcf_path} '
         f'--dest-mt-path {dest_mt_path} '
         + (f'--disable-validation ' if disable_validation else '')
+        + (f'--skip-vep ' if not run_vep else '')
         + f'--bucket {join(work_bucket, "seqr_load")} ',
         max_age='8h',
         packages=DATAPROC_PACKAGES,
         num_secondary_workers=2,
         job_name='seqr_load.py',
-        vep='GRCh38',
+        vep='GRCh38' if run_vep else None,
         depends_on=[gather_job],
     )
 
