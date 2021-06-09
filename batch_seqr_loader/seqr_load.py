@@ -85,7 +85,6 @@ def main(
     clinvar_path: str,
     hgmd_path: Optional[str],
     disable_validation: bool,
-    sample_type: str,
     remap_path: str,
     subset_path: str,
     make_checkpoints: bool = False,
@@ -96,7 +95,7 @@ def main(
     mt = import_vcf(source_paths, genome_version)
     mt = annotate_old_and_split_multi_hts(mt)
     if not disable_validation:
-        validate_mt(mt, sample_type)
+        validate_mt(mt, sample_type='WGS')
     if remap_path:
         mt = remap_sample_ids(mt, remap_path)
     if subset_path:
@@ -121,7 +120,7 @@ def main(
     mt = mt.annotate_globals(
         sourceFilePath=','.join(source_paths),
         genomeVersion=genome_version,
-        sampleType=sample_type,
+        sampleType='WGS',
         hail_version=hl.version(),
     )
 
