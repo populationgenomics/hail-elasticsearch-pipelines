@@ -25,8 +25,8 @@ run_test:
 	analysis-runner \
 	--dataset seqr \
 	--access-level test \
-	--output-dir "gs://cpg-seqr-test/seqr_$(VERSION)/hail" \
-	--description "test seqr loade - batch small1" \
+	--output-dir "gs://cpg-seqr-test-tmp/seqr_$(VERSION)/hail" \
+	--description "test seqr loader - batch small1" \
 	batch_seqr_loader/batch_workflow.py \
 	--gvcf-bucket gs://cpg-seqr-test/gvcf/small1 \
 	--ped-file gs://cpg-seqr-test/gvcf/small1/samples.ped \

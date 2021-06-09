@@ -7,19 +7,19 @@ The input is a set of GVCFs. It iteratively adds them into a [GenomicsDB](https:
 To run, use the analysis runner:
 
 ```sh
-VERSION=v1
+VERSION=v1.01
 analysis-runner \
     --dataset seqr \
     --access-level test \
-    --output-dir "gs://cpg-seqr-temporary/seqr_${VERSION}/hail" \
-    --description "test seqr loader" \
+    --output-dir "gs://cpg-seqr-test-tmp/seqr_${VERSION}/hail" \
+    --description "test seqr loader - batch small1" \
 batch_seqr_loader/batch_workflow.py \
-    --gvcf-bucket gs://cpg-seqr-temporary/gvcf \
-    --ped-file gs://cpg-seqr-temporary/gvcf/pedigree.ped \
+    --gvcf-bucket gs://cpg-seqr-test/gvcf/small1 \
+    --ped-file gs://cpg-seqr-test/gvcf/small1/samples.ped \
     --dataset seqr \
-    --work-bucket "gs://cpg-seqr-temporary/seqr_${VERSION}/work" \
-    --dest-mt-path "gs://cpg-seqr-temporary/seqr_${VERSION}/output/annotated.mt" \
-    --genomicsdb-bucket gs://cpg-seqr-temporary/seqr_${VERSION}/genomicsdb
+    --work-bucket "gs://cpg-seqr-test/seqr_${VERSION}/work" \
+    --dest-mt-path "gs://cpg-seqr-test/seqr_${VERSION}/output/annotated.mt" \
+    --genomicsdb-bucket gs://cpg-seqr-test/seqr_${VERSION}/genomicsdb
 ```
 
 This script will automatically start a Dataproc cluster where relevant.
