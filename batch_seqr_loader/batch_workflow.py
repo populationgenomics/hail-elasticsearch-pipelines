@@ -171,10 +171,10 @@ def main(
         f'--dest-mt-path {dest_mt_path} '
         f'--bucket {join(work_bucket, "seqr_load")} '
         + (f'--disable-validation ' if disable_validation else '')
-        + (f'--make-checkpoints ' if not make_checkpoints else '')
-        + (f'--remap-tsv ' if not remap_path else '')
-        + (f'--subset-tsv ' if not subset_path else '')
-        + (f'--vep-block-size ' if not vep_block_size else ''),
+        + (f'--make-checkpoints ' if make_checkpoints else '')
+        + (f'--remap-tsv ' if remap_path else '')
+        + (f'--subset-tsv ' if subset_path else '')
+        + (f'--vep-block-size ' if vep_block_size else ''),
         max_age='8h',
         packages=DATAPROC_PACKAGES,
         num_secondary_workers=2,
