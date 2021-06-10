@@ -4,41 +4,20 @@ hl.init(default_reference='GRCh38')
 
 import subprocess
 
-cmd = 'ls -a /'
-print(f'$ {cmd}')
-subprocess.run(cmd, shell=True, check=False)
-print()
+def _run_cmd(cmd):
+    print(f'$ {cmd}')
+    subprocess.run(cmd, shell=True, check=False)
+    print()
 
-cmd = 'ls -a /vep_data'
-print(f'$ {cmd}')
-subprocess.run(cmd, shell=True, check=False)
-print()
-
-cmd = 'ls -a /opt'
-print(f'$ {cmd}')
-subprocess.run(cmd, shell=True, check=False)
-print()
-
-cmd = 'ls -a /opt/vep'
-print(f'$ {cmd}')
-subprocess.run(cmd, shell=True, check=False)
-print()
-
-cmd = 'ls -a /opt/vep/.vep'
-print(f'$ {cmd}')
-subprocess.run(cmd, shell=True, check=False)
-print()
-
-cmd = 'cat /opt/vep/.vep/loftee.sql'
-print(f'$ {cmd}')
-subprocess.run(cmd, shell=True, check=False)
-print()
-
-# cmd = 'cat /vep_data/vep-gcloud.json'
-# print(f'Running {cmd}')
-# subprocess.run(cmd, shell=True, check=False)
-# print()
-
+_run_cmd('gsutil cp gs://hail-common/hailctl/dataproc/0.2.63/vep-GRCh38.sh .')
+_run_cmd('bash -x vep-GRCh38.sh')
+_run_cmd('ls -al /')
+_run_cmd('ls -al /vep_data')
+_run_cmd('ls -al /opt')
+_run_cmd('ls -al /opt/vep')
+_run_cmd('ls -al /opt/vep/.vep')
+_run_cmd('cat /opt/vep/.vep/loftee.sql')
+_run_cmd('cat /vep_data/vep-gcloud.json')
 # cmd = 'gsutil cp /vep_data/vep-gcloud.json gs://cpg-reference/hg38/v0/vep-config.json'
 # print(f'Running {cmd}')
 # subprocess.run(cmd, shell=True, check=False)
