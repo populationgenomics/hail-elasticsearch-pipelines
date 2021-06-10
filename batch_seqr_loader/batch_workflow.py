@@ -184,8 +184,14 @@ def main(
     )
     b = hb.Batch('Seqr loader', backend=backend)
 
+    local_tmp_dir = tempfile.mkdtemp()
+
     samples_df = find_inputs(
-        gvcf_buckets, bam_buckets, bam_to_realign_buckets, ped_fpath=ped_fpath
+        gvcf_buckets,
+        bam_buckets,
+        bam_to_realign_buckets,
+        local_tmp_dir=local_tmp_dir,
+        ped_fpath=ped_fpath,
     )
 
     reference = b.read_input_group(
@@ -234,6 +240,7 @@ def main(
             reference=reference,
             dbsnp=dbsnp,
             work_bucket=work_bucket,
+            local_tmp_dir=local_tmp_dir,
             depends_on=genotype_jobs,
         )
 
@@ -252,6 +259,7 @@ def main(
     )
 
     b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch)
+    shutil.rmtree(local_tmp_dir)
 
 
 # def _make_realign_bam_jobs(
@@ -330,6 +338,7 @@ def _make_joint_genotype_jobs(
     reference: hb.ResourceGroup,
     dbsnp: hb.ResourceGroup,
     work_bucket: str,
+    local_tmp_dir: str,
     depends_on: List[Job] = None,
 ) -> Job:
     """
@@ -350,6 +359,7 @@ def _make_joint_genotype_jobs(
             genomicsdb_gcs_path=genomicsdb_gcs_path,
             samples_df=samples_df,
             work_bucket=work_bucket,
+            local_tmp_dir=local_tmp_dir,
             interval=intervals[f'interval_{idx}'],
             interval_idx=idx,
             number_of_intervals=NUMBER_OF_INTERVALS,
@@ -383,6 +393,7 @@ def find_inputs(
     gvcf_buckets: List[str],
     bam_buckets: List[str],
     bam_to_realign_buckets: List[str],
+    local_tmp_dir: str,
     ped_fpath: Optional[str] = None,
 ) -> pd.DataFrame:  # pylint disable=too-many-branches
     """
@@ -421,13 +432,11 @@ def find_inputs(
         return re.sub('(.bam|.cram|.g.vcf.gz)$', '', os.path.basename(file_path))
 
     if ped_fpath:
-        local_tmp_dir = tempfile.mkdtemp()
         local_ped_fpath = join(local_tmp_dir, basename(ped_fpath))
         subprocess.run(
             f'gsutil cp {ped_fpath} {local_ped_fpath}', check=False, shell=True
         )
         df = pd.read_csv(local_ped_fpath, delimiter='\t')
-        shutil.rmtree(local_tmp_dir)
         df = df.set_index('Individual.ID', drop=False)
         df = df.rename(columns={'Individual.ID': 's'})
         ped_snames = list(df['s'])
@@ -620,6 +629,7 @@ def _add_import_gvcfs_job(
     genomicsdb_gcs_path: str,
     samples_df: pd.DataFrame,
     work_bucket: str,
+    local_tmp_dir: str,
     interval: hb.ResourceFile,
     interval_idx: Optional[int] = None,
     number_of_intervals: int = 1,
@@ -631,7 +641,17 @@ def _add_import_gvcfs_job(
     """
     if file_exists(genomicsdb_gcs_path):
         # Check if sample exists in the DB already
-        with open(join(genomicsdb_gcs_path, 'callset.json')) as f:
+        genomicsdb_metadata = join(local_tmp_dir, f'callset-{interval_idx}.json')
+        # This command will download the DB metadata file locally.
+        # The `-O` argument to `tar` means "write the file being extracted to the stdout",
+        # and the file to be extracted is specified as a positional argument to `tar`.
+        subprocess.run(
+            f'gsutil cat {genomicsdb_gcs_path} | tar -O --extract workspace/callset.json > {genomicsdb_metadata}',
+            check=False,
+            shell=True,
+        )
+
+        with open(genomicsdb_metadata) as f:
             db_metadata = json.load(f)
             samples_in_db = set(s['sample_name'] for s in db_metadata['callsets'])
             new_samples = set(samples_df[samples_df['type'] == 'gvcf'].s)
