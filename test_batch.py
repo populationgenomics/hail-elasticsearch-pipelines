@@ -14,15 +14,13 @@ backend = hb.ServiceBackend(
 )
 b = hb.Batch('Test VEP', backend=backend)
 
-hail_dataproc_job(
+dataproc.hail_dataproc_job(
     b,
     'hail_with_vep.py ',
     max_age='1h',
     num_secondary_workers=1,
     job_name='hail_with_vep.py',
-    vep='GRCh38'
+    vep='GRCh38',
 )
 
 b.run()
-
-

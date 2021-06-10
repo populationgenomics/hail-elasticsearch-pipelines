@@ -1,7 +1,9 @@
 import hail as hl
+
 hl.init(default_reference='GRCh38')
 
 import subprocess
+
 res1 = subprocess.check_output('ls /', shell=True)
 res2 = subprocess.check_output('ls /vep_data', shell=True)
 print(res1.decode().split('\n'), res2.decode().split('\n'))
@@ -14,6 +16,7 @@ mt = hl.import_vcf(
     force_bgz=True,
     min_partitions=100,
 )
+
 
 def annotate_old_and_split_multi_hts(mt):
     """
@@ -28,7 +31,7 @@ def annotate_old_and_split_multi_hts(mt):
         mt.annotate_rows(locus_old=mt.locus, alleles_old=mt.alleles)
     )
 
-    
+
 mt = annotate_old_and_split_multi_hts(mt)
 
 mt = hl.vep(mt, block_size=1000)
