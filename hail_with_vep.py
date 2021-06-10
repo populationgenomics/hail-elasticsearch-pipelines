@@ -4,13 +4,15 @@ hl.init(default_reference='GRCh38')
 
 import subprocess
 
+
 def _run_cmd(cmd):
     print(f'$ {cmd}')
     subprocess.run(cmd, shell=True, check=False)
     print()
 
-_run_cmd('gsutil cp gs://hail-common/hailctl/dataproc/0.2.63/vep-GRCh38.sh .')
-_run_cmd('bash -x vep-GRCh38.sh')
+
+# _run_cmd('gsutil cp gs://hail-common/hailctl/dataproc/0.2.63/vep-GRCh38.sh .')
+# _run_cmd('bash -x vep-GRCh38.sh')
 _run_cmd('ls -al /')
 _run_cmd('ls -al /vep_data')
 _run_cmd('ls -al /opt')
@@ -49,5 +51,5 @@ def annotate_old_and_split_multi_hts(mt):
 
 mt = annotate_old_and_split_multi_hts(mt)
 
-mt = hl.vep(mt, block_size=1000, config='gs://cpg-reference/hg38/v0/vep-config.json')
+mt = hl.vep(mt, block_size=1000)
 mt.entries().show()
