@@ -4,25 +4,45 @@ hl.init(default_reference='GRCh38')
 
 import subprocess
 
-cmd = 'ls /'
-print(f'Running {cmd}')
+cmd = 'ls -a /'
+print(f'$ {cmd}')
 subprocess.run(cmd, shell=True, check=False)
 print()
 
-cmd = 'ls /vep_data'
-print(f'Running {cmd}')
+cmd = 'ls -a /vep_data'
+print(f'$ {cmd}')
 subprocess.run(cmd, shell=True, check=False)
 print()
 
-cmd = 'cat /vep_data/vep-gcloud.json'
-print(f'Running {cmd}')
+cmd = 'ls -a /opt'
+print(f'$ {cmd}')
 subprocess.run(cmd, shell=True, check=False)
 print()
 
-cmd = 'gsutil cp /vep_data/vep-gcloud.json gs://cpg-reference/hg38/v0/vep-config.json'
-print(f'Running {cmd}')
+cmd = 'ls -a /opt/vep'
+print(f'$ {cmd}')
 subprocess.run(cmd, shell=True, check=False)
 print()
+
+cmd = 'ls -a /opt/vep/.vep'
+print(f'$ {cmd}')
+subprocess.run(cmd, shell=True, check=False)
+print()
+
+cmd = 'cat /opt/vep/.vep/loftee.sql'
+print(f'$ {cmd}')
+subprocess.run(cmd, shell=True, check=False)
+print()
+
+# cmd = 'cat /vep_data/vep-gcloud.json'
+# print(f'Running {cmd}')
+# subprocess.run(cmd, shell=True, check=False)
+# print()
+
+# cmd = 'gsutil cp /vep_data/vep-gcloud.json gs://cpg-reference/hg38/v0/vep-config.json'
+# print(f'Running {cmd}')
+# subprocess.run(cmd, shell=True, check=False)
+# print()
 
 vcf_path = 'gs://playground-au/seqr/vcf/seqr.vcf.gz'
 mt = hl.import_vcf(
