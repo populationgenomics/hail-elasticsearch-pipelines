@@ -14,6 +14,16 @@ print(f'Running {cmd}')
 subprocess.run(cmd, shell=True, check=False)
 print()
 
+cmd = 'cat /vep_data/vep-gcloud.json'
+print(f'Running {cmd}')
+subprocess.run(cmd, shell=True, check=False)
+print()
+
+cmd = 'gsutil cp /vep_data/vep-gcloud.json gs://cpg-reference/hg38/v0/vep-config.json'
+print(f'Running {cmd}')
+subprocess.run(cmd, shell=True, check=False)
+print()
+
 vcf_path = 'gs://playground-au/seqr/vcf/seqr.vcf.gz'
 mt = hl.import_vcf(
     [vcf_path],
