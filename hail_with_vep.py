@@ -40,5 +40,5 @@ def annotate_old_and_split_multi_hts(mt):
 
 mt = annotate_old_and_split_multi_hts(mt)
 
-mt = hl.vep(mt, block_size=1000, config='/vep_data/vep-gcloud.json')
+mt = hl.vep(mt, block_size=1000, config='gs://cpg-reference/hg38/v0/vep-config.json')
 mt.entries().show()
