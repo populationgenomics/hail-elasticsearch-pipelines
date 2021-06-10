@@ -556,7 +556,7 @@ def _add_haplotype_caller_job(
     disk_size = math.ceil(input_and_output_size / scatter_divisor) + reference_data_size
 
     job_name = 'HaplotypeCaller'
-    if interval_idx:
+    if interval_idx is not None:
         job_name += f', {sample_name} {interval_idx}/{number_of_intervals}'
 
     j = b.new_job('HaplotypeCaller')
@@ -691,7 +691,7 @@ def _add_import_gvcfs_job(
     )
     sample_name_map = b.read_input(sample_map_fpath)
 
-    if interval_idx:
+    if interval_idx is not None:
         job_name += f' {interval_idx}/{number_of_intervals}'
 
     j = b.new_job(job_name)
@@ -755,7 +755,7 @@ def _add_gatk_genotype_gvcf_job(
     Run joint-calling on all samples in a genomics database
     """
     job_name = 'Joint-genotype'
-    if interval_idx:
+    if interval_idx is not None:
         job_name += f' {interval_idx}/{number_of_intervals}'
 
     j = b.new_job(job_name)
