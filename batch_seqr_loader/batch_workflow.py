@@ -6,7 +6,7 @@ See the README for more information. This is WIP.
 
     - 2021/04/16 Michael Franklin and Vlad Savelyev
 """
-
+import json
 import logging
 import math
 import os
@@ -340,10 +340,6 @@ def _make_joint_genotype_jobs(
 
     genotype_vcf_jobs = []
     genotyped_vcfs = []
-    sample_map_fpath = join(work_bucket, 'work', 'sample_name.csv')
-    samples_df[samples_df['type'] == 'gvcf'][['s', 'file']].to_csv(
-        sample_map_fpath, sep='\t', header=False, index=False
-    )
     for idx in range(NUMBER_OF_INTERVALS):
         genomicsdb_gcs_path = join(
             genomicsdb_bucket, f'interval_{idx}_outof_{NUMBER_OF_INTERVALS}.tar'
@@ -352,7 +348,8 @@ def _make_joint_genotype_jobs(
         import_gvcfs_job = _add_import_gvcfs_job(
             b=b,
             genomicsdb_gcs_path=genomicsdb_gcs_path,
-            sample_name_map=b.read_input(sample_map_fpath),
+            samples_df=samples_df,
+            work_bucket=work_bucket,
             interval=intervals[f'interval_{idx}'],
             interval_idx=idx,
             number_of_intervals=NUMBER_OF_INTERVALS,
@@ -368,7 +365,8 @@ def _make_joint_genotype_jobs(
             interval_idx=idx,
             number_of_intervals=NUMBER_OF_INTERVALS,
         )
-        genotype_vcf_job.depends_on(import_gvcfs_job)
+        if import_gvcfs_job:
+            genotype_vcf_job.depends_on(import_gvcfs_job)
         genotype_vcf_jobs.append(genotype_vcf_job)
         genotyped_vcfs.append(genotype_vcf_job.output_vcf)
 
@@ -620,16 +618,42 @@ def _add_merge_gvcfs_job(
 def _add_import_gvcfs_job(
     b: hb.Batch,
     genomicsdb_gcs_path: str,
-    sample_name_map: hb.ResourceFile,
+    samples_df: pd.DataFrame,
+    work_bucket: str,
     interval: hb.ResourceFile,
     interval_idx: Optional[int] = None,
     number_of_intervals: int = 1,
     depends_on: Optional[List[Job]] = None,
-) -> Job:
+) -> Optional[Job]:
     """
-    Add GVCFs to a genomics database (or create a new instance if it doesn't exist).
+    Add GVCFs to a genomics database (or create a new instance if it doesn't exist)
+    Returns a Job, or None if no new samples to add
     """
     if file_exists(genomicsdb_gcs_path):
+        # Check if sample exists in the DB already
+        with open(join(genomicsdb_gcs_path, 'callset.json')) as f:
+            db_metadata = json.load(f)
+            samples_in_db = set(s['sample_name'] for s in db_metadata['callsets'])
+            new_samples = set(samples_df[samples_df['type'] == 'gvcf'].s)
+            samples_to_add = new_samples - samples_in_db
+            samples_to_skip = new_samples & samples_in_db
+            if samples_to_skip:
+                logger.warning(
+                    f'Samples {samples_to_skip} already exist in the DB '
+                    f'{genomicsdb_gcs_path}, skipping adding them'
+                )
+            if samples_to_add:
+                logger.info(
+                    f'Will add samples {samples_to_add} into the DB '
+                    f'{genomicsdb_gcs_path}'
+                )
+            else:
+                logger.warning(
+                    f'Nothing will be added into the DB {genomicsdb_gcs_path}'
+                )
+                return None
+            samples_df = samples_df[samples_df.s.isin(samples_to_add)]
+
         # Update existing DB
         genomicsdb_param = '--genomicsdb-update-workspace-path workspace'
         genomicsdb = b.read_input(genomicsdb_gcs_path)
@@ -640,6 +664,12 @@ def _add_import_gvcfs_job(
         genomicsdb_param = '--genomicsdb-workspace-path workspace'
         untar_genomicsdb_cmd = ''
         job_name = 'Creating GenomicsDB'
+
+    sample_map_fpath = join(work_bucket, 'work', 'sample_name.csv')
+    samples_df[['s', 'file']].to_csv(
+        sample_map_fpath, sep='\t', header=False, index=False
+    )
+    sample_name_map = b.read_input(sample_map_fpath)
 
     if interval_idx:
         job_name += f' {interval_idx}/{number_of_intervals}'
@@ -674,7 +704,7 @@ def _add_import_gvcfs_job(
     # the Hellbender (GATK engine) team!
     
     {untar_genomicsdb_cmd}
-
+    
     gatk --java-options -Xms{mem_gb - 1}g \
       GenomicsDBImport \
       {genomicsdb_param} \
