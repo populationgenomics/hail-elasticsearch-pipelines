@@ -4,9 +4,15 @@ hl.init(default_reference='GRCh38')
 
 import subprocess
 
-res1 = subprocess.check_output('ls /', shell=True)
-res2 = subprocess.check_output('ls /vep_data', shell=True)
-print(res1.decode().split('\n'), res2.decode().split('\n'))
+cmd = 'ls /'
+print(f'Running {cmd}')
+subprocess.run(cmd, shell=True, check=False)
+print()
+
+cmd = 'ls /vep_data'
+print(f'Running {cmd}')
+subprocess.run(cmd, shell=True, check=False)
+print()
 
 vcf_path = 'gs://playground-au/seqr/vcf/seqr.vcf.gz'
 mt = hl.import_vcf(
@@ -34,5 +40,5 @@ def annotate_old_and_split_multi_hts(mt):
 
 mt = annotate_old_and_split_multi_hts(mt)
 
-mt = hl.vep(mt, block_size=1000)
+mt = hl.vep(mt, block_size=1000, config='/vep_data/vep-gcloud.json')
 mt.entries().show()
