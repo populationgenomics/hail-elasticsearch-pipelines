@@ -1,4 +1,4 @@
-VERSION := v1gvcf
+VERSION := v1_1
 
 .PHONY: package
 package:
@@ -25,15 +25,15 @@ run_test:
 	analysis-runner \
 	--dataset seqr \
 	--access-level test \
-	--output-dir "gs://cpg-seqr-test/seqr_$(VERSION)/hail" \
+	--output-dir "gs://cpg-seqr-test-tmp/seqr_$(VERSION)/hail" \
 	--description "test seqr loader - batch small1" \
 	batch_seqr_loader/batch_workflow.py \
-	--gvcf-bucket gs://cpg-seqr-test/gvcf/small1 \
-	--cram-bucket gs://cpg-seqr-test/cram \
+	--gvcf-bucket "gs://cpg-seqr-test/gvcf/small1" \
+	--cram-bucket "gs://cpg-seqr-test/cram" \
 	--dataset seqr \
-	--work-bucket "gs://cpg-seqr-test/seqr_$(VERSION)/work" \
-	--dest-mt-path "gs://cpg-seqr-test/seqr_$(VERSION)/output/annotated.mt" \
-	--genomicsdb-bucket gs://cpg-seqr-test/seqr_$(VERSION)/genomicsdb \
+	--work-bucket "gs://cpg-seqr-test-tmp/seqr_$(VERSION)/work" \
+	--dest-mt-path "gs://cpg-seqr-test-tmp/seqr_$(VERSION)/output/annotated.mt" \
+	--genomicsdb-bucket "gs://cpg-seqr-test-tmp/seqr_$(VERSION)/genomicsdb" \
 	--keep-scratch \
 	--reuse
 
@@ -42,14 +42,14 @@ run_test_extend:
 	analysis-runner \
 	--dataset seqr \
 	--access-level test \
-	--output-dir "gs://cpg-seqr-test/seqr_$(VERSION)/hail" \
+	--output-dir "gs://cpg-seqr-test-tmp/seqr_$(VERSION)/hail" \
 	--description "test seqr loader - extend with batch small2" \
 	batch_seqr_loader/batch_workflow.py \
-	--gvcf-bucket gs://cpg-seqr-test/gvcf/small2 \
-	--ped-file gs://cpg-seqr-test/gvcf/small2/samples.ped \
+	--gvcf-bucket "gs://cpg-seqr-test/gvcf/small2" \
+	--ped-file "gs://cpg-seqr-test/gvcf/small2/samples.ped" \
 	--dataset seqr \
-	--work-bucket "gs://cpg-seqr-test/seqr_$(VERSION)/work-withsmall2" \
-	--dest-mt-path "gs://cpg-seqr-test/seqr_$(VERSION)/output/annotated-withsmall2.mt" \
-	--genomicsdb-bucket gs://cpg-seqr-test/seqr_$(VERSION)/genomicsdb \
+	--work-bucket "gs://cpg-seqr-test-tmp/seqr_$(VERSION)/work-withsmall2" \
+	--dest-mt-path "gs://cpg-seqr-test-tmp/seqr_$(VERSION)/output/annotated-withsmall2.mt" \
+	--genomicsdb-bucket "gs://cpg-seqr-test-tmp/seqr_$(VERSION)/genomicsdb" \
 	--keep-scratch \
 	--reuse

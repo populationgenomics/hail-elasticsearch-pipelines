@@ -7,6 +7,7 @@ into a matrix table, which annotates and prepares to load into ES.
 
 import logging
 from typing import Optional, List
+from os.path import join
 
 import click
 import hail as hl
@@ -15,6 +16,8 @@ from lib.model.seqr_mt_schema import SeqrVariantsAndGenotypesSchema
 from hail_scripts.v02.utils.elasticsearch_client import ElasticsearchClient
 
 logger = logging.getLogger()
+
+SEQR_REF_BUCKET = 'gs://seqr-reference-data'
 
 
 @click.command()
@@ -31,7 +34,7 @@ logger = logging.getLogger()
 )
 @click.option(
     '--bucket',
-    'bucket',
+    'work_bucket',
     required=True,
 )
 @click.option('--genome-version', 'genome_version', default='GRCh38')
@@ -40,14 +43,14 @@ logger = logging.getLogger()
     'reference_path',
     required=True,
     help='Path to the Hail table storing the reference variants.',
-    default='gs://cpg-seqr-reference-data/GRCh38/all_reference_data/v2/combined_reference_data_grch38-2.0.3.ht',
+    default=f'{SEQR_REF_BUCKET}/GRCh38/all_reference_data/v2/combined_reference_data_grch38-2.0.3.ht',
 )
 @click.option(
     '--clinvar-ht',
     'clinvar_path',
     required=True,
     help='Path to the Hail table storing the clinvar variants.',
-    default='gs://cpg-seqr-reference-data/GRCh38/clinvar/clinvar.GRCh38.2020-06-15.ht',
+    default=f'{SEQR_REF_BUCKET}/GRCh38/clinvar/clinvar.GRCh38.2020-06-15.ht',
 )
 @click.option(
     '--hgmd-ht',
@@ -56,9 +59,6 @@ logger = logging.getLogger()
     # default='gs://seqr-reference-data-private/GRCh38/HGMD/hgmd_pro_2018.4_hg38_without_db_field.vds'
 )
 @click.option('--disable-validation', 'disable_validation', is_flag=True)
-@click.option(
-    '--sample-type', 'sample_type', type=click.Choice(['WGS', 'WES']), default='WGS'
-)
 @click.option(
     '--remap-tsv',
     'remap_path',
@@ -69,19 +69,25 @@ logger = logging.getLogger()
     'subset_path',
     help='Path to a TSV file with one column of sample IDs: s.',
 )
+@click.option(
+    '--make-checkpoints',
+    'make_checkpoints',
+    is_flag=True,
+    help='Create checkpoints for intermediate matrix tables',
+)
 @click.option('--vep-block-size', 'vep_block_size')
 def main(
     source_paths: List[str],
     dest_path: str,
-    bucket: str,
+    work_bucket: str,
     genome_version: str,
     reference_path: str,
     clinvar_path: str,
     hgmd_path: Optional[str],
     disable_validation: bool,
-    sample_type: str,
-    remap_path: str = None,  # pylint: disable=unused-argument
-    subset_path: str = None,  # pylint: disable=unused-argument
+    remap_path: str,
+    subset_path: str,
+    make_checkpoints: bool = False,
     vep_block_size: Optional[int] = None,
 ):  # pylint: disable=missing-function-docstring
     logger.info('Starting the seqr_load pipeline')
@@ -89,29 +95,32 @@ def main(
     mt = import_vcf(source_paths, genome_version)
     mt = annotate_old_and_split_multi_hts(mt)
     if not disable_validation:
-        validate_mt(mt, sample_type)
+        validate_mt(mt, sample_type='WGS')
     if remap_path:
         mt = remap_sample_ids(mt, remap_path)
     if subset_path:
         mt = subset_samples_and_variants(mt, subset_path)
     if genome_version == '38':
         mt = add_37_coordinates(mt)
-        mt.write(f'{bucket}/add_37_coordinates.mt', overwrite=True)
+        if make_checkpoints:
+            mt.write(join(work_bucket, 'add_37_coordinates.mt'), overwrite=True)
 
     mt = hl.vep(mt, block_size=vep_block_size or 1000)
-    mt.write(f'{bucket}/run_vep.mt', overwrite=True)
+    if make_checkpoints:
+        mt.write(join(work_bucket, 'run_vep.mt'), overwrite=True)
 
     ref_data = hl.read_table(reference_path)
     clinvar = hl.read_table(clinvar_path)
     hgmd = hl.read_table(hgmd_path) if hgmd_path else None
 
     mt = compute_annotated_vcf(mt, ref_data=ref_data, clinvar=clinvar, hgmd=hgmd)
-    mt.write(f'{bucket}/compute_annotated_vcf.mt', overwrite=True)
+    if make_checkpoints:
+        mt.write(join(work_bucket, 'compute_annotated_vcf.mt'), overwrite=True)
 
     mt = mt.annotate_globals(
         sourceFilePath=','.join(source_paths),
         genomeVersion=genome_version,
-        sampleType=sample_type,
+        sampleType='WGS',
         hail_version=hl.version(),
     )
 
