@@ -562,7 +562,7 @@ def _add_haplotype_caller_job(
     j = b.new_job('HaplotypeCaller')
     j.image(GATK_CONTAINER)
     j.cpu(2)
-    mem_gb = 16
+    mem_gb = 64
     j.memory(f'{mem_gb}G')
     j.storage(f'{disk_size}G')
     j.declare_resource_group(
