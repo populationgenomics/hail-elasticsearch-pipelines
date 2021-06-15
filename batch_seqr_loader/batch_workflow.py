@@ -199,13 +199,13 @@ def main(
     )
     df = pd.read_csv(local_somalier_results, delimiter='\t')
     mismathced = (
-        (df['sex'] == 2 & df['original_pedigree_sex'] != 'female') | 
-        (df['sex'] == 1 & df['original_pedigree_sex'] != 'male')
+        (df['sex'] == 2) & (df['original_pedigree_sex'] != 'female') | 
+        (df['sex'] == 1) & (df['original_pedigree_sex'] != 'male')
     )
     if mismathced.any():
         logger.error(
-            f'Found samples with mismatched sex: {df[mismathced].s}. '
-            f'Review somalier results for more information: {somalier_html_path}'
+            f'Found samples with mismatched sex: {df[mismathced].sample_id}. '
+            f'Review the somalier results for more information: {somalier_html_path}'
         )
         return
         
