@@ -381,7 +381,7 @@ def _make_genotype_jobs(
     reference: hb.ResourceGroup,
     work_bucket: str,  # pylint: disable=unused-argument
     overwrite: bool,  # pylint: disable=unused-argument
-    depends_on: List[Job],
+    depends_on: Optional[List[Job]],
 ) -> Tuple[List[Job], pd.DataFrame]:
     """
     Takes all samples with a 'file' of 'type'='bam' in `samples_df`,
@@ -698,7 +698,7 @@ def _add_split_intervals_job(
 def _add_haplotype_caller_job(
     b: hb.Batch,
     bam_fpath: str,
-    depends_on: List[Job],
+    depends_on: Optional[List[Job]],
     interval: hb.ResourceFile,
     reference: hb.ResourceGroup,
     sample_name: str,
