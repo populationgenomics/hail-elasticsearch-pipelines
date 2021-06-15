@@ -52,7 +52,7 @@ run_test_extend:
 	--reuse
 
 .PHONY: run_full_family
-run_test:
+run_full_family:
 	analysis-runner \
 	--dataset seqr \
 	--access-level test \

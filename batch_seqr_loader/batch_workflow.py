@@ -315,15 +315,18 @@ def _somalier(
     if depends_on:
         j.depends_on(extract_jobs)
 
-    print('Sample names: ' + str(samples_df['s']))
+    print('Sample names: ' + str(list(samples_df['s'])))
     relate_input = b.read_input_group(
-        **{sn: join(fingerprints_bucket, f'{sn}.somalier') for sn in samples_df['s']}
+        **{
+            sn: join(fingerprints_bucket, f'{sn}.somalier')
+            for sn in list(samples_df['s'])
+        }
     )
     j.command(
         f"""set -e
         
         somalier relate \\
-        {' '.join(relate_input)} \\
+        {' '.join(relate_input[sn] for sn in samples_df['s'])} \\
         --ped {ped_file} \\
         -o related
         
