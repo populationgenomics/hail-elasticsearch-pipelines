@@ -331,6 +331,7 @@ def _somalier(
         --ped samples.ped \\
         -o related
         
+        ls
         mv related.html {j.output_html}
         mv related.groups.tsv {j.output_groups}
         mv related.pairs.tsv {j.output_pairs}
