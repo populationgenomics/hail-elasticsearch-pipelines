@@ -286,7 +286,7 @@ def _somalier(
             j.memory(f'8G')
             j.storage(f'10G')
             if depends_on:
-                j.depends_on(depends_on)
+                j.depends_on(*depends_on)
 
             input_file = b.read_input_group(
                 base=input_path,
@@ -312,7 +312,7 @@ def _somalier(
     j.image(SOMALIER_CONTAINER)
     j.memory(f'8G')
     j.storage(f'10G')
-    j.depends_on(extract_jobs)
+    j.depends_on(*extract_jobs)
 
     print('Sample names: ' + str(list(samples_df['s'])))
     relate_input = b.read_input_group(
@@ -470,7 +470,7 @@ def _make_joint_genotype_jobs(
             output_vcf_path=output_vcf_path,
         )
         if import_gvcfs_job:
-            genotype_vcf_job.depends_on(import_gvcfs_job)
+            genotype_vcf_job.depends_on(*import_gvcfs_job)
 
         genotype_vcf_jobs.append(genotype_vcf_job)
         genotyped_vcfs.append(genotype_vcf_job.output_vcf)
@@ -714,7 +714,7 @@ def _add_haplotype_caller_job(
         }
     )
     if depends_on:
-        j.depends_on(depends_on)
+        j.depends_on(*depends_on)
 
     j.command(
         f"""set -e
