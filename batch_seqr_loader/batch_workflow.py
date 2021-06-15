@@ -218,6 +218,14 @@ def main(
         )
 
     b = hb.Batch('Seqr loader', backend=backend)
+
+    reference = b.read_input_group(
+        base=REF_FASTA,
+        fai=REF_FASTA + '.fai',
+        dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
+        + '.dict',
+    )
+
     # realign_bam_jobs = _make_realign_bam_jobs(
     #     b=b,
     #     samples_df=samples_df,
