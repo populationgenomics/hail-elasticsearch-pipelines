@@ -315,6 +315,7 @@ def _somalier(
     if depends_on:
         j.depends_on(extract_jobs)
 
+    print('Sample names: ' + str(samples_df['s']))
     relate_input = b.read_input_group(
         **{sn: join(fingerprints_bucket, f'{sn}.somalier') for sn in samples_df['s']}
     )
