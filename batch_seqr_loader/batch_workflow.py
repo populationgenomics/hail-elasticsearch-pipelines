@@ -208,9 +208,14 @@ def main(
     if mismathced.any():
         logger.error(
             f'Found samples with mismatched sex: {df[mismathced].sample_id}. '
-            f'Review the somalier results for more information: {somalier_html_path}'
+            f'Review the somalier results for more detail: {somalier_html_path}'
         )
         return
+    else:
+        logger.error(
+            f'All sample sex match the provided one. '
+            f'Review the somalier results for more detail: {somalier_html_path}'
+        )
 
     b = hb.Batch('Seqr loader', backend=backend)
     # realign_bam_jobs = _make_realign_bam_jobs(
@@ -593,7 +598,19 @@ def find_inputs(
         subprocess.run(
             f'gsutil cp {ped_fpath} {local_ped_fpath}', check=False, shell=True
         )
-        df = pd.read_csv(local_ped_fpath, delimiter='\t')
+        df = pd.read_csv(
+            local_ped_fpath,
+            delimiter='\t',
+            comment='Family.ID',
+            names=[
+                'Family.ID',
+                'Individual.ID',
+                'Paternal.ID',
+                'Maternal.ID',
+                'Gender',
+                'Phenotype',
+            ],
+        )
         df = df.set_index('Individual.ID', drop=False)
         df = df.rename(columns={'Individual.ID': 's'})
         ped_snames = list(df['s'])
