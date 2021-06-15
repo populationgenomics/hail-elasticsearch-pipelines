@@ -312,8 +312,7 @@ def _somalier(
     j.image(SOMALIER_CONTAINER)
     j.memory(f'8G')
     j.storage(f'10G')
-    if depends_on:
-        j.depends_on(extract_jobs)
+    j.depends_on(extract_jobs)
 
     print('Sample names: ' + str(list(samples_df['s'])))
     relate_input = b.read_input_group(
