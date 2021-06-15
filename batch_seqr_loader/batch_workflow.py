@@ -596,12 +596,13 @@ def find_inputs(
     if ped_fpath:
         local_ped_fpath = join(local_tmp_dir, basename(ped_fpath))
         subprocess.run(
-            f'gsutil cp {ped_fpath} {local_ped_fpath}', check=False, shell=True
+            f'gsutil cat {ped_fpath} | grep -v ^Family.ID > {local_ped_fpath}',
+            check=False,
+            shell=True,
         )
         df = pd.read_csv(
             local_ped_fpath,
             delimiter='\t',
-            comment='Family.ID',
             names=[
                 'Family.ID',
                 'Individual.ID',
