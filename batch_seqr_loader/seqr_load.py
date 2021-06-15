@@ -17,7 +17,7 @@ from hail_scripts.v02.utils.elasticsearch_client import ElasticsearchClient
 
 logger = logging.getLogger()
 
-SEQR_REF_BUCKET = 'gs://seqr-reference-data'
+SEQR_REF_BUCKET = 'gs://cpg-seqr-reference-data'
 
 
 @click.command()
