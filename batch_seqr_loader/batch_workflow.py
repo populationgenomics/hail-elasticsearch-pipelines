@@ -539,24 +539,25 @@ def find_inputs(
                     pass
 
     for input_type, fpaths in found_files_by_type.items():
-        assert input_type in ['gvcf', 'bam', 'cram'], input_type
         for fp in fpaths:
-            if input_type == 'gvcf':
-                index = fp + '.tbi'
+            index = fp + '.tbi'
+            if fp.endswith('.g.vcf.gz'):
                 if not file_exists(index):
                     logger.critical(f'Not found TBI index for file {fp}')
-            elif input_type == 'bam':
+            elif fp.endswith('.bam'):
                 index = fp + '.bai'
                 if not file_exists(index):
                     index = re.sub('.bam$', '.bai', fp)
                     if not file_exists(index):
                         logger.critical(f'Not found BAI index for file {fp}')
-            else:
+            elif fp.endswith('.cram'):
                 index = fp + '.crai'
                 if not file_exists(index):
                     index = re.sub('.cram$', '.crai', fp)
                     if not file_exists(index):
                         logger.critical(f'Not found CRAI index for file {fp}')
+            else:
+                logger.critical(f'Unrecognised input file extention {fp}')
             found_indices_by_type[input_type].append(index)
 
     def _get_base_name(file_path):
