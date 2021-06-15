@@ -323,10 +323,12 @@ def _somalier(
     )
     j.command(
         f"""set -e
-        
+
+        cat {ped_file} | grep -v Family.ID > samples.ped 
+
         somalier relate \\
         {' '.join(relate_input[sn] for sn in samples_df['s'])} \\
-        --ped {ped_file} \\
+        --ped samples.ped \\
         -o related
         
         mv related.html {j.output_html}
