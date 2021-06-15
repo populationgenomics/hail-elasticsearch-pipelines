@@ -160,7 +160,7 @@ def main(
         billing_project=billing_project,
         bucket=hail_bucket.replace('gs://', ''),
     )
-    b = hb.Batch('Seqr loader', backend=backend)
+    b = hb.Batch('Somalier check', backend=backend)
 
     local_tmp_dir = tempfile.mkdtemp()
 
@@ -179,8 +179,7 @@ def main(
         + '.dict',
     )
     
-    fingerprints_bucket = join(data_bucket, 'fingerprints')
-    somalier_job = _somalier(
+    somalier_job, somalier_html_path, somalier_tsv_path = _somalier(
         b,
         samples_df=samples_df,
         reference=reference,
@@ -188,14 +187,29 @@ def main(
         ped_file=b.read_input(ped_fpath),
         work_bucket=work_bucket,
         overwrite=overwrite,
-        fingerprints_bucket=fingerprints_bucket,
+        fingerprints_bucket=join(data_bucket, 'fingerprints'),
     )
 
     logger.info('Running relatedness checks before processing with the rest of the pipeline')
     b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch)
     
-    somalier_results = join(fingerprints_bucket, 'related.pairs.tsv')
-
+    local_somalier_results = join(local_tmp_dir, 'somalier.tsv')
+    subprocess.run(
+        f'gsutil cp {somalier_tsv_path} {local_somalier_results}', check=False, shell=True
+    )
+    df = pd.read_csv(local_somalier_results, delimiter='\t')
+    mismathced = (
+        (df['sex'] == 2 & df['original_pedigree_sex'] != 'female') | 
+        (df['sex'] == 1 & df['original_pedigree_sex'] != 'male')
+    )
+    if mismathced.any():
+        logger.error(
+            f'Found samples with mismatched sex: {df[mismathced].s}. '
+            f'Review somalier results for more information: {somalier_html_path}'
+        )
+        return
+        
+    b = hb.Batch('Seqr loader', backend=backend)
     # realign_bam_jobs = _make_realign_bam_jobs(
     #     b=b,
     #     samples_df=samples_df,
@@ -218,7 +232,6 @@ def main(
         reference=reference,
         work_bucket=work_bucket,
         overwrite=overwrite,
-        depends_on=[somalier_job],
     )
 
     joint_genotype_job, gathered_vcf_path = _make_joint_genotype_jobs(
@@ -278,7 +291,7 @@ def _somalier(
     overwrite: bool,  # pylint: disable=unused-argument
     fingerprints_bucket: str,
     depends_on: Optional[List[Job]] = None,
-) -> Job:
+) -> Tuple[Job, str, str]:
     extract_jobs = []
     for sn, input_path, input_index in zip(
         samples_df['s'], samples_df['file'], samples_df['index']
@@ -335,7 +348,8 @@ def _somalier(
         somalier relate \\
         {' '.join(relate_input[sn] for sn in samples_df['s'])} \\
         --ped samples.ped \\
-        -o related
+        -o related \\
+        --infer
 
         ls
         mv related.html {j.output_html}
@@ -345,17 +359,19 @@ def _somalier(
     )
 
     sample_hash = hash_sample_names(samples_df['s'])
+    somalier_html_path = join(fingerprints_bucket, sample_hash, f'somalier.html')
+    somalier_tsv_path = join(fingerprints_bucket, sample_hash, f'somalier.samples.tsv')
     b.write_output(
-        j.output_html, join(fingerprints_bucket, sample_hash, f'somalier.html')
+        j.output_html, somalier_html_path
     )
     b.write_output(
         j.output_pairs, join(fingerprints_bucket, sample_hash, f'somalier.pairs.tsv')
     )
     b.write_output(
         j.output_samples,
-        join(fingerprints_bucket, sample_hash, f'somalier.samples.tsv'),
+        somalier_tsv_path,
     )
-    return j
+    return j, somalier_html_path, somalier_tsv_path
 
 
 def _make_genotype_jobs(
