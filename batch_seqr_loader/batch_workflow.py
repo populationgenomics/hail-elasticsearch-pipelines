@@ -302,7 +302,7 @@ def _somalier(
                 -f {reference.base} \\
                 {input_file['base']}
                 
-                ln -s extracted/{sn}.somalier {j.output_file}
+                mv extracted/{sn}.somalier {j.output_file}
               """
             )
             b.write_output(j.output_file, fingerprint_file)
@@ -330,10 +330,10 @@ def _somalier(
         --ped {ped_file} \\
         -o related
         
-        ln -s related.html {j.output_html}
-        ln -s related.groups.tsv {j.output_groups}
-        ln -s related.pairs.tsv {j.output_pairs}
-        ln -s related.samples.tsv {j.output_samples}
+        mv related.html {j.output_html}
+        mv related.groups.tsv {j.output_groups}
+        mv related.pairs.tsv {j.output_pairs}
+        mv related.samples.tsv {j.output_samples}
       """
     )
 
