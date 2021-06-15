@@ -178,8 +178,8 @@ def main(
         dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
         + '.dict',
     )
-    
-    somalier_job, somalier_html_path, somalier_tsv_path = _somalier(
+
+    _, somalier_html_path, somalier_tsv_path = _somalier(
         b,
         samples_df=samples_df,
         reference=reference,
@@ -190,25 +190,28 @@ def main(
         fingerprints_bucket=join(data_bucket, 'fingerprints'),
     )
 
-    logger.info('Running relatedness checks before processing with the rest of the pipeline')
-    b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch)
-    
+    logger.info(
+        'Running relatedness checks before processing with the rest of the pipeline'
+    )
+    b.run(wait=True, dry_run=dry_run, delete_scratch_on_exit=not keep_scratch)
+
     local_somalier_results = join(local_tmp_dir, 'somalier.tsv')
     subprocess.run(
-        f'gsutil cp {somalier_tsv_path} {local_somalier_results}', check=False, shell=True
+        f'gsutil cp {somalier_tsv_path} {local_somalier_results}',
+        check=False,
+        shell=True,
     )
     df = pd.read_csv(local_somalier_results, delimiter='\t')
-    mismathced = (
-        (df['sex'] == 2) & (df['original_pedigree_sex'] != 'female') | 
-        (df['sex'] == 1) & (df['original_pedigree_sex'] != 'male')
-    )
+    mismathced = (df['sex'] == 2) & (df['original_pedigree_sex'] != 'female') | (
+        df['sex'] == 1
+    ) & (df['original_pedigree_sex'] != 'male')
     if mismathced.any():
         logger.error(
             f'Found samples with mismatched sex: {df[mismathced].sample_id}. '
             f'Review the somalier results for more information: {somalier_html_path}'
         )
         return
-        
+
     b = hb.Batch('Seqr loader', backend=backend)
     # realign_bam_jobs = _make_realign_bam_jobs(
     #     b=b,
@@ -361,9 +364,7 @@ def _somalier(
     sample_hash = hash_sample_names(samples_df['s'])
     somalier_html_path = join(fingerprints_bucket, sample_hash, f'somalier.html')
     somalier_tsv_path = join(fingerprints_bucket, sample_hash, f'somalier.samples.tsv')
-    b.write_output(
-        j.output_html, somalier_html_path
-    )
+    b.write_output(j.output_html, somalier_html_path)
     b.write_output(
         j.output_pairs, join(fingerprints_bucket, sample_hash, f'somalier.pairs.tsv')
     )
