@@ -831,10 +831,11 @@ def _add_import_gvcfs_job(
         untar_genomicsdb_cmd = ''
         job_name = 'Creating GenomicsDB'
 
+        samples_to_add = set(new_samples_df.s)
         samples_to_add_df = new_samples_df
-        samples_will_be_in_db = set(new_samples_df.s)
+        samples_will_be_in_db = samples_to_add
 
-    if not samples_to_add_df:
+    if not samples_to_add:
         return None, samples_will_be_in_db
 
     sample_map_fpath = join(work_bucket, 'work', 'sample_name.csv')
