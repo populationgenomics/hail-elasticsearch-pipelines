@@ -404,6 +404,7 @@ def _make_genotype_jobs(
                 )
             )
         samples_df.loc[sn, 'file'] = output_gvcf_path
+        samples_df.loc[sn, 'index'] = output_gvcf_path + '.tbi'
         samples_df.loc[sn, 'type'] = 'gvcf'
 
     return merge_gvcf_jobs, samples_df
@@ -520,6 +521,7 @@ def find_inputs(
         bam_to_realign=bam_to_realign_buckets,
     )
     found_files_by_type: Dict[str, List[str]] = {t: [] for t in input_buckets_by_type}
+    found_indices_by_type: Dict[str, List[str]] = {t: [] for t in input_buckets_by_type}
 
     for input_type, buckets in input_buckets_by_type.items():
         patterns = ['*.g.vcf.gz'] if input_type == 'gvcf' else ['*.bam', '*.cram']
@@ -535,6 +537,27 @@ def find_inputs(
                     )
                 except subprocess.CalledProcessError:
                     pass
+
+    for input_type, fpaths in found_files_by_type.items():
+        assert input_type in ['gvcf', 'bam', 'cram'], input_type
+        for fp in fpaths:
+            if input_type == 'gvcf':
+                index = fp + '.tbi'
+                if not file_exists(index):
+                    logger.critical(f'Not found TBI index for file {fp}')
+            elif input_type == 'bam':
+                index = fp + '.bai'
+                if not file_exists(index):
+                    index = re.sub('.bam$', '.bai', fp)
+                    if not file_exists(index):
+                        logger.critical(f'Not found BAI index for file {fp}')
+            else:
+                index = fp + '.crai'
+                if not file_exists(index):
+                    index = re.sub('.cram$', '.crai', fp)
+                    if not file_exists(index):
+                        logger.critical(f'Not found CRAI index for file {fp}')
+            found_indices_by_type[input_type].append(index)
 
     def _get_base_name(file_path):
         return re.sub('(.bam|.cram|.g.vcf.gz)$', '', os.path.basename(file_path))
@@ -570,8 +593,10 @@ def find_inputs(
                 logging.warning(f'No files found for the sample {ped_sname}')
 
         # Second, checking the match of input files to PED sample names, and filling a dict
-        for input_type, file_paths in found_files_by_type.items():
-            for fp in file_paths:
+        for input_type in found_files_by_type:
+            for fp, index in zip(
+                found_files_by_type[input_type], found_indices_by_type[input_type]
+            ):
                 input_sname = _get_base_name(fp)
                 matching_sn = [sn for sn in ped_snames if sn == input_sname]
                 if len(matching_sn) > 1:
@@ -584,15 +609,19 @@ def find_inputs(
                 else:
                     df.loc[matching_sn[0], 'type'] = input_type
                     df.loc[matching_sn[0], 'file'] = fp
+                    df.loc[matching_sn[0], 'index'] = index
 
         df = df[df.file.notnull()]
 
     else:
         data: Dict[str, List] = dict(s=[], file=[], type=[])
-        for input_type, file_paths in found_files_by_type.items():
-            for fp in file_paths:
+        for input_type in found_files_by_type:
+            for fp, index in zip(
+                found_files_by_type[input_type], found_indices_by_type[input_type]
+            ):
                 data['s'].append(_get_base_name(fp))
                 data['file'].append(fp)
+                data['index'].append(index)
                 data['type'].append(input_type)
 
         df = pd.DataFrame(data=data).set_index('s', drop=False)
