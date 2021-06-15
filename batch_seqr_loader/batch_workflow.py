@@ -596,7 +596,7 @@ def find_inputs(
     if ped_fpath:
         local_ped_fpath = join(local_tmp_dir, basename(ped_fpath))
         subprocess.run(
-            f'gsutil cat {ped_fpath} | grep -v ^Family.ID > {local_ped_fpath}',
+            f'gsutil cat {ped_fpath} | cut -f1-6 | grep -v ^Family.ID > {local_ped_fpath}',
             check=False,
             shell=True,
         )
@@ -612,8 +612,8 @@ def find_inputs(
                 'Phenotype',
             ],
         )
-        df = df.set_index('Individual.ID', drop=False)
         df = df.rename(columns={'Individual.ID': 's'})
+        df = df.set_index('s', drop=False)
         ped_snames = list(df['s'])
 
         # Checking that file base names have a 1-to-1 match with the samples in PED
