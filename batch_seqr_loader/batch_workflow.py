@@ -381,7 +381,7 @@ def _make_genotype_jobs(
     reference: hb.ResourceGroup,
     work_bucket: str,  # pylint: disable=unused-argument
     overwrite: bool,  # pylint: disable=unused-argument
-    depends_on: Optional[List[Job]],
+    depends_on: Optional[List[Job]] = None,
 ) -> Tuple[List[Job], pd.DataFrame]:
     """
     Takes all samples with a 'file' of 'type'='bam' in `samples_df`,
@@ -411,12 +411,12 @@ def _make_genotype_jobs(
                     _add_haplotype_caller_job(
                         b,
                         bam_fpath,
-                        depends_on=depends_on,
                         interval=intervals[f'interval_{idx}'],
                         reference=reference,
                         sample_name=sn,
                         interval_idx=idx,
                         number_of_intervals=NUMBER_OF_INTERVALS,
+                        depends_on=depends_on,
                     )
                 )
             merge_gvcf_jobs.append(
@@ -698,12 +698,12 @@ def _add_split_intervals_job(
 def _add_haplotype_caller_job(
     b: hb.Batch,
     bam_fpath: str,
-    depends_on: Optional[List[Job]],
     interval: hb.ResourceFile,
     reference: hb.ResourceGroup,
     sample_name: str,
     interval_idx: Optional[int] = None,
     number_of_intervals: int = 1,
+    depends_on: Optional[List[Job]] = None,
 ) -> Job:
     """
     Run HaplotypeCaller on an input BAM or CRAM, and output GVCF
