@@ -178,7 +178,8 @@ def main(
         dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
         + '.dict',
     )
-
+    
+    fingerprints_bucket = join(data_bucket, 'fingerprints')
     somalier_job = _somalier(
         b,
         samples_df=samples_df,
@@ -187,8 +188,13 @@ def main(
         ped_file=b.read_input(ped_fpath),
         work_bucket=work_bucket,
         overwrite=overwrite,
-        fingerprints_bucket=join(data_bucket, 'fingerprints'),
+        fingerprints_bucket=fingerprints_bucket,
     )
+
+    logger.info('Running relatedness checks before processing with the rest of the pipeline')
+    b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch)
+    
+    somalier_results = join(fingerprints_bucket, 'related.pairs.tsv')
 
     # realign_bam_jobs = _make_realign_bam_jobs(
     #     b=b,
@@ -330,7 +336,7 @@ def _somalier(
         {' '.join(relate_input[sn] for sn in samples_df['s'])} \\
         --ped samples.ped \\
         -o related
-        
+
         ls
         mv related.html {j.output_html}
         mv related.pairs.tsv {j.output_pairs}
@@ -341,9 +347,6 @@ def _somalier(
     sample_hash = hash_sample_names(samples_df['s'])
     b.write_output(
         j.output_html, join(fingerprints_bucket, sample_hash, f'somalier.html')
-    )
-    b.write_output(
-        j.output_groups, join(fingerprints_bucket, sample_hash, f'somalier.groups.tsv')
     )
     b.write_output(
         j.output_pairs, join(fingerprints_bucket, sample_hash, f'somalier.pairs.tsv')
