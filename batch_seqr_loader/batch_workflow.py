@@ -54,7 +54,8 @@ DATAPROC_PACKAGES = [
 ]
 
 logger = logging.getLogger('seqr-loader')
-logger.setLevel('INFO')
+logging.basicConfig(format="%(levelname)s (%(name)s %(lineno)s): %(message)s")
+logger.setLevel(logging.INFO)
 
 
 @click.command()
@@ -363,7 +364,7 @@ EOT
 python check_pedigree.py \
 --somalier-samples {relate_j.output_samples} \
 --somalier-pairs {relate_j.output_pairs} \
---somalier-html {relate_j.output_html}
+--somalier-html {somalier_html_path}
     """
     )
 

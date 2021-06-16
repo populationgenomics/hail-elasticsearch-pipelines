@@ -15,7 +15,9 @@ import hail as hl
 from lib.model.seqr_mt_schema import SeqrVariantsAndGenotypesSchema
 from hail_scripts.v02.utils.elasticsearch_client import ElasticsearchClient
 
-logger = logging.getLogger()
+logger = logging.getLogger('seqr-load')
+logging.basicConfig(format="%(levelname)s (%(name)s %(lineno)s): %(message)s")
+logger.setLevel(logging.INFO)
 
 SEQR_REF_BUCKET = 'gs://cpg-seqr-reference-data'
 
