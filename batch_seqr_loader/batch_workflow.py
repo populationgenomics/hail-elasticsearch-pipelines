@@ -476,7 +476,7 @@ def _make_joint_genotype_jobs(
             output_vcf_path=output_vcf_path,
         )
         if import_gvcfs_job:
-            genotype_vcf_job.depends_on(*import_gvcfs_job)
+            genotype_vcf_job.depends_on(import_gvcfs_job)
 
         genotype_vcf_jobs.append(genotype_vcf_job)
         genotyped_vcfs.append(genotype_vcf_job.output_vcf)
