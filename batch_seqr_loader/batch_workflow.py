@@ -325,7 +325,7 @@ def _pedigree_checks(
         cat {ped_file} | grep -v Family.ID > samples.ped 
 
         somalier relate \\
-        {' '.join(j.ouptut_file for j in extract_jobs)} \\
+        {' '.join(j.output_file for j in extract_jobs)} \\
         --ped samples.ped \\
         -o related \\
         --infer
