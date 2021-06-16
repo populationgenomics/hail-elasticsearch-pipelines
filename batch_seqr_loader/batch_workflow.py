@@ -360,7 +360,10 @@ def _pedigree_checks(
 cat <<EOT >> check_pedigree.py
 {script}
 EOT
-python check_pedigree.py --somalier-prefix {prefix}
+python check_pedigree.py \
+--somalier-samples {relate_j.output_samples} \
+--somalier-pairs {relate_j.somalier_pairs_path} \
+--somalier-html {relate_j.output_html}
     """
     )
 
