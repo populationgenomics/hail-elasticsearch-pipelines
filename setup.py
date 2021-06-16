@@ -23,7 +23,6 @@ setuptools.setup(
     package_dir={'lib': 'luigi_pipeline/lib', 'lib.model': 'luigi_pipeline/lib/model'},
     include_package_data=True,
     zip_safe=False,
-    scripts=['batch_seqr_loader/seqr_load.py'],
     keywords='bioinformatics',
     classifiers=[
         'Environment :: Console',

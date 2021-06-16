@@ -32,6 +32,7 @@ GATK_CONTAINER = (
 PICARD_CONTAINER = f'us.gcr.io/broad-gotc-prod/picard-cloud:2.23.8'
 BAZAM_CONTAINER = f'australia-southeast1-docker.pkg.dev/fewgenomes/images/bazam:v2'
 SOMALIER_CONTAINER = 'brentp/somalier:latest'
+PEDDY_CONTAINER = 'quay.io/biocontainers/peddy:0.4.8--pyh5e36f6f_0'
 
 # Fixed scatter count, because we are storing a genomics DB per each interval
 NUMBER_OF_INTERVALS = 10
@@ -179,8 +180,8 @@ def main(
         + '.dict',
     )
 
-    _, somalier_html_path, somalier_tsv_path = _somalier(
-        b,
+    ped_check_j = _pedigree_checks(
+        b=b,
         samples_df=samples_df,
         reference=reference,
         sites=b.read_input(SOMALIER_SITES),
@@ -188,42 +189,6 @@ def main(
         work_bucket=work_bucket,
         overwrite=overwrite,
         fingerprints_bucket=join(data_bucket, 'fingerprints'),
-    )
-
-    logger.info(
-        'Running relatedness checks before processing with the rest of the pipeline'
-    )
-    b.run(wait=True, dry_run=dry_run, delete_scratch_on_exit=not keep_scratch)
-
-    local_somalier_results = join(local_tmp_dir, 'somalier.tsv')
-    subprocess.run(
-        f'gsutil cp {somalier_tsv_path} {local_somalier_results}',
-        check=False,
-        shell=True,
-    )
-    df = pd.read_csv(local_somalier_results, delimiter='\t')
-    mismathced = (df['sex'] == 2) & (df['original_pedigree_sex'] != 'female') | (
-        df['sex'] == 1
-    ) & (df['original_pedigree_sex'] != 'male')
-    if mismathced.any():
-        logger.error(
-            f'Found samples with mismatched sex: {df[mismathced].sample_id}. '
-            f'Review the somalier results for more detail: {somalier_html_path}'
-        )
-        return
-    else:
-        logger.error(
-            f'All sample sex match the provided one. '
-            f'Review the somalier results for more detail: {somalier_html_path}'
-        )
-
-    b = hb.Batch('Seqr loader', backend=backend)
-
-    reference = b.read_input_group(
-        base=REF_FASTA,
-        fai=REF_FASTA + '.fai',
-        dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
-        + '.dict',
     )
 
     # realign_bam_jobs = _make_realign_bam_jobs(
@@ -234,16 +199,17 @@ def main(
     #     overwrite=overwrite,
     # )
 
-    intervals = _add_split_intervals_job(
+    intervals_j = _add_split_intervals_job(
         b,
         UNPADDED_INTERVALS,
         NUMBER_OF_INTERVALS,
         REF_FASTA,
-    ).intervals
+    )
+    intervals_j.depends_on(ped_check_j)
 
     genotype_jobs, samples_df = _make_genotype_jobs(
         b=b,
-        intervals=intervals,
+        intervals=intervals_j.intervals,
         samples_df=samples_df,
         reference=reference,
         work_bucket=work_bucket,
@@ -252,7 +218,7 @@ def main(
 
     joint_genotype_job, gathered_vcf_path = _make_joint_genotype_jobs(
         b=b,
-        intervals=intervals,
+        intervals=intervals_j.intervals,
         genomicsdb_bucket=join(data_bucket, 'genomicsdb'),
         samples_df=samples_df,
         reference=reference,
@@ -297,7 +263,7 @@ def main(
 #     return []
 
 
-def _somalier(
+def _pedigree_checks(
     b: hb.Batch,
     samples_df: pd.DataFrame,
     reference: hb.ResourceGroup,
@@ -307,7 +273,13 @@ def _somalier(
     overwrite: bool,  # pylint: disable=unused-argument
     fingerprints_bucket: str,
     depends_on: Optional[List[Job]] = None,
-) -> Tuple[Job, str, str]:
+) -> Job:
+    """
+    Add somalier and peddy based jobs that infer relatedness
+    and sex, and compare that to the provided ped file, and fail
+    if anything don't match
+    """
+
     extract_jobs = []
     for sn, input_path, input_index in zip(
         samples_df['s'], samples_df['file'], samples_df['index']
@@ -343,49 +315,48 @@ def _somalier(
             b.write_output(j.output_file, fingerprint_file)
             extract_jobs.append(j)
 
-    j = b.new_job(f'Somalier relate')
-    j.image(SOMALIER_CONTAINER)
-    j.memory(f'8G')
-    j.storage(f'10G')
-    j.depends_on(*extract_jobs)
-
-    print('Sample names: ' + str(list(samples_df['s'])))
-    relate_input = b.read_input_group(
-        **{
-            sn: join(fingerprints_bucket, f'{sn}.somalier')
-            for sn in list(samples_df['s'])
-        }
-    )
-    j.command(
+    relate_j = b.new_job(f'Somalier relate')
+    relate_j.image(SOMALIER_CONTAINER)
+    relate_j.memory(f'8G')
+    relate_j.storage(f'10G')
+    relate_j.command(
         f"""set -e
 
         cat {ped_file} | grep -v Family.ID > samples.ped 
 
         somalier relate \\
-        {' '.join(relate_input[sn] for sn in samples_df['s'])} \\
+        {' '.join(j.ouptut_file for j in extract_jobs)} \\
         --ped samples.ped \\
         -o related \\
         --infer
 
         ls
-        mv related.html {j.output_html}
-        mv related.pairs.tsv {j.output_pairs}
-        mv related.samples.tsv {j.output_samples}
+        mv related.html {relate_j.output_html}
+        mv related.pairs.tsv {relate_j.output_pairs}
+        mv related.samples.tsv {relate_j.output_samples}
       """
     )
 
     sample_hash = hash_sample_names(samples_df['s'])
-    somalier_html_path = join(fingerprints_bucket, sample_hash, f'somalier.html')
-    somalier_tsv_path = join(fingerprints_bucket, sample_hash, f'somalier.samples.tsv')
-    b.write_output(j.output_html, somalier_html_path)
-    b.write_output(
-        j.output_pairs, join(fingerprints_bucket, sample_hash, f'somalier.pairs.tsv')
+    prefix = join(fingerprints_bucket, sample_hash, 'somalier')
+    somalier_html_path = f'{prefix}.html'
+    somalier_samples_path = f'{prefix}.samples.tsv'
+    somalier_pairs_path = f'{prefix}.pairs.tsv'
+    b.write_output(relate_j.output_html, somalier_html_path)
+    b.write_output(relate_j.output_samples, somalier_samples_path)
+    b.write_output(relate_j.output_pairs, somalier_pairs_path)
+
+    check_j = b.new_job(f'Check relatedness and sex')
+    check_j.image(PEDDY_CONTAINER)
+    check_j.memory(f'8G')
+    check_j.storage(f'10G')
+    check_j.command(
+        f"""set -e
+        batch_seqr_loader/check_pedigree.py --somalier-prefix {prefix}
+      """
     )
-    b.write_output(
-        j.output_samples,
-        somalier_tsv_path,
-    )
-    return j, somalier_html_path, somalier_tsv_path
+    check_j.depends_on(relate_j)
+    return check_j
 
 
 def _make_genotype_jobs(
