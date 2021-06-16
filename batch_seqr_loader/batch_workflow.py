@@ -15,10 +15,9 @@ import shutil
 import subprocess
 import tempfile
 import hashlib
-import inspect
 from collections import defaultdict
 from os.path import join, basename, dirname, abspath
-from typing import Optional, List, Tuple, Dict, Set, Iterable, Callable
+from typing import Optional, List, Tuple, Dict, Set, Iterable
 import pandas as pd
 import click
 import hailtop.batch as hb
@@ -282,11 +281,12 @@ def _pedigree_checks(
     """
 
     extract_jobs = []
+    fp_file_by_sample = dict()
     for sn, input_path, input_index in zip(
         samples_df['s'], samples_df['file'], samples_df['index']
     ):
-        fingerprint_file = join(fingerprints_bucket, f'{sn}.somalier')
-        if can_reuse(fingerprint_file, overwrite):
+        fp_file_by_sample[sn] = join(fingerprints_bucket, f'{sn}.somalier')
+        if can_reuse(fp_file_by_sample[sn], overwrite):
             extract_jobs.append(b.new_job(f'Somalier Extract, {sn} [reuse]'))
         else:
             j = b.new_job(f'Somalier extract, {sn}')
@@ -311,22 +311,24 @@ def _pedigree_checks(
                 {input_file['base']}
                 
                 mv extracted/{sn}.somalier {j.output_file}
-              """
+                """
             )
-            b.write_output(j.output_file, fingerprint_file)
+            b.write_output(j.output_file, fp_file_by_sample[sn])
             extract_jobs.append(j)
 
     relate_j = b.new_job(f'Somalier relate')
     relate_j.image(SOMALIER_CONTAINER)
     relate_j.memory(f'8G')
     relate_j.storage(f'10G')
+    relate_j.depends_on(*extract_jobs)
+    fp_files = [b.read_input(fp) for sn, fp in fp_file_by_sample.items()]
     relate_j.command(
         f"""set -e
 
         cat {ped_file} | grep -v Family.ID > samples.ped 
 
         somalier relate \\
-        {' '.join(j.output_file for j in extract_jobs)} \\
+        {' '.join(fp_files)} \\
         --ped samples.ped \\
         -o related \\
         --infer
