@@ -362,7 +362,7 @@ cat <<EOT >> check_pedigree.py
 EOT
 python check_pedigree.py \
 --somalier-samples {relate_j.output_samples} \
---somalier-pairs {relate_j.somalier_pairs_path} \
+--somalier-pairs {relate_j.output_pairs} \
 --somalier-html {relate_j.output_html}
     """
     )
