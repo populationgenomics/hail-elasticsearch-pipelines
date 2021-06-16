@@ -15,9 +15,10 @@ import shutil
 import subprocess
 import tempfile
 import hashlib
+import inspect
 from collections import defaultdict
-from os.path import join, basename, dirname
-from typing import Optional, List, Tuple, Dict, Set, Iterable
+from os.path import join, basename, dirname, abspath
+from typing import Optional, List, Tuple, Dict, Set, Iterable, Callable
 import pandas as pd
 import click
 import hailtop.batch as hb
@@ -350,11 +351,17 @@ def _pedigree_checks(
     check_j.image(PEDDY_CONTAINER)
     check_j.memory(f'8G')
     check_j.storage(f'10G')
+    with open(join(dirname(abspath(__file__)), 'check_pedigree.py')) as f:
+        script = f.read()
     check_j.command(
         f"""set -e
-        batch_seqr_loader/check_pedigree.py --somalier-prefix {prefix}
-      """
+cat <<EOT >> check_pedigree.py
+{script}
+EOT
+python check_pedigree.py --somalier-prefix {prefix}
+    """
     )
+
     check_j.depends_on(relate_j)
     return check_j
 
