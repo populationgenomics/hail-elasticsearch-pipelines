@@ -78,7 +78,7 @@ def _find_files_by_type(
     input_buckets_by_type: Dict[str, List[str]]
 ) -> Dict[str, List[str]]:
     """
-    Finds input files like .g.vcf.gz, .bam, .cram
+    Find input files like .g.vcf.gz, .bam, .cram
     """
     found_files_by_type: Dict[str, List[str]] = {t: [] for t in input_buckets_by_type}
     for input_type, buckets in input_buckets_by_type.items():
@@ -102,7 +102,10 @@ def _find_file_indices(
     found_files_by_type: Dict[str, List[str]]
 ) -> Dict[str, List[str]]:
     """
-    Finds corresponding index files ('.tbi' for '.g.vcf.gz', '.crai' for '.cram', etc)
+    Find corresponding index files. Will look for:
+    '<sample>.g.vcf.gz.tbi' for '<sample>.g.vcf.gz',
+    '<sample>.bam.bai' or '<sample>.bai' for '<sample>.bam',
+    '<sample>.cram.crai' or '<sample>.crai' for '<sample>.cram',
     """
     found_indices_by_type: Dict[str, List[str]] = {t: [] for t in found_files_by_type}
     for input_type, fpaths in found_files_by_type.items():
