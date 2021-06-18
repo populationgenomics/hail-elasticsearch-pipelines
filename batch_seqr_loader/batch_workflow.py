@@ -54,7 +54,7 @@ DATAPROC_PACKAGES = [
 ]
 
 logger = logging.getLogger('seqr-loader')
-logging.basicConfig(format="%(levelname)s (%(name)s %(lineno)s): %(message)s")
+logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
 logger.setLevel(logging.INFO)
 
 
@@ -349,7 +349,6 @@ def _pedigree_checks(
     b.write_output(relate_j.output_html, somalier_html_path)
     b.write_output(relate_j.output_samples, somalier_samples_path)
     b.write_output(relate_j.output_pairs, somalier_pairs_path)
-
     check_j = b.new_job(f'Check relatedness and sex')
     check_j.image(PEDDY_CONTAINER)
     check_j.memory(f'8G')
@@ -361,9 +360,9 @@ def _pedigree_checks(
 cat <<EOT >> check_pedigree.py
 {script}
 EOT
-python check_pedigree.py \
---somalier-samples {relate_j.output_samples} \
---somalier-pairs {relate_j.output_pairs} \
+python check_pedigree.py \\
+--somalier-samples {relate_j.output_samples} \\
+--somalier-pairs {relate_j.output_pairs} \\
 --somalier-html {somalier_html_path}
     """
     )
@@ -527,7 +526,7 @@ def find_inputs(
     ped_fpath: Optional[str] = None,
 ) -> pd.DataFrame:  # pylint disable=too-many-branches
     """
-    Read the inputs assuming a standard CPG storage structure.
+    Find input files: GVCFs, BAMs or CRAMs
     :param gvcf_buckets: buckets to find GVCF files
     :param bam_buckets: buckets to find BAM files
         (will be passed to HaplotypeCaller to produce GVCFs)
@@ -1064,13 +1063,15 @@ def can_reuse(fpath: str, overwrite: bool) -> bool:
         return True
 
 
-def hash_sample_names(samples_names: Iterable[str]) -> str:
+def hash_sample_names(sample_names: Iterable[str]) -> str:
     """
     Return a unique hash string from a from a set of strings
-    :param samples_names: set of strings
+    :param sample_names: set of strings
     :return: a string hash
     """
-    return hashlib.sha224(' '.join(sorted(samples_names)).encode()).hexdigest()
+    for sn in sample_names:
+        assert ' ' not in sn, sn
+    return hashlib.sha224(' '.join(sorted(sample_names)).encode()).hexdigest()
 
 
 if __name__ == '__main__':
