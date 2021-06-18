@@ -10,20 +10,20 @@ import json
 import logging
 import math
 import os
-import re
 import shutil
 import subprocess
 import tempfile
 import hashlib
 from collections import defaultdict
-from os.path import join, basename, dirname, abspath
-from typing import Optional, List, Tuple, Dict, Set, Iterable
+from os.path import join, dirname, abspath
+from typing import Optional, List, Tuple, Set, Iterable
 import pandas as pd
 import click
 import hailtop.batch as hb
 from analysis_runner import dataproc
 from hailtop.batch.job import Job
-from google.cloud import storage
+from find_inputs import find_inputs
+from utils import file_exists
 
 GATK_VERSION = '4.2.0.0'
 GATK_CONTAINER = (
@@ -53,7 +53,7 @@ DATAPROC_PACKAGES = [
     'gcloud',
 ]
 
-logger = logging.getLogger('seqr-loader')
+logger = logging.getLogger(__file__)
 logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
 logger.setLevel(logging.INFO)
 
@@ -518,152 +518,6 @@ def _make_joint_genotype_jobs(
     return final_gathered_vcf_job, output_vcf_path
 
 
-def find_inputs(
-    gvcf_buckets: List[str],
-    bam_buckets: List[str],
-    bam_to_realign_buckets: List[str],
-    local_tmp_dir: str,
-    ped_fpath: Optional[str] = None,
-) -> pd.DataFrame:  # pylint disable=too-many-branches
-    """
-    Find input files: GVCFs, BAMs or CRAMs
-    :param gvcf_buckets: buckets to find GVCF files
-    :param bam_buckets: buckets to find BAM files
-        (will be passed to HaplotypeCaller to produce GVCFs)
-    :param bam_to_realign_buckets: buckets to find BAM files
-        (will be re-aligned with BWA before passing to HaplotypeCaller)
-    :param ped_fpath: pedigree file
-    :param local_tmp_dir: temporary local directory
-    :return: a dataframe with the pedigree information and paths to gvcfs
-    """
-    input_buckets_by_type = dict(
-        gvcf=gvcf_buckets,
-        bam=bam_buckets,
-        bam_to_realign=bam_to_realign_buckets,
-    )
-    found_files_by_type: Dict[str, List[str]] = {t: [] for t in input_buckets_by_type}
-    found_indices_by_type: Dict[str, List[str]] = {t: [] for t in input_buckets_by_type}
-
-    for input_type, buckets in input_buckets_by_type.items():
-        patterns = ['*.g.vcf.gz'] if input_type == 'gvcf' else ['*.bam', '*.cram']
-        for ib in buckets:
-            for pattern in patterns:
-                cmd = f"gsutil ls '{join(ib, pattern)}'"
-                try:
-                    found_files_by_type[input_type].extend(
-                        line.strip()
-                        for line in subprocess.check_output(cmd, shell=True)
-                        .decode()
-                        .split()
-                    )
-                except subprocess.CalledProcessError:
-                    pass
-
-    for input_type, fpaths in found_files_by_type.items():
-        for fp in fpaths:
-            index = fp + '.tbi'
-            if fp.endswith('.g.vcf.gz'):
-                if not file_exists(index):
-                    logger.critical(f'Not found TBI index for file {fp}')
-            elif fp.endswith('.bam'):
-                index = fp + '.bai'
-                if not file_exists(index):
-                    index = re.sub('.bam$', '.bai', fp)
-                    if not file_exists(index):
-                        logger.critical(f'Not found BAI index for file {fp}')
-            elif fp.endswith('.cram'):
-                index = fp + '.crai'
-                if not file_exists(index):
-                    index = re.sub('.cram$', '.crai', fp)
-                    if not file_exists(index):
-                        logger.critical(f'Not found CRAI index for file {fp}')
-            else:
-                logger.critical(f'Unrecognised input file extention {fp}')
-            found_indices_by_type[input_type].append(index)
-
-    def _get_base_name(file_path):
-        return re.sub('(.bam|.cram|.g.vcf.gz)$', '', os.path.basename(file_path))
-
-    if ped_fpath:
-        local_ped_fpath = join(local_tmp_dir, basename(ped_fpath))
-        subprocess.run(
-            f'gsutil cat {ped_fpath} | cut -f1-6 | grep -v ^Family.ID > {local_ped_fpath}',
-            check=False,
-            shell=True,
-        )
-        df = pd.read_csv(
-            local_ped_fpath,
-            delimiter='\t',
-            names=[
-                'Family.ID',
-                'Individual.ID',
-                'Paternal.ID',
-                'Maternal.ID',
-                'Gender',
-                'Phenotype',
-            ],
-        )
-        df = df.rename(columns={'Individual.ID': 's'})
-        df = df.set_index('s', drop=False)
-        ped_snames = list(df['s'])
-
-        # Checking that file base names have a 1-to-1 match with the samples in PED
-        # First, checking the match of PED sample names to input files
-        all_input_snames = []
-        for fpaths in found_files_by_type.values():
-            all_input_snames.extend([_get_base_name(fp) for fp in fpaths])
-
-        for ped_sname in ped_snames:
-            matching_files = [
-                input_sname
-                for input_sname in all_input_snames
-                if ped_sname == input_sname
-            ]
-            if len(matching_files) > 1:
-                logging.warning(
-                    f'Multiple input files found for the sample {ped_sname}:'
-                    f'{matching_files}'
-                )
-            elif len(matching_files) == 0:
-                logging.warning(f'No files found for the sample {ped_sname}')
-
-        # Second, checking the match of input files to PED sample names, and filling a dict
-        for input_type in found_files_by_type:
-            for fp, index in zip(
-                found_files_by_type[input_type], found_indices_by_type[input_type]
-            ):
-                input_sname = _get_base_name(fp)
-                matching_sn = [sn for sn in ped_snames if sn == input_sname]
-                if len(matching_sn) > 1:
-                    logging.warning(
-                        f'Multiple samples found for the input {input_sname}:'
-                        f'{matching_sn}'
-                    )
-                elif len(matching_sn) == 0:
-                    logging.warning(f'No samples found for the input {input_sname}')
-                else:
-                    df.loc[matching_sn[0], 'type'] = input_type
-                    df.loc[matching_sn[0], 'file'] = fp
-                    df.loc[matching_sn[0], 'index'] = index
-
-        df = df[df.file.notnull()]
-
-    else:
-        data: Dict[str, List] = dict(s=[], file=[], type=[])
-        for input_type in found_files_by_type:
-            for fp, index in zip(
-                found_files_by_type[input_type], found_indices_by_type[input_type]
-            ):
-                data['s'].append(_get_base_name(fp))
-                data['file'].append(fp)
-                data['index'].append(index)
-                data['type'].append(input_type)
-
-        df = pd.DataFrame(data=data).set_index('s', drop=False)
-
-    return df
-
-
 def _add_split_intervals_job(
     b: hb.Batch,
     interval_list: str,
@@ -1024,29 +878,6 @@ def _add_final_gather_vcf_step(
     if output_vcf_path:
         b.write_output(j.output_vcf, output_vcf_path.replace('.vcf.gz', ''))
     return j
-
-
-def file_exists(path: str) -> bool:
-    """
-    Check if the object exists, where the object can be:
-        * local file
-        * local directory
-        * Google Storage object
-        * Google Storage URL representing a *.mt or *.ht Hail data,
-          in which case it will check for the existence of a
-          *.mt/_SUCCESS or *.ht/_SUCCESS file.
-    :param path: path to the file/directory/object/mt/ht
-    :return: True if the object exists
-    """
-    if path.startswith('gs://'):
-        bucket = path.replace('gs://', '').split('/')[0]
-        path = path.replace('gs://', '').split('/', maxsplit=1)[1]
-        path = path.rstrip('/')  # '.mt/' -> '.mt'
-        if any(path.endswith(f'.{suf}') for suf in ['mt', 'ht']):
-            path = os.path.join(path, '_SUCCESS')
-        gs = storage.Client()
-        return gs.get_bucket(bucket).get_blob(path)
-    return os.path.exists(path)
 
 
 def can_reuse(fpath: str, overwrite: bool) -> bool:
