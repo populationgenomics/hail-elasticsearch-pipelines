@@ -295,7 +295,7 @@ def _pedigree_checks(
             j.memory(f'8G')
             if input_path.endswith('.bam'):
                 j.storage(f'120G')
-            if input_path.endswith('.cram'):
+            elif input_path.endswith('.cram'):
                 j.storage(f'30G')
             else:
                 j.storage(f'10G')
