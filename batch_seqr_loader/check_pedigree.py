@@ -102,7 +102,7 @@ def main(
         }
         if inferred_rel not in provided_to_inferred[provided_rel]:
             mismatching_pairs.append(
-                f'{s1}-{s2}, '
+                f'"{s1}" and "{s2}", '
                 f'provided relationship: "{provided_rel}", inferred: "{inferred_rel}"'
             )
     if mismatching_pairs:

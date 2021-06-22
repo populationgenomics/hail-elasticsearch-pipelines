@@ -186,12 +186,12 @@ def _df_based_on_ped_file(
             matching_sn = [sn for sn in ped_snames if sn == input_sname]
             if len(matching_sn) > 1:
                 logging.warning(
-                    f'Multiple samples found for the input {input_sname}:'
+                    f'Multiple PED records found for the input {input_sname}:'
                     f'{matching_sn}'
                 )
                 mismatches_with_ped_found = True
             elif len(matching_sn) == 0:
-                logging.warning(f'No samples found for the input {input_sname}')
+                logging.warning(f'No PED records found for the input {input_sname}')
                 mismatches_with_ped_found = True
             else:
                 df.loc[matching_sn[0], 'type'] = input_type
