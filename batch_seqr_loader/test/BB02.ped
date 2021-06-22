@@ -1,0 +1,4 @@
+Family.ID	Individual.ID	Paternal.ID	Maternal.ID	Gender	Phenotype	Population	Other.info	Relationships.from.Pemberton.et.al.AJHG.2010	Broad.IBD.Analysis	sequence_read	alignment	high_coverage_alignment	exome_alignment	gvcf	gatksv_cram
+BB02	HG01882	0	0	1	0	ACB	father	0		True	True	False	True	True	
+BB02	HG01883	0	0	2	0	ACB	mother	0		True	True	False	True	True	
+BB02	HG01888	HG01882	HG01883	1	0	ACB	child	0		False	False	False	False	True	
