@@ -293,7 +293,12 @@ def _pedigree_checks(
             j = b.new_job(f'Somalier extract, {sn}')
             j.image(SOMALIER_CONTAINER)
             j.memory(f'8G')
-            j.storage(f'10G')
+            if input_path.endswith('.bam'):
+                j.storage(f'120G')
+            if input_path.endswith('.cram'):
+                j.storage(f'30G')
+            else:
+                j.storage(f'10G')
             if depends_on:
                 j.depends_on(*depends_on)
 

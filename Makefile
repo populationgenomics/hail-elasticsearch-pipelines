@@ -69,7 +69,7 @@ run_test_mismatched:
 run_zornitza-stark:
 	analysis-runner \
 	--dataset seqr \
-	--access-level full \
+	--access-level test \
 	--output-dir  "gs://cpg-seqr-test/data/zornitza-stark-v0" \
 	--description "test seqr loader - zornitza-stark" \
 	batch_seqr_loader/batch_workflow.py \
