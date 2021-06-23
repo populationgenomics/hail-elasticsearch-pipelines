@@ -56,13 +56,14 @@ def main(
 
     logger.info('* Checking sex *')
     df = pd.read_csv(somalier_samples_fpath, delimiter='\t')
-    mismatching_female = (df['sex'] == 2) & (df['original_pedigree_sex'] != 'female')
-    mismatching_male = (df['sex'] == 1) & (df['original_pedigree_sex'] != 'male')
+    missing_sex = df['original_pedigree_sex'] == 'unknown'
+    mismatching_female = (df['sex'] == 2) & (df['original_pedigree_sex'] == 'male')
+    mismatching_male = (df['sex'] == 1) & (df['original_pedigree_sex'] == 'female')
     mismatching_sex = mismatching_female | mismatching_male
 
-    if mismatching_sex.any():
-        logger.info(f'Found samples with mismatched sex:')
-        for _, row in df[mismatching_sex].iterrows():
+    if (mismatching_sex | missing_sex).any():
+        logger.info(f'Found PED samples with mismatching or missing sex:')
+        for _, row in df[mismatching_sex | missing_sex].iterrows():
             inferred_sex = {1: 'male', 2: 'female'}[row.sex]
             logger.info(
                 f'\t{row.sample_id} (provided: {row.original_pedigree_sex}, inferred: {inferred_sex})'
@@ -118,13 +119,15 @@ def main(
         sys.exit(1)
 
     logger.info(
-        f'\nInferred sex and pedigree matches for all samples with the data in the PED file. '
+        f'\nInferred sex and pedigree matches for all samples with the specified data in the PED file. '
         + (
             f'Review the somalier results for more detail: {somalier_html_fpath}'
             if somalier_html_fpath
             else ''
         )
     )
+
+    # TODO: generate new PED file with fixed sex and rels (.samples.tsv is a good base)
 
 
 def infer_relationship(coeff: float, ibs0: float, ibs2: float) -> str:
@@ -133,9 +136,9 @@ def infer_relationship(coeff: float, ibs0: float, ibs2: float) -> str:
     and ibs0 and ibs2 values.
     """
     result = 'ambiguous'
-    if coeff < 0.05:
+    if coeff < 0.1:
         result = 'unrelated'
-    elif 0.1 < coeff < 0.38:
+    elif 0.1 <= coeff < 0.38:
         result = 'below_first_degree'
     elif 0.38 <= coeff <= 0.62:
         if ibs0 / ibs2 < 0.005:

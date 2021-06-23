@@ -28,6 +28,7 @@ run_test:
 	--output-dir  "gs://cpg-seqr-test/data/test-$(VERSION)" \
 	--description "test seqr loader - test" \
 	batch_seqr_loader/batch_workflow.py \
+	--namespace test \
 	--gvcf-bucket "gs://cpg-seqr-test/datasets/BB01" \
 	--ped-file    "gs://cpg-seqr-test/datasets/BB01/BB01.ped" \
 	--data-bucket "gs://cpg-seqr-test/data/test-$(VERSION)" \
@@ -43,6 +44,7 @@ run_test_extend:
 	--output-dir  "gs://cpg-seqr-test/data/test-$(VERSION)" \
 	--description "test seqr loader - extend" \
 	batch_seqr_loader/batch_workflow.py \
+	--namespace test \
 	--gvcf-bucket "gs://cpg-seqr-test/datasets/BB02" \
 	--ped-file    "gs://cpg-seqr-test/datasets/BB02/BB02.ped" \
 	--data-bucket "gs://cpg-seqr-test/data/test-$(VERSION)" \
@@ -58,6 +60,7 @@ run_test_mismatched:
 	--output-dir  "gs://cpg-seqr-test/data/test-$(VERSION)" \
 	--description "test seqr loader - mismatched" \
 	batch_seqr_loader/batch_workflow.py \
+	--namespace test \
 	--gvcf-bucket "gs://cpg-seqr-test/datasets/BB01" \
 	--ped-file    "gs://cpg-seqr-test/datasets/BB01/BB01-mismatched.ped" \
 	--data-bucket "gs://cpg-seqr-test/data/test-$(VERSION)" \
@@ -73,6 +76,7 @@ run_zornitza-stark:
 	--output-dir  "gs://cpg-seqr-test/data/zornitza-stark-v0" \
 	--description "test seqr loader - zornitza-stark" \
 	batch_seqr_loader/batch_workflow.py \
+	--namespace test \
 	--bam-bucket  "gs://cpg-seqr-upload-zornitza-stark" \
 	--ped-file    "gs://cpg-seqr-upload-zornitza-stark/cpg_acute.ped" \
 	--data-bucket "gs://cpg-seqr-test/data/zornitza-stark-v0" \

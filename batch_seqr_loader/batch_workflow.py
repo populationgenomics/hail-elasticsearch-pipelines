@@ -121,6 +121,12 @@ logger.setLevel(logging.INFO)
     is_flag=True,
     help='Create checkpoints for intermediate Hail data',
 )
+@click.option(
+    '--namespace',
+    'namespace',
+    type=click.Choice(['main', 'test']),
+    help='Bucket namespace: test or main',
+)
 @click.option('--vep-block-size', 'vep_block_size')
 def main(
     gvcf_buckets: List[str],
@@ -136,6 +142,7 @@ def main(
     remap_path: str,
     subset_path: str,
     make_checkpoints: bool,
+    namespace: Optional[str] = None,
     vep_block_size: Optional[int] = None,  # pylint: disable=unused-argument
 ):
     """
@@ -181,7 +188,7 @@ def main(
         + '.dict',
     )
 
-    ped_check_j = _pedigree_checks(
+    ped_check_j, ped_fpath = _pedigree_checks(
         b=b,
         samples_df=samples_df,
         reference=reference,
@@ -190,6 +197,7 @@ def main(
         work_bucket=work_bucket,
         overwrite=overwrite,
         fingerprints_bucket=join(data_bucket, 'fingerprints'),
+        namespace=namespace,
     )
 
     # realign_bam_jobs = _make_realign_bam_jobs(
@@ -273,12 +281,15 @@ def _pedigree_checks(
     work_bucket: str,  # pylint: disable=unused-argument
     overwrite: bool,  # pylint: disable=unused-argument
     fingerprints_bucket: str,
+    namespace: Optional[str] = None,
     depends_on: Optional[List[Job]] = None,
-) -> Job:
+) -> Tuple[Job, str]:
     """
-    Add somalier and peddy based jobs that infer relatedness
-    and sex, and compare that to the provided ped file, and fail
-    if anything don't match
+    Add somalier and peddy based jobs that infer relatedness and sex, compare that
+    to the provided PED file, and attempt to recover it. If unable to recover, cancel
+    the further workflow jobs.
+
+    Returns a job, and a bucket path to a fixed PED file if able to recover.
     """
 
     extract_jobs = []
@@ -346,14 +357,24 @@ def _pedigree_checks(
       """
     )
 
+    # Copy somalier outputs to buckets
     sample_hash = hash_sample_names(samples_df['s'])
+
+    somalier_html_url = None
+    if namespace:
+        web_bucket = f'gs://cpg-seqr-{namespace}-web'
+        rel_path = join('loader', sample_hash[:10], 'somalier.html')
+        somalier_path = join(web_bucket, rel_path)
+        somalier_html_url = (
+            f'https://{namespace}-web.populationgenomics.org.au/seqr/{rel_path}'
+        )
+        b.write_output(relate_j.output_html, somalier_path)
     prefix = join(fingerprints_bucket, sample_hash, 'somalier')
-    somalier_html_path = f'{prefix}.html'
     somalier_samples_path = f'{prefix}.samples.tsv'
     somalier_pairs_path = f'{prefix}.pairs.tsv'
-    b.write_output(relate_j.output_html, somalier_html_path)
     b.write_output(relate_j.output_samples, somalier_samples_path)
     b.write_output(relate_j.output_pairs, somalier_pairs_path)
+
     check_j = b.new_job(f'Check relatedness and sex')
     check_j.image(PEDDY_CONTAINER)
     check_j.memory(f'8G')
@@ -368,12 +389,12 @@ EOT
 python check_pedigree.py \\
 --somalier-samples {relate_j.output_samples} \\
 --somalier-pairs {relate_j.output_pairs} \\
---somalier-html {somalier_html_path}
+{('--somalier-html ' + somalier_html_url) if somalier_html_url else ''}
     """
     )
 
     check_j.depends_on(relate_j)
-    return check_j
+    return check_j, somalier_samples_path
 
 
 def _make_genotype_jobs(
