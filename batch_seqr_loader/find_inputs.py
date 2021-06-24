@@ -9,7 +9,7 @@ import os
 import re
 import subprocess
 from os.path import join, basename
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 import pandas as pd
 from utils import file_exists
 
@@ -23,8 +23,9 @@ def find_inputs(
     bam_buckets: List[str],
     bam_to_realign_buckets: List[str],
     local_tmp_dir: str,
+    work_bucket: str,
     ped_fpath: Optional[str] = None,
-) -> pd.DataFrame:
+) -> Tuple[pd.DataFrame, str]:
     """
     Find input files (.g.vcf.gz, .bam or .cram) in provided buckets,
     along with corresponding indices (tbi, bai, crai).
@@ -34,10 +35,13 @@ def find_inputs(
         (will be passed to HaplotypeCaller to produce GVCFs)
     :param bam_to_realign_buckets: buckets to find BAM files
         (will be re-aligned with BWA before passing to HaplotypeCaller)
-    :param ped_fpath: pedigree file
+    :param work_bucket: bucket for temporary files
+    :param ped_fpath: pedigree file. If not provided, a bare one will be generated
+        with the sample names derived from input file names, and with missing/unknown
+        pedigree and sex information
     :param local_tmp_dir: temporary local directory
-    :return: a DataFrame with the pedigree information and paths to input files.
-        Columns: s, file, index, type
+    :return: a tuple of a DataFrame with the pedigree information and paths to
+        input files (columns: s, file, index, type), and a path to a PED file
     """
     input_buckets_by_type = dict(
         gvcf=gvcf_buckets,
@@ -59,19 +63,39 @@ def find_inputs(
 
     else:
         # PED file not provided, so creating DataFrame purely from the found input files
-        data: Dict[str, List] = dict(s=[], file=[], index=[], type=[])
+        data: Dict[str, List] = dict(
+            fam_id=[],
+            s=[],
+            father_id=[],
+            mother_id=[],
+            sex=[],
+            phenotype=[],
+            file=[],
+            index=[],
+            type=[],
+        )
         for input_type in found_files_by_type:
             for fp, index in zip(
                 found_files_by_type[input_type], found_indices_by_type[input_type]
             ):
-                data['s'].append(_get_file_base_name(fp))
+                sn = _get_file_base_name(fp)
+                data['s'].append(sn)
                 data['file'].append(fp)
                 data['index'].append(index)
                 data['type'].append(input_type)
+                data['fam_id'].append(sn)
+                data['father_id'].append('0')
+                data['mother_id'].append('0')
+                data['sex'].append('0')
+                data['phenotype'].append('0')
 
         df = pd.DataFrame(data=data).set_index('s', drop=False)
+        ped_fpath = join(work_bucket, 'bare.ped')
+        df[['fam_id', 's', 'father_id', 'mother_id', 'sex', 'phenotype']].write(
+            ped_fpath
+        )
 
-    return df
+    return df, ped_fpath
 
 
 def _find_files_by_type(
@@ -144,14 +168,14 @@ def _df_based_on_ped_file(
     """
     local_sample_list_fpath = join(local_tmp_dir, basename(ped_fpath))
     subprocess.run(
-        f'gsutil cat {ped_fpath} | grep -v ^Family.ID | cut -f2 > {local_sample_list_fpath}',
+        f'gsutil cat {ped_fpath} | grep -v ^Family.ID > {local_sample_list_fpath}',
         check=False,
         shell=True,
     )
     df = pd.read_csv(
         local_sample_list_fpath,
         delimiter='\t',
-        names=['s'],
+        names=['fam_id', 's', 'father_id', 'mother_id', 'sex', 'phenotype'],
     ).set_index('s', drop=False)
     ped_snames = list(df['s'])
 

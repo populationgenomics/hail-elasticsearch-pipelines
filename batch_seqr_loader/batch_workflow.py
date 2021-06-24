@@ -196,11 +196,12 @@ def main(
 
     local_tmp_dir = tempfile.mkdtemp()
 
-    samples_df = find_inputs(
+    samples_df, ped_fpath = find_inputs(
         gvcf_buckets,
         bam_buckets,
         bam_to_realign_buckets,
         local_tmp_dir=local_tmp_dir,
+        work_bucket=work_bucket,
         ped_fpath=ped_fpath,
     )
 
