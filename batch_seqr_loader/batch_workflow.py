@@ -866,8 +866,8 @@ def _add_gatk_genotype_gvcf_job(
     j.cpu(2)
     java_mem = 7
     j.memory('standard')  # ~ 4G/core ~ 8G
-    # 1G + 1G per sample divided by the number of intervals
-    j.storage(f'{1 + number_of_samples * 1 // number_of_intervals}G')
+    # 12G (dbsnp) + 4G (fasta+fai+dict) + 1G per sample divided by the number of intervals
+    j.storage(f'{12 + 4 + number_of_samples * 1 // number_of_intervals}G')
     j.declare_resource_group(
         output_vcf={
             'vcf.gz': '{root}.vcf.gz',
