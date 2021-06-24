@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 
 """
-Let this be the entrypoint / driver for loading data into SEQR for the CPG
-See the README for more information. This is WIP.
+Driver for loading data into SEQR for the CPG. See the README for more information.
 
     - 2021/04/16 Michael Franklin and Vlad Savelyev
 """
+
 import json
 import logging
-import math
+# import math
 import os
 import shutil
 import subprocess
@@ -144,10 +144,7 @@ def main(
     make_checkpoints: bool,
     namespace: Optional[str] = None,
     vep_block_size: Optional[int] = None,  # pylint: disable=unused-argument
-):
-    """
-    Entry point for a batch workflow
-    """
+):  # pylint: disable=missing-function-docstring
     if not (gvcf_buckets or bam_buckets or bam_to_realign_buckets):
         raise click.BadParameter(
             'Specify at least one of the input parameters '
@@ -169,7 +166,7 @@ def main(
         billing_project=billing_project,
         bucket=hail_bucket.replace('gs://', ''),
     )
-    b = hb.Batch('Somalier check', backend=backend)
+    b = hb.Batch('Seqr loading pipeline', backend=backend)
 
     local_tmp_dir = tempfile.mkdtemp()
 
@@ -603,10 +600,11 @@ def _add_haplotype_caller_job(
     # HaplotypeCaller. If we take the number we are scattering by and reduce by 20,
     # we will have enough disk space to account for the fact that the data is quite
     # uneven across the shards.
-    scatter_divisor = max((number_of_intervals - 20), 1)
-    input_and_output_size = 40
-    reference_data_size = 20
-    disk_size = math.ceil(input_and_output_size / scatter_divisor) + reference_data_size
+    # scatter_divisor = max((number_of_intervals - 20), 1)
+    # input_and_output_size = 40
+    # reference_data_size = 20
+    # disk_size = math.ceil(input_and_output_size / scatter_divisor) + reference_data_size
+    disk_size = 32
 
     job_name = 'HaplotypeCaller'
     if interval_idx is not None:
@@ -615,8 +613,8 @@ def _add_haplotype_caller_job(
     j = b.new_job('HaplotypeCaller')
     j.image(GATK_CONTAINER)
     j.cpu(2)
-    mem_gb = 64
-    j.memory(f'{mem_gb}G')
+    j.memory('highmem')  # ~ 7 Gi/core ~ 14
+    java_mem = 13
     j.storage(f'{disk_size}G')
     j.declare_resource_group(
         output_gvcf={
@@ -629,7 +627,9 @@ def _add_haplotype_caller_job(
 
     j.command(
         f"""set -e
-    gatk --java-options "-Xms{mem_gb - 1}g -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10" \
+    (while true; do df -h; pwd; du -sh *; free -m; sleep 300; done) &
+
+    gatk --java-options "-Xms{java_mem}g -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10" \
       HaplotypeCaller \
       -R {reference.base} \
       -I {bam_fpath} \
@@ -638,6 +638,8 @@ def _add_haplotype_caller_job(
       -G StandardAnnotation -G StandardHCAnnotation -G AS_StandardAnnotation \
       -GQB 10 -GQB 20 -GQB 30 -GQB 40 -GQB 50 -GQB 60 -GQB 70 -GQB 80 -GQB 90 \
       -ERC GVCF \
+
+    df -h; pwd; du -sh *
     """
     )
     return j
@@ -658,7 +660,7 @@ def _add_merge_gvcfs_job(
     j.image(PICARD_CONTAINER)
     mem_gb = 8
     j.memory(f'{mem_gb}G')
-    j.storage(f'25G')
+    j.storage(f'32G')
     j.declare_resource_group(
         output_gvcf={
             'g.vcf.gz': '{root}-' + sample_name + '.g.vcf.gz',
@@ -670,8 +672,13 @@ def _add_merge_gvcfs_job(
 
     j.command(
         f"""set -e
+
+    (while true; do df -h; pwd; du -sh *; free -m; sleep 300; done) &
+
     java -Xms{mem_gb - 1}g -jar /usr/picard/picard.jar \
       MergeVcfs {input_cmd} OUTPUT={j.output_gvcf['g.vcf.gz']}
+
+    df -h; pwd; du -sh *
       """
     )
     if output_gvcf_path:
@@ -787,6 +794,8 @@ def _add_import_gvcfs_job(
     # the Hellbender (GATK engine) team!
     
     {untar_genomicsdb_cmd}
+
+    (while true; do df -h; pwd; du -sh *; free -m; sleep 300; done) &
     
     gatk --java-options -Xms{mem_gb - 1}g \
       GenomicsDBImport \
@@ -798,7 +807,11 @@ def _add_import_gvcfs_job(
       --merge-input-intervals \
       --consolidate
 
+    df -h; pwd; du -sh *
+
     tar -cf {j.output['tar']} workspace
+
+    df -h; pwd; du -sh *
     """
     )
     b.write_output(j.output, genomicsdb_gcs_path.replace('.tar', ''))
@@ -841,7 +854,11 @@ def _add_gatk_genotype_gvcf_job(
     j.command(
         f"""set -e
         
+    (while true; do df -h; pwd; du -sh *; free -m; sleep 300; done) &
+
     tar -xf {genomicsdb}
+
+    df -h; pwd; du -sh *
 
     gatk --java-options -Xms{mem_gb - 1}g \\
       GenotypeGVCFs \\
@@ -852,6 +869,8 @@ def _add_gatk_genotype_gvcf_job(
       -V gendb://workspace \\
       -L {interval} \\
       --merge-input-intervals
+
+    df -h; pwd; du -sh *
     """
     )
     if output_vcf_path:
@@ -888,6 +907,8 @@ def _add_final_gather_vcf_step(
     j.command(
         f"""set -euo pipefail
 
+    (while true; do df -h; pwd; du -sh *; free -m; sleep 300; done) &
+
     # --ignore-safety-checks makes a big performance difference so we include it in 
     # our invocation. This argument disables expensive checks that the file headers 
     # contain the same set of genotyped samples and that files are in order 
@@ -899,7 +920,10 @@ def _add_final_gather_vcf_step(
       {input_cmdl} \\
       --output {j.output_vcf['vcf.gz']}
 
-    tabix {j.output_vcf['vcf.gz']}"""
+    tabix {j.output_vcf['vcf.gz']}
+    
+    df -h; pwd; du -sh *
+    """
     )
     if output_vcf_path:
         b.write_output(j.output_vcf, output_vcf_path.replace('.vcf.gz', ''))
