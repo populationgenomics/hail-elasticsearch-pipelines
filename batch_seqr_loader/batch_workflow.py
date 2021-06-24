@@ -659,7 +659,7 @@ def _add_haplotype_caller_job(
 
     j.command(
         f"""set -e
-    (while true; do df -h; pwd; du -sh *; free -m; sleep 300; done) &
+    (while true; do df -h; pwd; free -m; sleep 300; done) &
 
     gatk --java-options "-Xms{java_mem}g -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10" \
       HaplotypeCaller \
@@ -706,7 +706,7 @@ def _add_merge_gvcfs_job(
     j.command(
         f"""set -e
 
-    (while true; do df -h; pwd; du -sh *; free -m; sleep 300; done) &
+    (while true; do df -h; pwd; free -m; sleep 300; done) &
 
     java -Xms{java_mem}g -jar /usr/picard/picard.jar \
       MergeVcfs {input_cmd} OUTPUT={j.output_gvcf['g.vcf.gz']}
@@ -829,7 +829,7 @@ def _add_import_gvcfs_job(
     
     {untar_genomicsdb_cmd}
 
-    (while true; do df -h; pwd; du -sh *; free -m; sleep 300; done) &
+    (while true; do df -h; pwd; free -m; sleep 300; done) &
 
     gatk --java-options -Xms{java_mem}g \
       GenomicsDBImport \
@@ -889,7 +889,7 @@ def _add_gatk_genotype_gvcf_job(
     j.command(
         f"""set -e
         
-    (while true; do df -h; pwd; du -sh *; free -m; sleep 300; done) &
+    (while true; do df -h; pwd; free -m; sleep 300; done) &
 
     tar -xf {genomicsdb}
 
@@ -943,7 +943,7 @@ def _add_final_gather_vcf_step(
     j.command(
         f"""set -euo pipefail
 
-    (while true; do df -h; pwd; du -sh *; free -m; sleep 300; done) &
+    (while true; do df -h; pwd; free -m; sleep 300; done) &
 
     # --ignore-safety-checks makes a big performance difference so we include it in 
     # our invocation. This argument disables expensive checks that the file headers 
