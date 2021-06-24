@@ -657,7 +657,7 @@ def _add_haplotype_caller_job(
       -GQB 10 -GQB 20 -GQB 30 -GQB 40 -GQB 50 -GQB 60 -GQB 70 -GQB 80 -GQB 90 \
       -ERC GVCF \
 
-    df -h; pwd; du -sh *
+    df -h; pwd
     """
     )
     return j
@@ -697,7 +697,7 @@ def _add_merge_gvcfs_job(
     java -Xms{java_mem}g -jar /usr/picard/picard.jar \
       MergeVcfs {input_cmd} OUTPUT={j.output_gvcf['g.vcf.gz']}
 
-    df -h; pwd; du -sh *
+    df -h; pwd
       """
     )
     if output_gvcf_path:
@@ -828,11 +828,11 @@ def _add_import_gvcfs_job(
       --merge-input-intervals \
       --consolidate
 
-    df -h; pwd; du -sh *
+    df -h; pwd
 
     tar -cf {j.output['tar']} workspace
 
-    df -h; pwd; du -sh *
+    df -h; pwd
     """
     )
     b.write_output(j.output, genomicsdb_gcs_path.replace('.tar', ''))
@@ -882,7 +882,7 @@ def _add_gatk_genotype_gvcf_job(
 
     tar -xf {genomicsdb}
 
-    df -h; pwd; du -sh *
+    df -h; pwd
 
     gatk --java-options -Xms{java_mem}g \\
       GenotypeGVCFs \\
@@ -894,7 +894,7 @@ def _add_gatk_genotype_gvcf_job(
       -L {interval} \\
       --merge-input-intervals
 
-    df -h; pwd; du -sh *
+    df -h; pwd
     """
     )
     if output_vcf_path:
@@ -947,7 +947,7 @@ def _add_final_gather_vcf_step(
 
     tabix {j.output_vcf['vcf.gz']}
     
-    df -h; pwd; du -sh *
+    df -h; pwd
     """
     )
     if output_vcf_path:
