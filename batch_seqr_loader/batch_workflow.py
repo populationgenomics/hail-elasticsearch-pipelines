@@ -36,7 +36,7 @@ SOMALIER_CONTAINER = 'brentp/somalier:latest'
 PEDDY_CONTAINER = 'quay.io/biocontainers/peddy:0.4.8--pyh5e36f6f_0'
 
 # Fixed scatter count, because we are storing a genomics DB per each interval
-NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS = 10
+NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS = 50
 NUMBER_OF_GENOMICS_DB_INTERVALS = 10
 
 REF_BUCKET = 'gs://cpg-reference/hg38/v0'
@@ -628,17 +628,6 @@ def _add_haplotype_caller_job(
     """
     Run HaplotypeCaller on an input BAM or CRAM, and output GVCF
     """
-
-    # We need disk to localize the sharded input and output due to the scatter for
-    # HaplotypeCaller. If we take the number we are scattering by and reduce by 20,
-    # we will have enough disk space to account for the fact that the data is quite
-    # uneven across the shards.
-    # scatter_divisor = max((number_of_intervals - 20), 1)
-    # input_and_output_size = 40
-    # reference_data_size = 20
-    # disk_size = math.ceil(input_and_output_size / scatter_divisor) + reference_data_size
-    disk_size = 32
-
     job_name = 'HaplotypeCaller'
     if interval_idx is not None:
         job_name += f', {sample_name} {interval_idx}/{number_of_intervals}'
@@ -648,7 +637,7 @@ def _add_haplotype_caller_job(
     j.cpu(2)
     java_mem = 7
     j.memory('standard')  # ~ 4 Gi/core ~ 8
-    j.storage(f'{disk_size}G')
+    j.storage('16G')
     j.declare_resource_group(
         output_gvcf={
             'g.vcf.gz': '{root}-' + sample_name + '.g.vcf.gz',
