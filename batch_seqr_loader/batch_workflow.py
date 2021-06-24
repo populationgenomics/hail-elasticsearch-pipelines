@@ -623,8 +623,8 @@ def _add_haplotype_caller_job(
     j = b.new_job(job_name)
     j.image(GATK_CONTAINER)
     j.cpu(2)
-    j.memory('highmem')  # ~ 7 Gi/core ~ 14
-    java_mem = 13
+    java_mem = 7
+    j.memory('standard')  # ~ 4 Gi/core ~ 8
     j.storage(f'{disk_size}G')
     j.declare_resource_group(
         output_gvcf={
