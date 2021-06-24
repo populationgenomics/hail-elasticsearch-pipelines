@@ -36,7 +36,8 @@ SOMALIER_CONTAINER = 'brentp/somalier:latest'
 PEDDY_CONTAINER = 'quay.io/biocontainers/peddy:0.4.8--pyh5e36f6f_0'
 
 # Fixed scatter count, because we are storing a genomics DB per each interval
-NUMBER_OF_INTERVALS = 10
+NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS = 10
+NUMBER_OF_GENOMICS_DB_INTERVALS = 10
 
 REF_BUCKET = 'gs://cpg-reference/hg38/v0'
 REF_FASTA = join(REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
@@ -81,20 +82,22 @@ logger.setLevel(logging.INFO)
     help='Bucket path with input BAM or CRAM files that need re-alignment',
 )
 @click.option(
-    '--data-bucket',
-    'data_bucket',
+    '--dataset',
+    'dataset_name',
     required=True,
-    help='Base bucket path to store genomics DBs, fingerprints, and matrix tables',
+    help='Name of the dataset. If a genomics DB already exists for this dataset, '
+    'it will be extended with the new samples',
+)
+@click.option('--version', 'dataset_version', type=str, required=True)
+@click.option(
+    '-n',
+    '--namespace',
+    'output_namespace',
+    type=click.Choice(['main', 'test', 'tmp']),
+    help='The bucket namespace to write the results to',
 )
 @click.option(
-    '--ped-file', 'ped_fpath', help='Pedigree file to verify the relatedness and sex'
-)
-@click.option(
-    '--work-bucket',
-    '--bucket',
-    'work_bucket',
-    required=True,
-    help='Base bucket path to store temporary and intermediate files',
+    '--ped-file', 'ped_fpath', help='Pedigree file to verify the relatedness and sex.'
 )
 @click.option('--keep-scratch', 'keep_scratch', is_flag=True)
 @click.option(
@@ -128,20 +131,15 @@ logger.setLevel(logging.INFO)
     is_flag=True,
     help='Skip checking provided sex and pedigree against the inferred one',
 )
-@click.option(
-    '--namespace',
-    'namespace',
-    type=click.Choice(['main', 'test']),
-    help='Bucket namespace: test or main',
-)
 @click.option('--vep-block-size', 'vep_block_size')
 def main(
     gvcf_buckets: List[str],
     bam_buckets: List[str],
     bam_to_realign_buckets: List[str],
-    data_bucket: str,
+    dataset_name: str,
+    dataset_version: str,
+    output_namespace: str,
     ped_fpath: str,
-    work_bucket: str,
     keep_scratch: bool,
     overwrite: bool,
     dry_run: bool,
@@ -160,8 +158,14 @@ def main(
             '--gvcf-bucket, --bam-bucket, --bam-to-realign-bucket'
         )
 
+    project = 'seqr'
     billing_project = os.getenv('HAIL_BILLING_PROJECT') or 'seqr'
 
+    if output_namespace in ['test', 'tmp']:
+        tmp_bucket_suffix = 'test-tmp'
+    else:
+        tmp_bucket_suffix = 'main-tmp'
+    work_bucket = f'gs://cpg-{project}-{tmp_bucket_suffix}/seqr-loader-tmp/{dataset_name}/{dataset_version}'
     hail_bucket = os.environ.get('HAIL_BUCKET')
     if not hail_bucket or keep_scratch:
         # Scratch files are large, so we want to use the temporary bucket for them
@@ -174,7 +178,21 @@ def main(
         billing_project=billing_project,
         bucket=hail_bucket.replace('gs://', ''),
     )
-    b = hb.Batch('Seqr loading pipeline', backend=backend)
+    b = hb.Batch(
+        f'Seqr loading pipeline for dataset "{dataset_name}"'
+        f', in the namespace "{output_namespace}"',
+        backend=backend,
+    )
+
+    if output_namespace in ['test', 'main']:
+        output_suffix = output_namespace
+        web_bucket_suffix = f'{output_namespace}-web'
+    else:
+        output_suffix = 'test-tmp'
+        web_bucket_suffix = 'test-tmp'
+    genomicsdb_bucket = f'gs://cpg-{project}-{output_suffix}/datasets/{dataset_name}/{dataset_version}/genomicsdbs'
+    fingerprints_bucket = f'gs://cpg-{project}-{output_suffix}/datasets/{dataset_name}/{dataset_version}/fingerprints'
+    web_bucket = f'gs://cpg-{project}-{web_bucket_suffix}/datasets/{dataset_name}/{dataset_version}'
 
     local_tmp_dir = tempfile.mkdtemp()
 
@@ -201,10 +219,10 @@ def main(
             reference=reference,
             sites=b.read_input(SOMALIER_SITES),
             ped_file=b.read_input(ped_fpath),
-            work_bucket=work_bucket,
             overwrite=overwrite,
-            fingerprints_bucket=join(data_bucket, 'fingerprints'),
-            namespace=namespace,
+            fingerprints_bucket=fingerprints_bucket,
+            web_bucket=web_bucket,
+            web_url=f'https://{namespace}-web.populationgenomics.org.au/{project}',
         )
 
     # realign_bam_jobs = _make_realign_bam_jobs(
@@ -215,28 +233,35 @@ def main(
     #     overwrite=overwrite,
     # )
 
-    intervals_j = _add_split_intervals_job(
+    hc_intervals_j = _add_split_intervals_job(
         b,
         UNPADDED_INTERVALS,
-        NUMBER_OF_INTERVALS,
+        NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS,
         REF_FASTA,
     )
     if ped_check_j is not None:
-        intervals_j.depends_on(ped_check_j)
+        hc_intervals_j.depends_on(ped_check_j)
 
     genotype_jobs, samples_df = _make_genotype_jobs(
         b=b,
-        intervals=intervals_j.intervals,
+        intervals=hc_intervals_j.intervals,
         samples_df=samples_df,
         reference=reference,
         work_bucket=work_bucket,
         overwrite=overwrite,
     )
 
+    db_intervals_j = _add_split_intervals_job(
+        b,
+        UNPADDED_INTERVALS,
+        NUMBER_OF_GENOMICS_DB_INTERVALS,
+        REF_FASTA,
+    )
+
     joint_genotype_job, gathered_vcf_path = _make_joint_genotype_jobs(
         b=b,
-        intervals=intervals_j.intervals,
-        genomicsdb_bucket=join(data_bucket, 'genomicsdb'),
+        intervals=db_intervals_j.intervals,
+        genomicsdb_bucket=genomicsdb_bucket,
         samples_df=samples_df,
         reference=reference,
         dbsnp=b.read_input_group(base=DBSNP_VCF, idx=DBSNP_VCF + '.idx'),
@@ -286,10 +311,10 @@ def _pedigree_checks(
     reference: hb.ResourceGroup,
     sites: hb.ResourceFile,
     ped_file: hb.ResourceFile,
-    work_bucket: str,  # pylint: disable=unused-argument
     overwrite: bool,  # pylint: disable=unused-argument
     fingerprints_bucket: str,
-    namespace: Optional[str] = None,
+    web_bucket: str,
+    web_url: str,
     depends_on: Optional[List[Job]] = None,
 ) -> Tuple[Job, str]:
     """
@@ -372,15 +397,11 @@ def _pedigree_checks(
     somalier_pairs_path = f'{prefix}.pairs.tsv'
     b.write_output(relate_j.output_samples, somalier_samples_path)
     b.write_output(relate_j.output_pairs, somalier_pairs_path)
-    somalier_html_url = None
-    if namespace:
-        web_bucket = f'gs://cpg-seqr-{namespace}-web'
-        rel_path = join('loader', sample_hash[:10], 'somalier.html')
-        somalier_html_path = join(web_bucket, rel_path)
-        somalier_html_url = (
-            f'https://{namespace}-web.populationgenomics.org.au/seqr/{rel_path}'
-        )
-        b.write_output(relate_j.output_html, somalier_html_path)
+    # Copy somalier HTML to the web bucket
+    rel_path = join('loader', sample_hash[:10], 'somalier.html')
+    somalier_html_path = join(web_bucket, rel_path)
+    somalier_html_url = f'{web_url}/{rel_path}'
+    b.write_output(relate_j.output_html, somalier_html_path)
 
     check_j = b.new_job(f'Check relatedness and sex')
     check_j.image(PEDDY_CONTAINER)
@@ -436,7 +457,7 @@ def _make_genotype_jobs(
             #     bai=index_path,
             # )
             haplotype_caller_jobs = []
-            for idx in range(NUMBER_OF_INTERVALS):
+            for idx in range(NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS):
                 haplotype_caller_jobs.append(
                     _add_haplotype_caller_job(
                         b,
@@ -445,7 +466,7 @@ def _make_genotype_jobs(
                         reference=reference,
                         sample_name=sn,
                         interval_idx=idx,
-                        number_of_intervals=NUMBER_OF_INTERVALS,
+                        number_of_intervals=NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS,
                         depends_on=depends_on,
                     )
                 )
@@ -487,9 +508,10 @@ def _make_joint_genotype_jobs(
 
     samples_to_be_in_db_per_interval = dict()
 
-    for idx in range(NUMBER_OF_INTERVALS):
+    for idx in range(NUMBER_OF_GENOMICS_DB_INTERVALS):
         genomicsdb_gcs_path = join(
-            genomicsdb_bucket, f'interval_{idx}_outof_{NUMBER_OF_INTERVALS}.tar'
+            genomicsdb_bucket,
+            f'interval_{idx}_outof_{NUMBER_OF_GENOMICS_DB_INTERVALS}.tar',
         )
 
         import_gvcfs_job, samples_to_be_in_db = _add_import_gvcfs_job(
@@ -500,7 +522,7 @@ def _make_joint_genotype_jobs(
             local_tmp_dir=local_tmp_dir,
             interval=intervals[f'interval_{idx}'],
             interval_idx=idx,
-            number_of_intervals=NUMBER_OF_INTERVALS,
+            number_of_intervals=NUMBER_OF_GENOMICS_DB_INTERVALS,
             depends_on=depends_on,
         )
 
@@ -517,7 +539,7 @@ def _make_joint_genotype_jobs(
             dbsnp=dbsnp,
             overwrite=overwrite,
             interval_idx=idx,
-            number_of_intervals=NUMBER_OF_INTERVALS,
+            number_of_intervals=NUMBER_OF_GENOMICS_DB_INTERVALS,
             output_vcf_path=output_vcf_path,
         )
         if import_gvcfs_job:
@@ -668,8 +690,9 @@ def _add_merge_gvcfs_job(
     job_name = f'Merge {len(gvcfs)} GVCFs, {sample_name}'
     j = b.new_job(job_name)
     j.image(PICARD_CONTAINER)
-    mem_gb = 8
-    j.memory(f'{mem_gb}G')
+    j.cpu(2)
+    java_mem = 7
+    j.memory('standard')  # ~ 4 Gi/core ~ 8
     j.storage(f'32G')
     j.declare_resource_group(
         output_gvcf={
@@ -685,7 +708,7 @@ def _add_merge_gvcfs_job(
 
     (while true; do df -h; pwd; du -sh *; free -m; sleep 300; done) &
 
-    java -Xms{mem_gb - 1}g -jar /usr/picard/picard.jar \
+    java -Xms{java_mem}g -jar /usr/picard/picard.jar \
       MergeVcfs {input_cmd} OUTPUT={j.output_gvcf['g.vcf.gz']}
 
     df -h; pwd; du -sh *
@@ -776,9 +799,10 @@ def _add_import_gvcfs_job(
 
     j = b.new_job(job_name)
     j.image(GATK_CONTAINER)
-    mem_gb = 16
-    j.memory(f'{mem_gb}G')
-    j.storage(f'100G')
+    j.cpu(16)
+    java_mem = 15
+    j.memory('lowmem')
+    j.storage(f'50G')
     if depends_on:
         j.depends_on(*depends_on)
 
@@ -806,14 +830,14 @@ def _add_import_gvcfs_job(
     {untar_genomicsdb_cmd}
 
     (while true; do df -h; pwd; du -sh *; free -m; sleep 300; done) &
-    
-    gatk --java-options -Xms{mem_gb - 1}g \
+
+    gatk --java-options -Xms{java_mem}g \
       GenomicsDBImport \
       {genomicsdb_param} \
       --batch-size 50 \
       -L {interval} \
       --sample-name-map {sample_name_map} \
-      --reader-threads 5 \
+      --reader-threads 14 \
       --merge-input-intervals \
       --consolidate
 
@@ -851,9 +875,10 @@ def _add_gatk_genotype_gvcf_job(
 
     j = b.new_job(job_name)
     j.image(GATK_CONTAINER)
-    mem_gb = 16
-    j.memory(f'{mem_gb}G')
-    j.storage(f'200G')
+    j.cpu(2)
+    java_mem = 7
+    j.memory('standard')  # ~ 4 Gi/core ~ 8
+    j.storage(f'50G')
     j.declare_resource_group(
         output_vcf={
             'vcf.gz': '{root}.vcf.gz',
@@ -870,7 +895,7 @@ def _add_gatk_genotype_gvcf_job(
 
     df -h; pwd; du -sh *
 
-    gatk --java-options -Xms{mem_gb - 1}g \\
+    gatk --java-options -Xms{java_mem}g \\
       GenotypeGVCFs \\
       -R {reference.base} \\
       -O {j.output_vcf['vcf.gz']} \\
@@ -906,8 +931,9 @@ def _add_final_gather_vcf_step(
 
     j = b.new_job(job_name)
     j.image(GATK_CONTAINER)
-    mem_gb = 8
-    j.memory(f'{mem_gb}G')
+    j.cpu(2)
+    java_mem = 7
+    j.memory('standard')  # ~ 4 Gi/core ~ 8
     j.storage(f'100G')
     j.declare_resource_group(
         output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
@@ -923,7 +949,7 @@ def _add_final_gather_vcf_step(
     # our invocation. This argument disables expensive checks that the file headers 
     # contain the same set of genotyped samples and that files are in order 
     # by position of first record.
-    gatk --java-options -Xms{mem_gb - 1}g \\
+    gatk --java-options -Xms{java_mem}g \\
       GatherVcfsCloud \\
       --ignore-safety-checks \\
       --gather-type BLOCK \\
