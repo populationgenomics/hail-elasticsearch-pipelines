@@ -584,7 +584,7 @@ def _add_split_intervals_job(
     """
     j = b.new_job(f'Make {scatter_count} intervals')
     j.image(GATK_CONTAINER)
-    java_mem = 3.5
+    java_mem = 3
     j.memory('standard')  # ~ 4G/core ~ 4G
     j.storage('16G')
     j.declare_resource_group(
