@@ -338,6 +338,7 @@ def _pedigree_checks(
             j = b.new_job(f'Somalier extract, {sn}')
             j.image(SOMALIER_CONTAINER)
             j.cpu(1)
+            j.memory('standard')  # ~ 4G/core ~ 4G
             if input_path.endswith('.bam'):
                 j.storage(f'200G')
             elif input_path.endswith('.cram'):
@@ -370,7 +371,10 @@ def _pedigree_checks(
     relate_j = b.new_job(f'Somalier relate')
     relate_j.image(SOMALIER_CONTAINER)
     relate_j.cpu(1)
-    relate_j.storage('10G')
+    relate_j.memory('standard')  # ~ 4G/core ~ 4G
+    # Size of one somalier file is 212K, so we add another G only if the number of
+    # samples is >4k
+    relate_j.storage(f'{1 + len(extract_jobs) // 4000 * 1}G')
     relate_j.depends_on(*extract_jobs)
     fp_files = [b.read_input(fp) for sn, fp in fp_file_by_sample.items()]
     relate_j.command(
@@ -406,8 +410,8 @@ def _pedigree_checks(
 
     check_j = b.new_job(f'Check relatedness and sex')
     check_j.image(PEDDY_CONTAINER)
-    check_j.memory(f'8G')
-    check_j.storage(f'10G')
+    check_j.cpu(1)
+    check_j.memory('standard')  # ~ 4G/core ~ 4G
     with open(join(dirname(abspath(__file__)), 'check_pedigree.py')) as f:
         script = f.read()
     check_j.command(
@@ -449,14 +453,6 @@ def _make_genotype_jobs(
         if can_reuse(output_gvcf_path, overwrite):
             merge_gvcf_jobs.append(b.new_job(f'HaplotypeCaller, {sn} [reuse]'))
         else:
-            # if bam_fpath.endswith('.cram'):
-            #     index_path = os.path.splitext(bam_fpath)[0] + '.crai'
-            # else:
-            #     index_path = os.path.splitext(bam_fpath)[0] + '.bai'
-            # input_bam = b.read_input_group(
-            #     bam=bam_fpath,
-            #     bai=index_path,
-            # )
             haplotype_caller_jobs = []
             for idx in range(NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS):
                 haplotype_caller_jobs.append(
@@ -540,6 +536,7 @@ def _make_joint_genotype_jobs(
             dbsnp=dbsnp,
             overwrite=overwrite,
             interval_idx=idx,
+            number_of_samples=len(samples_to_be_in_db),
             number_of_intervals=NUMBER_OF_GENOMICS_DB_INTERVALS,
             output_vcf_path=output_vcf_path,
         )
@@ -579,7 +576,6 @@ def _add_split_intervals_job(
     interval_list: str,
     scatter_count: int,
     ref_fasta: str,
-    disk_size: int = 30,
 ) -> Job:
     """
     Split genome into intervals to parallelise GnarlyGenotyper.
@@ -588,9 +584,9 @@ def _add_split_intervals_job(
     """
     j = b.new_job(f'Make {scatter_count} intervals')
     j.image(GATK_CONTAINER)
-    mem_gb = 8
-    j.memory(f'{mem_gb}G')
-    j.storage(f'{disk_size}G')
+    java_mem = 3.5
+    j.memory('standard')  # ~ 4G/core ~ 4G
+    j.storage('16G')
     j.declare_resource_group(
         intervals={
             f'interval_{idx}': f'{{root}}/{str(idx).zfill(4)}-scattered.interval_list'
@@ -604,7 +600,7 @@ def _add_split_intervals_job(
     # Modes other than INTERVAL_SUBDIVISION will produce an unpredicted number 
     # of intervals. But we have to expect exactly the {scatter_count} number of 
     # output files because our workflow is not dynamic.
-    gatk --java-options -Xms{mem_gb - 1}g SplitIntervals \\
+    gatk --java-options -Xms{java_mem}g SplitIntervals \\
       -L {interval_list} \\
       -O {j.intervals} \\
       -scatter {scatter_count} \\
@@ -636,8 +632,8 @@ def _add_haplotype_caller_job(
     j.image(GATK_CONTAINER)
     j.cpu(2)
     java_mem = 7
-    j.memory('standard')  # ~ 4 Gi/core ~ 8
-    j.storage('16G')
+    j.memory('standard')  # ~ 4G/core ~ 7.5G
+    j.storage('8G')
     j.declare_resource_group(
         output_gvcf={
             'g.vcf.gz': '{root}-' + sample_name + '.g.vcf.gz',
@@ -682,8 +678,8 @@ def _add_merge_gvcfs_job(
     j.image(PICARD_CONTAINER)
     j.cpu(2)
     java_mem = 7
-    j.memory('standard')  # ~ 4 Gi/core ~ 8
-    j.storage(f'32G')
+    j.memory('standard')  # ~ 4G/core ~ 7.5G
+    j.storage(f'{len(gvcfs) * 1 + 1}G')
     j.declare_resource_group(
         output_gvcf={
             'g.vcf.gz': '{root}-' + sample_name + '.g.vcf.gz',
@@ -791,8 +787,9 @@ def _add_import_gvcfs_job(
     j.image(GATK_CONTAINER)
     j.cpu(16)
     java_mem = 15
-    j.memory('lowmem')
-    j.storage(f'50G')
+    j.memory('lowmem')  # ~ 1G/core ~ 16G
+    # 1G + 1G per sample divided by the number of intervals
+    j.storage(f'{1 + len(samples_will_be_in_db) * 1 // number_of_intervals}G')
     if depends_on:
         j.depends_on(*depends_on)
 
@@ -849,6 +846,7 @@ def _add_gatk_genotype_gvcf_job(
     reference: hb.ResourceGroup,
     dbsnp: hb.ResourceGroup,
     overwrite: bool,
+    number_of_samples: int,
     interval_idx: Optional[int] = None,
     number_of_intervals: int = 1,
     output_vcf_path: Optional[str] = None,
@@ -867,8 +865,9 @@ def _add_gatk_genotype_gvcf_job(
     j.image(GATK_CONTAINER)
     j.cpu(2)
     java_mem = 7
-    j.memory('standard')  # ~ 4 Gi/core ~ 8
-    j.storage(f'50G')
+    j.memory('standard')  # ~ 4G/core ~ 8G
+    # 1G + 1G per sample divided by the number of intervals
+    j.storage(f'{1 + number_of_samples * 1 // number_of_intervals}G')
     j.declare_resource_group(
         output_vcf={
             'vcf.gz': '{root}.vcf.gz',
@@ -923,8 +922,8 @@ def _add_final_gather_vcf_step(
     j.image(GATK_CONTAINER)
     j.cpu(2)
     java_mem = 7
-    j.memory('standard')  # ~ 4 Gi/core ~ 8
-    j.storage(f'100G')
+    j.memory('standard')  # ~ 4G/core ~ 7.5G
+    j.storage(f'{1 + len(input_vcfs) * 1}G')
     j.declare_resource_group(
         output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
     )
