@@ -679,7 +679,7 @@ def _add_merge_gvcfs_job(
     j.cpu(2)
     java_mem = 7
     j.memory('standard')  # ~ 4G/core ~ 7.5G
-    j.storage(f'{len(gvcfs) * 1 + 1}G')
+    j.storage(f'{len(gvcfs) * 1.5 + 2}G')
     j.declare_resource_group(
         output_gvcf={
             'g.vcf.gz': '{root}-' + sample_name + '.g.vcf.gz',
