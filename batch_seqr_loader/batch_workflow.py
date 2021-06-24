@@ -337,11 +337,11 @@ def _pedigree_checks(
         else:
             j = b.new_job(f'Somalier extract, {sn}')
             j.image(SOMALIER_CONTAINER)
-            j.memory(f'8G')
+            j.cpu(1)
             if input_path.endswith('.bam'):
-                j.storage(f'120G')
+                j.storage(f'200G')
             elif input_path.endswith('.cram'):
-                j.storage(f'30G')
+                j.storage(f'50G')
             else:
                 j.storage(f'10G')
             if depends_on:
@@ -369,8 +369,8 @@ def _pedigree_checks(
 
     relate_j = b.new_job(f'Somalier relate')
     relate_j.image(SOMALIER_CONTAINER)
-    relate_j.memory(f'8G')
-    relate_j.storage(f'10G')
+    relate_j.cpu(1)
+    relate_j.storage('10G')
     relate_j.depends_on(*extract_jobs)
     fp_files = [b.read_input(fp) for sn, fp in fp_file_by_sample.items()]
     relate_j.command(
