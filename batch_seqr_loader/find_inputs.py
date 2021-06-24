@@ -91,8 +91,8 @@ def find_inputs(
 
         df = pd.DataFrame(data=data).set_index('s', drop=False)
         ped_fpath = join(work_bucket, 'bare.ped')
-        df[['fam_id', 's', 'father_id', 'mother_id', 'sex', 'phenotype']].write(
-            ped_fpath
+        df[['fam_id', 's', 'father_id', 'mother_id', 'sex', 'phenotype']].to_csv(
+            ped_fpath, sep='\t', header=False, index=False
         )
 
     return df, ped_fpath
