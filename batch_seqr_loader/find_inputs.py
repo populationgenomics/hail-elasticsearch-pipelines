@@ -59,7 +59,7 @@ def find_inputs(
 
     else:
         # PED file not provided, so creating DataFrame purely from the found input files
-        data: Dict[str, List] = dict(s=[], file=[], type=[])
+        data: Dict[str, List] = dict(s=[], file=[], index=[], type=[])
         for input_type in found_files_by_type:
             for fp, index in zip(
                 found_files_by_type[input_type], found_indices_by_type[input_type]
