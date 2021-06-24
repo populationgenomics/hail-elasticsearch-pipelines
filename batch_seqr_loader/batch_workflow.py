@@ -8,8 +8,6 @@ Driver for loading data into SEQR for the CPG. See the README for more informati
 
 import json
 import logging
-
-# import math
 import os
 import shutil
 import subprocess
@@ -265,7 +263,7 @@ def main(
         genomicsdb_bucket=genomicsdb_bucket,
         samples_df=samples_df,
         reference=reference,
-        dbsnp=b.read_input_group(base=DBSNP_VCF, idx=DBSNP_VCF + '.idx'),
+        dbsnp=DBSNP_VCF,
         work_bucket=work_bucket,
         local_tmp_dir=local_tmp_dir,
         overwrite=overwrite,
@@ -488,7 +486,7 @@ def _make_joint_genotype_jobs(
     genomicsdb_bucket: str,
     samples_df: pd.DataFrame,
     reference: hb.ResourceGroup,
-    dbsnp: hb.ResourceGroup,
+    dbsnp: str,
     work_bucket: str,
     local_tmp_dir: str,
     overwrite: bool,
@@ -844,7 +842,7 @@ def _add_gatk_genotype_gvcf_job(
     genomicsdb: hb.ResourceFile,
     interval: hb.ResourceFile,
     reference: hb.ResourceGroup,
-    dbsnp: hb.ResourceGroup,
+    dbsnp: str,
     overwrite: bool,
     number_of_samples: int,
     interval_idx: Optional[int] = None,
@@ -866,8 +864,8 @@ def _add_gatk_genotype_gvcf_job(
     j.cpu(2)
     java_mem = 7
     j.memory('standard')  # ~ 4G/core ~ 8G
-    # 12G (dbsnp) + 4G (fasta+fai+dict) + 1G per sample divided by the number of intervals
-    j.storage(f'{12 + 4 + number_of_samples * 1 // number_of_intervals}G')
+    # 4G (fasta+fai+dict) + 1G per sample divided by the number of intervals
+    j.storage(f'{4 + number_of_samples * 1 // number_of_intervals}G')
     j.declare_resource_group(
         output_vcf={
             'vcf.gz': '{root}.vcf.gz',
@@ -888,7 +886,7 @@ def _add_gatk_genotype_gvcf_job(
       GenotypeGVCFs \\
       -R {reference.base} \\
       -O {j.output_vcf['vcf.gz']} \\
-      -D {dbsnp.base} \\
+      -D {dbsnp} \\
       --only-output-calls-starting-in-intervals \\
       -V gendb://workspace \\
       -L {interval} \\
