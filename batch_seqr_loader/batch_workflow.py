@@ -606,6 +606,7 @@ def _add_split_intervals_job(
       -mode INTERVAL_SUBDIVISION
       """
     )
+    # Could save intervals to a bucket here to avoid rerunning the job
     return j
 
 
