@@ -335,8 +335,8 @@ def _pedigree_checks(
         else:
             j = b.new_job(f'Somalier extract, {sn}')
             j.image(SOMALIER_CONTAINER)
-            j.cpu(1)
-            j.memory('standard')  # ~ 4G/core ~ 4G
+            j.cpu(2)
+            j.memory('highmem')  # ~ 4G/core ~ 8G
             if input_path.endswith('.bam'):
                 j.storage(f'200G')
             elif input_path.endswith('.cram'):
