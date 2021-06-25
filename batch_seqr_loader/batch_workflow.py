@@ -232,34 +232,17 @@ def main(
     #     overwrite=overwrite,
     # )
 
-    hc_intervals_j = _add_split_intervals_job(
-        b,
-        UNPADDED_INTERVALS,
-        NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS,
-        REF_FASTA,
-    )
-    if ped_check_j is not None:
-        hc_intervals_j.depends_on(ped_check_j)
-
     genotype_jobs, samples_df = _make_genotype_jobs(
         b=b,
-        intervals=hc_intervals_j.intervals,
         samples_df=samples_df,
         reference=reference,
         work_bucket=work_bucket,
         overwrite=overwrite,
-    )
-
-    db_intervals_j = _add_split_intervals_job(
-        b,
-        UNPADDED_INTERVALS,
-        NUMBER_OF_GENOMICS_DB_INTERVALS,
-        REF_FASTA,
+        depends_on=[ped_check_j] if ped_check_j else [],
     )
 
     joint_genotype_job, gathered_vcf_path = _make_joint_genotype_jobs(
         b=b,
-        intervals=db_intervals_j.intervals,
         genomicsdb_bucket=genomicsdb_bucket,
         samples_df=samples_df,
         reference=reference,
@@ -331,7 +314,7 @@ def _pedigree_checks(
     ):
         fp_file_by_sample[sn] = join(fingerprints_bucket, f'{sn}.somalier')
         if can_reuse(fp_file_by_sample[sn], overwrite):
-            extract_jobs.append(b.new_job(f'Somalier Extract, {sn} [reuse]'))
+            extract_jobs.append(b.new_job(f'Somalier extract, {sn} [reuse]'))
         else:
             j = b.new_job(f'Somalier extract, {sn}')
             j.image(SOMALIER_CONTAINER)
@@ -430,7 +413,6 @@ python check_pedigree.py \\
 
 def _make_genotype_jobs(
     b: hb.Batch,
-    intervals: hb.ResourceGroup,
     samples_df: pd.DataFrame,
     reference: hb.ResourceGroup,
     work_bucket: str,  # pylint: disable=unused-argument
@@ -444,6 +426,8 @@ def _make_genotype_jobs(
     HaplotypeCaller is run in an interval-based sharded way, with per-interval
     HaplotypeCaller jobs defined in a nested loop.
     """
+    intervals_j = None
+
     merge_gvcf_jobs = []
     bams_df = samples_df[samples_df['type'] == 'bam']
     for sn, bam_fpath in zip(bams_df['s'], bams_df['file']):
@@ -452,12 +436,21 @@ def _make_genotype_jobs(
             merge_gvcf_jobs.append(b.new_job(f'HaplotypeCaller, {sn} [reuse]'))
         else:
             haplotype_caller_jobs = []
+            if intervals_j is None:
+                intervals_j = _add_split_intervals_job(
+                    b,
+                    UNPADDED_INTERVALS,
+                    NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS,
+                    REF_FASTA,
+                )
+                if depends_on:
+                    intervals_j.depends_on(depends_on)
             for idx in range(NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS):
                 haplotype_caller_jobs.append(
                     _add_haplotype_caller_job(
                         b,
                         bam_fpath,
-                        interval=intervals[f'interval_{idx}'],
+                        interval=intervals_j.intervals[f'interval_{idx}'],
                         reference=reference,
                         sample_name=sn,
                         interval_idx=idx,
@@ -482,7 +475,6 @@ def _make_genotype_jobs(
 
 def _make_joint_genotype_jobs(
     b: hb.Batch,
-    intervals: hb.ResourceGroup,
     genomicsdb_bucket: str,
     samples_df: pd.DataFrame,
     reference: hb.ResourceGroup,
@@ -497,12 +489,19 @@ def _make_joint_genotype_jobs(
     Adds samples to the GenomicsDB and runs joint genotyping on them.
     Outputs a multi-sample VCF under `output_vcf_path`.
     """
+    intervals_j = _add_split_intervals_job(
+        b,
+        UNPADDED_INTERVALS,
+        NUMBER_OF_GENOMICS_DB_INTERVALS,
+        REF_FASTA,
+    )
+    if depends_on:
+        intervals_j.depends_on(depends_on)
 
     genotype_vcf_jobs = []
     genotyped_vcfs = []
 
     samples_to_be_in_db_per_interval = dict()
-
     for idx in range(NUMBER_OF_GENOMICS_DB_INTERVALS):
         genomicsdb_gcs_path = join(
             genomicsdb_bucket,
@@ -515,10 +514,9 @@ def _make_joint_genotype_jobs(
             samples_df=samples_df,
             work_bucket=work_bucket,
             local_tmp_dir=local_tmp_dir,
-            interval=intervals[f'interval_{idx}'],
+            interval=intervals_j.intervals[f'interval_{idx}'],
             interval_idx=idx,
             number_of_intervals=NUMBER_OF_GENOMICS_DB_INTERVALS,
-            depends_on=depends_on,
         )
 
         samples_to_be_in_db_per_interval[idx] = samples_to_be_in_db
@@ -529,7 +527,7 @@ def _make_joint_genotype_jobs(
         genotype_vcf_job = _add_gatk_genotype_gvcf_job(
             b,
             genomicsdb=b.read_input(genomicsdb_gcs_path),
-            interval=intervals[f'interval_{idx}'],
+            interval=intervals_j.intervals[f'interval_{idx}'],
             reference=reference,
             dbsnp=dbsnp,
             overwrite=overwrite,
