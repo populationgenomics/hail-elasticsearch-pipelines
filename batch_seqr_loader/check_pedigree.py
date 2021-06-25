@@ -148,9 +148,6 @@ def infer_relationship(coeff: float, ibs0: float, ibs2: float) -> str:
         result = 'unrelated'
     elif 0.1 <= coeff < 0.38:
         result = 'below_first_degree'
-        # Distinguish between uncle/grandparent and double-first cousins, setting the latter to unrelated
-        # Remove any relationship below uncle/grandparent from the second degree relatives category
-
     elif 0.38 <= coeff <= 0.62:
         if ibs0 / ibs2 < 0.005:
             result = 'parent-child'
