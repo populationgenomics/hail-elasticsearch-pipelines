@@ -783,8 +783,8 @@ def _add_import_gvcfs_job(
     j = b.new_job(job_name)
     j.image(GATK_CONTAINER)
     j.cpu(16)
-    java_mem = 15
-    j.memory('lowmem')  # ~ 1G/core ~ 16G
+    java_mem = 14
+    j.memory('lowmem')  # ~ 1G/core ~ 14.4G
     # 1G + 1G per sample divided by the number of intervals
     j.storage(f'{1 + len(samples_will_be_in_db) * 1 // number_of_intervals}G')
     if depends_on:
