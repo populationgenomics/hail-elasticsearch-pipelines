@@ -168,7 +168,7 @@ def _df_based_on_ped_file(
     """
     local_sample_list_fpath = join(local_tmp_dir, basename(ped_fpath))
     subprocess.run(
-        f'gsutil cat {ped_fpath} | grep -v ^Family.ID > {local_sample_list_fpath}',
+        f'gsutil cat {ped_fpath} | grep -v ^Family.ID | cut -f1-6 > {local_sample_list_fpath}',
         check=False,
         shell=True,
     )

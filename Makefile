@@ -29,10 +29,10 @@ run_test:
 	--description "test seqr loader - test" \
 	batch_seqr_loader/batch_workflow.py \
 	--namespace   test \
-	--dataset     "BB01-BB02" \
 	--version     $(TEST_VERSION) \
-	--gvcf-bucket "gs://cpg-seqr-test/datasets/BB01" \
-	--ped-file    "gs://cpg-seqr-test/datasets/BB01/BB01.ped" \
+	--dataset     "BB01-BB02" \
+	--gvcf-bucket "gs://cpg-seqr-test/batches/BB01" \
+	--ped-file    "gs://cpg-seqr-test/batches/BB01/BB01.ped" \
 	--keep-scratch \
 	--reuse
 
@@ -47,8 +47,8 @@ run_test_extend:
 	--namespace   test \
 	--version     $(TEST_VERSION) \
 	--dataset     "BB01-BB02" \
-	--gvcf-bucket "gs://cpg-seqr-test/datasets/BB02" \
-	--ped-file    "gs://cpg-seqr-test/datasets/BB02/BB02.ped" \
+	--gvcf-bucket "gs://cpg-seqr-test/batches/BB02" \
+	--ped-file    "gs://cpg-seqr-test/batches/BB02/BB02.ped" \
 	--keep-scratch \
 	--reuse
 
@@ -63,8 +63,8 @@ run_test_mismatched:
 	--namespace   test \
 	--version     $(TEST_VERSION) \
 	--dataset     "BB01-BB02-mismatched" \
-	--gvcf-bucket "gs://cpg-seqr-test/datasets/BB02" \
-	--ped-file    "gs://cpg-seqr-test/datasets/BB02/BB02-mismatched.ped" \
+	--gvcf-bucket "gs://cpg-seqr-test/batches/BB01" \
+	--ped-file    "gs://cpg-seqr-test/batches/BB01/BB01-mismatched.ped" \
 	--keep-scratch \
 	--reuse
 
@@ -79,7 +79,7 @@ run_test_cram:
 	--namespace   test \
 	--version     $(TEST_VERSION) \
 	--dataset     "NA12878-cram" \
-	--cram-bucket "gs://cpg-seqr-test/datasets/NA12878-cram" \
+	--cram-bucket "gs://cpg-seqr-test/batches/NA12878-cram" \
 	--keep-scratch \
 	--reuse
 
