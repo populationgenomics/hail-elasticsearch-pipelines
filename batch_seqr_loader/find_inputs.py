@@ -101,7 +101,7 @@ def find_inputs(
             data['index'].append(None)
             data['type'].append('fastq_to_realign')
 
-    df = pd.DataFrame(data=data).set_index('s', drop=False)
+    df = pd.DataFrame(data=data).set_index('Individual.ID', drop=False)
 
     # If PED file is provided, adding it and comparing to the found input files
     if ped_fpath:
