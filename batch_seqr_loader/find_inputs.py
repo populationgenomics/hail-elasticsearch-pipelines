@@ -244,11 +244,12 @@ def _add_ped_info(
         )
 
     for sn in ped_snames:
-        df.loc[sn, 'Family.ID'] = ped_df.loc[sn, 'Family.ID']
-        df.loc[sn, 'Paternal.ID'] = ped_df.loc[sn, 'Paternal.ID']
-        df.loc[sn, 'Maternal.ID'] = ped_df.loc[sn, 'Maternal.ID']
-        df.loc[sn, 'Sex'] = ped_df.loc[sn, 'Sex']
-        df.loc[sn, 'Phenotype'] = ped_df.loc[sn, 'Phenotype']
+        if sn in snames:
+            df.loc[sn, 'Family.ID'] = ped_df.loc[sn, 'Family.ID']
+            df.loc[sn, 'Paternal.ID'] = ped_df.loc[sn, 'Paternal.ID']
+            df.loc[sn, 'Maternal.ID'] = ped_df.loc[sn, 'Maternal.ID']
+            df.loc[sn, 'Sex'] = ped_df.loc[sn, 'Sex']
+            df.loc[sn, 'Phenotype'] = ped_df.loc[sn, 'Phenotype']
 
     return df
 
