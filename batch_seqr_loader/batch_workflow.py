@@ -317,7 +317,7 @@ def _pedigree_checks(
     extract_jobs = []
     fp_file_by_sample = dict()
     for sn, input_path, input_index in zip(
-        samples_df['s'], samples_df['file'], samples_df['index']
+        samples_df['Individual.ID'], samples_df['file'], samples_df['index']
     ):
         fp_file_by_sample[sn] = join(fingerprints_bucket, f'{sn}.somalier')
         if can_reuse(fp_file_by_sample[sn], overwrite):
@@ -384,7 +384,7 @@ def _pedigree_checks(
     )
 
     # Copy somalier outputs to buckets
-    sample_hash = hash_sample_names(samples_df['s'])
+    sample_hash = hash_sample_names(samples_df['Individual.ID'])
     prefix = join(fingerprints_bucket, sample_hash, 'somalier')
     somalier_samples_path = f'{prefix}.samples.tsv'
     somalier_pairs_path = f'{prefix}.pairs.tsv'
@@ -437,7 +437,7 @@ def _make_genotype_jobs(
 
     merge_gvcf_jobs = []
     bams_df = samples_df[samples_df['type'] == 'cram']
-    for sn, bam_fpath in zip(bams_df['s'], bams_df['file']):
+    for sn, bam_fpath in zip(bams_df['Individual.ID'], bams_df['file']):
         output_gvcf_path = join(work_bucket, f'{sn}.g.vcf.gz')
         if can_reuse(output_gvcf_path, overwrite):
             merge_gvcf_jobs.append(b.new_job(f'HaplotypeCaller, {sn} [reuse]'))
@@ -779,7 +779,7 @@ def _add_import_gvcfs_job(
         return None, samples_will_be_in_db
 
     sample_map_fpath = join(work_bucket, 'work', 'sample_name.csv')
-    samples_to_add_df[['s', 'file']].to_csv(
+    samples_to_add_df[['Individual.ID', 'file']].to_csv(
         sample_map_fpath, sep='\t', header=False, index=False
     )
     sample_name_map = b.read_input(sample_map_fpath)
