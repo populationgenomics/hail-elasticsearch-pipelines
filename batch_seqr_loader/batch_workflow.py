@@ -60,24 +60,31 @@ logger.setLevel(logging.INFO)
 
 @click.command()
 @click.option(
-    '--gvcf-bucket',
-    'gvcf_buckets',
+    '--gvcf',
+    'gvcfs',
     multiple=True,
-    help='Bucket path with input GVCF files along with tbi indices',
+    help='Glob path to input GVCF files.C orresponding tbi index files are expected '
+    'exist',
 )
 @click.option(
-    '--bam-bucket',
-    '--cram-bucket',
-    'bam_buckets',
+    '--bam',
+    '--cram',
+    'crams',
     multiple=True,
-    help='Bucket path with input BAM or CRAM files',
+    help='Glob path to input BAM or CRAM files. Corresponding bai/crai indices are '
+    'expected to existVariants will be called with GATK HaplotypeCaller',
 )
 @click.option(
-    '--bam-to-realign-bucket',
-    '--cram-to-realign-bucket',
-    'bam_to_realign_buckets',
+    '--bam-to-realign',
+    '--cram-to-realign',
+    '--fastq-to-realign',
+    '--data-to-realign',
+    'data_to_realign',
     multiple=True,
-    help='Bucket path with input BAM or CRAM files that need re-alignment',
+    help='Glob path with input BAM/CRAM/FASTQ files that need re-alignment. '
+    'For BAMs and CRAMs, corresponding bai/crai indices are expected to exist. '
+    'Files will be (re-)aligned with BWA, and variants will be called with '
+    'GATK HaplotypeCaller',
 )
 @click.option(
     '--dataset',
@@ -131,9 +138,9 @@ logger.setLevel(logging.INFO)
 )
 @click.option('--vep-block-size', 'vep_block_size')
 def main(
-    gvcf_buckets: List[str],
-    bam_buckets: List[str],
-    bam_to_realign_buckets: List[str],
+    gvcfs: List[str],
+    crams: List[str],
+    data_to_realign: List[str],
     dataset_name: str,
     dataset_version: str,
     output_namespace: str,
@@ -149,11 +156,11 @@ def main(
     namespace: Optional[str] = None,
     vep_block_size: Optional[int] = None,  # pylint: disable=unused-argument
 ):  # pylint: disable=missing-function-docstring
-    if not (gvcf_buckets or bam_buckets or bam_to_realign_buckets):
+    if not (gvcfs or crams or data_to_realign):
         raise click.BadParameter(
             'Specify at least one of the input parameters '
             '(can be multiple and/or repeated): '
-            '--gvcf-bucket, --bam-bucket, --bam-to-realign-bucket'
+            '--gvcf, --cram, --bam, --data-to-realign'
         )
 
     project = 'seqr'
@@ -195,9 +202,9 @@ def main(
     local_tmp_dir = tempfile.mkdtemp()
 
     samples_df, ped_fpath = find_inputs(
-        gvcf_buckets,
-        bam_buckets,
-        bam_to_realign_buckets,
+        gvcfs,
+        crams,
+        data_to_realign,
         local_tmp_dir=local_tmp_dir,
         work_bucket=work_bucket,
         ped_fpath=ped_fpath,
@@ -429,7 +436,7 @@ def _make_genotype_jobs(
     intervals_j = None
 
     merge_gvcf_jobs = []
-    bams_df = samples_df[samples_df['type'] == 'bam']
+    bams_df = samples_df[samples_df['type'] == 'cram']
     for sn, bam_fpath in zip(bams_df['s'], bams_df['file']):
         output_gvcf_path = join(work_bucket, f'{sn}.g.vcf.gz')
         if can_reuse(output_gvcf_path, overwrite):

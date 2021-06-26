@@ -8,7 +8,7 @@ import logging
 import os
 import re
 import subprocess
-from os.path import join, basename
+from os.path import join, basename, splitext
 from typing import Optional, List, Dict, Tuple
 import pandas as pd
 from utils import file_exists
@@ -19,9 +19,9 @@ logger.setLevel(logging.INFO)
 
 
 def find_inputs(
-    gvcf_buckets: List[str],
-    bam_buckets: List[str],
-    bam_to_realign_buckets: List[str],
+    gvcfs: List[str],
+    crams: List[str],
+    data_to_realign: List[str],
     local_tmp_dir: str,
     work_bucket: str,
     ped_fpath: Optional[str] = None,
@@ -30,10 +30,10 @@ def find_inputs(
     Find input files (.g.vcf.gz, .bam or .cram) in provided buckets,
     along with corresponding indices (tbi, bai, crai).
     Compares sample names to the provided PED, and returns DataFrame.
-    :param gvcf_buckets: buckets to find GVCF files
-    :param bam_buckets: buckets to find BAM files
+    :param gvcfs: glob paths to find GVCF files
+    :param crams: glob paths to find CRAM/BAM files
         (will be passed to HaplotypeCaller to produce GVCFs)
-    :param bam_to_realign_buckets: buckets to find BAM files
+    :param data_to_realign: buckets to find CRAM/BAM files
         (will be re-aligned with BWA before passing to HaplotypeCaller)
     :param work_bucket: bucket for temporary files
     :param ped_fpath: pedigree file. If not provided, a bare one will be generated
@@ -43,123 +43,161 @@ def find_inputs(
     :return: a tuple of a DataFrame with the pedigree information and paths to
         input files (columns: s, file, index, type), and a path to a PED file
     """
-    input_buckets_by_type = dict(
-        gvcf=gvcf_buckets,
-        bam=bam_buckets,
-        bam_to_realign=bam_to_realign_buckets,
+    gvcfs, crams, fastq_to_align, cram_to_realign = _find_files_by_type(
+        gvcfs, crams, data_to_realign
     )
-    found_files_by_type = _find_files_by_type(input_buckets_by_type)
-    found_indices_by_type = _find_file_indices(found_files_by_type)
+    gvcf_with_index_by_by_sn = _find_file_indices(gvcfs)
+    cram_with_index_by_by_sn = _find_file_indices(crams)
+    fastq_pairs_by_by_sn = _find_fastq_pairs(fastq_to_align)
+    cram_with_index_to_realign_by_sn = _find_file_indices(cram_to_realign)
 
+    data: Dict[str, List] = {
+        'Family.ID': [],
+        'Individual.ID': [],
+        'Paternal.ID': [],
+        'Maternal.ID': [],
+        'Sex': [],
+        'Phenotype': [],
+        'file': [],
+        'file2': [],
+        'index': [],
+        'type': [],
+    }
+    all_sns = (
+        set(gvcf_with_index_by_by_sn.keys())
+        | set(cram_with_index_by_by_sn.keys())
+        | set(fastq_pairs_by_by_sn.keys())
+        | set(cram_with_index_to_realign_by_sn.keys())
+    )
+    for sn in all_sns:
+        data['Individual.ID'].append(sn)
+        data['Family.ID'].append(sn)
+        data['Paternal.ID'].append('0')
+        data['Maternal.ID'].append('0')
+        data['Sex'].append('0')
+        data['Phenotype'].append('0')
+        if sn in gvcf_with_index_by_by_sn:
+            file, index = gvcf_with_index_by_by_sn[sn]
+            data['file'].append(file)
+            data['file2'].append(None)
+            data['index'].append(index)
+            data['type'].append('gvcf')
+        if sn in cram_with_index_by_by_sn:
+            file, index = cram_with_index_by_by_sn[sn]
+            data['file'].append(file)
+            data['file2'].append(None)
+            data['index'].append(index)
+            data['type'].append('cram')
+        if sn in cram_with_index_to_realign_by_sn:
+            file, index = cram_with_index_to_realign_by_sn[sn]
+            data['file'].append(file)
+            data['file2'].append(None)
+            data['index'].append(index)
+            data['type'].append('cram_to_realign')
+        if sn in cram_with_index_to_realign_by_sn:
+            file1, file2 = fastq_pairs_by_by_sn[sn]
+            data['file'].append(file1)
+            data['file2'].append(file2)
+            data['index'].append(None)
+            data['type'].append('fastq_to_realign')
+
+    df = pd.DataFrame(data=data).set_index('s', drop=False)
+
+    # If PED file is provided, adding it and comparing to the found input files
     if ped_fpath:
-        # PED file provided, so creating DataFrame based on sample names in the file,
-        # and comparing to found input files
-        df = _df_based_on_ped_file(
-            ped_fpath,
-            found_files_by_type,
-            found_indices_by_type,
-            local_tmp_dir,
-        )
+        df = _add_ped_info(df, ped_fpath, local_tmp_dir)
 
-    else:
-        # PED file not provided, so creating DataFrame purely from the found input files
-        data: Dict[str, List] = dict(
-            fam_id=[],
-            s=[],
-            father_id=[],
-            mother_id=[],
-            sex=[],
-            phenotype=[],
-            file=[],
-            index=[],
-            type=[],
-        )
-        for input_type in found_files_by_type:
-            for fp, index in zip(
-                found_files_by_type[input_type], found_indices_by_type[input_type]
-            ):
-                sn = _get_file_base_name(fp)
-                data['s'].append(sn)
-                data['file'].append(fp)
-                data['index'].append(index)
-                data['type'].append(input_type)
-                data['fam_id'].append(sn)
-                data['father_id'].append('0')
-                data['mother_id'].append('0')
-                data['sex'].append('0')
-                data['phenotype'].append('0')
-
-        df = pd.DataFrame(data=data).set_index('s', drop=False)
-        ped_fpath = join(work_bucket, 'bare.ped')
-        df[['fam_id', 's', 'father_id', 'mother_id', 'sex', 'phenotype']].to_csv(
-            ped_fpath, sep='\t', header=False, index=False
-        )
-
-    return df, ped_fpath
+    new_ped_fpath = join(work_bucket, 'data.ped')
+    df.to_csv(new_ped_fpath, sep='\t', header=False, index=False)
+    return df, new_ped_fpath
 
 
 def _find_files_by_type(
-    input_buckets_by_type: Dict[str, List[str]]
-) -> Dict[str, List[str]]:
+    gvcf_globs: List[str],
+    crams_globs: List[str],
+    data_to_realign_globs: List[str],
+) -> Tuple[List[str], List[str], List[str], List[str]]:
     """
-    Find input files like .g.vcf.gz, .bam, .cram
+    Find input files like .g.vcf.gz, .bam, .cram, .fastq
+    Return 4 lists of paths: gvcfs, crams, fastq_to_align, cram_to_realign
     """
-    found_files_by_type: Dict[str, List[str]] = {t: [] for t in input_buckets_by_type}
-    for input_type, buckets in input_buckets_by_type.items():
-        patterns = ['*.g.vcf.gz'] if input_type == 'gvcf' else ['*.bam', '*.cram']
-        for ib in buckets:
-            for pattern in patterns:
-                cmd = f"gsutil ls '{join(ib, pattern)}'"
-                try:
-                    found_files_by_type[input_type].extend(
-                        line.strip()
-                        for line in subprocess.check_output(cmd, shell=True)
-                        .decode()
-                        .split()
-                    )
-                except subprocess.CalledProcessError:
-                    pass
-    return found_files_by_type
+    input_globs_by_type = dict(
+        gvcf=gvcf_globs,
+        cram=crams_globs,
+        data_to_realign=data_to_realign_globs,
+    )
+
+    expected_ext_by_type = dict(
+        gvcf='.g.vcf.gz',
+        cram=['.cram', '.bam'],
+        data_to_realign=['.cram', '.bam', '.fq', '.fastq', '.fq.gz', '.fastq.gz'],
+    )
+
+    gvcfs = []
+    crams = []
+    fastq_to_align = []
+    cram_to_realign = []
+
+    for input_type, glob_paths in input_globs_by_type.items():
+        for glob_path in glob_paths:
+            assert any(
+                glob_path.endswith(ext) for ext in expected_ext_by_type[input_type]
+            ), (input_type, glob_path)
+            glob_path = glob_path.lstrip("'").rstrip("'")
+            cmd = f"gsutil ls '{glob_path}'"
+            found_files = [
+                line.strip()
+                for line in subprocess.check_output(cmd, shell=True).decode().split()
+            ]
+            if input_type == 'data_to_realign':
+                if glob_path.endswith('.cram') or glob_path.endswith('.bam'):
+                    cram_to_realign.extend(found_files)
+                else:
+                    fastq_to_align.extend(found_files)
+            elif input_type == 'gvcf':
+                gvcfs.extend(found_files)
+            elif input_type == 'cram':
+                crams.extend(found_files)
+
+    return gvcfs, crams, fastq_to_align, cram_to_realign
 
 
-def _find_file_indices(
-    found_files_by_type: Dict[str, List[str]]
-) -> Dict[str, List[str]]:
+def _find_file_indices(fpaths: List[str]) -> Dict[str, Tuple[str, str]]:
     """
     Find corresponding index files. Will look for:
     '<sample>.g.vcf.gz.tbi' for '<sample>.g.vcf.gz',
     '<sample>.bam.bai' or '<sample>.bai' for '<sample>.bam',
     '<sample>.cram.crai' or '<sample>.crai' for '<sample>.cram',
+
+    Returns a dict mapping sample name to a pair of file paths (file, index)
     """
-    found_indices_by_type: Dict[str, List[str]] = {t: [] for t in found_files_by_type}
-    for input_type, fpaths in found_files_by_type.items():
-        for fp in fpaths:
-            index = fp + '.tbi'
-            if fp.endswith('.g.vcf.gz'):
+    result: Dict[str, Tuple[str, str]] = dict()
+    for fp in fpaths:
+        index = fp + '.tbi'
+        if fp.endswith('.g.vcf.gz'):
+            if not file_exists(index):
+                logger.critical(f'Not found TBI index for file {fp}')
+        elif fp.endswith('.bam'):
+            index = fp + '.bai'
+            if not file_exists(index):
+                index = re.sub('.bam$', '.bai', fp)
                 if not file_exists(index):
-                    logger.critical(f'Not found TBI index for file {fp}')
-            elif fp.endswith('.bam'):
-                index = fp + '.bai'
+                    logger.critical(f'Not found BAI index for file {fp}')
+        elif fp.endswith('.cram'):
+            index = fp + '.crai'
+            if not file_exists(index):
+                index = re.sub('.cram$', '.crai', fp)
                 if not file_exists(index):
-                    index = re.sub('.bam$', '.bai', fp)
-                    if not file_exists(index):
-                        logger.critical(f'Not found BAI index for file {fp}')
-            elif fp.endswith('.cram'):
-                index = fp + '.crai'
-                if not file_exists(index):
-                    index = re.sub('.cram$', '.crai', fp)
-                    if not file_exists(index):
-                        logger.critical(f'Not found CRAI index for file {fp}')
-            else:
-                logger.critical(f'Unrecognised input file extention {fp}')
-            found_indices_by_type[input_type].append(index)
-    return found_indices_by_type
+                    logger.critical(f'Not found CRAI index for file {fp}')
+        else:
+            logger.critical(f'Unrecognised input file extention {fp}')
+        result[_get_file_base_name(fp)] = fp, index
+    return result
 
 
-def _df_based_on_ped_file(
+def _add_ped_info(
+    df: pd.DataFrame,
     ped_fpath: str,
-    found_files_by_type: Dict[str, List[str]],
-    found_indices_by_type: Dict[str, List[str]],
     local_tmp_dir: str,
 ) -> pd.DataFrame:
     """
@@ -172,64 +210,45 @@ def _df_based_on_ped_file(
         check=False,
         shell=True,
     )
-    df = pd.read_csv(
+    ped_df = pd.read_csv(
         local_sample_list_fpath,
         delimiter='\t',
-        names=['fam_id', 's', 'father_id', 'mother_id', 'sex', 'phenotype'],
-    ).set_index('s', drop=False)
-    ped_snames = list(df['s'])
+        names=[
+            'Family.ID',
+            'Individual.ID',
+            'Paternal.ID',
+            'Maternal.ID',
+            'Sex',
+            'Phenotype',
+        ],
+    ).set_index('Individual.ID', drop=False)
+
+    snames = set(df['Individual.ID'])
+    ped_snames = set(ped_df['Individual.ID'])
 
     # Checking that file base names have a 1-to-1 match with the samples in PED
     # First, checking the match of PED sample names to input files
-    all_input_snames = []
-    for fpaths in found_files_by_type.values():
-        all_input_snames.extend([_get_file_base_name(fp) for fp in fpaths])
-
-    mismatches_with_ped_found = False
-
-    for ped_sname in ped_snames:
-        matching_files = [
-            input_sname for input_sname in all_input_snames if ped_sname == input_sname
-        ]
-        if len(matching_files) > 1:
-            logging.warning(
-                f'Multiple input files found for the sample {ped_sname}:'
-                f'{matching_files}'
-            )
-            mismatches_with_ped_found = True
-        elif len(matching_files) == 0:
-            logging.warning(f'No files found for the sample {ped_sname}')
-            mismatches_with_ped_found = True
-
-    # Second, checking the match of input files to PED sample names, and filling a dict
-    for input_type in found_files_by_type:
-        for fp, index in zip(
-            found_files_by_type[input_type], found_indices_by_type[input_type]
-        ):
-            input_sname = _get_file_base_name(fp)
-            matching_sn = [sn for sn in ped_snames if sn == input_sname]
-            if len(matching_sn) > 1:
-                logging.warning(
-                    f'Multiple PED records found for the input {input_sname}:'
-                    f'{matching_sn}'
-                )
-                mismatches_with_ped_found = True
-            elif len(matching_sn) == 0:
-                logging.warning(f'No PED records found for the input {input_sname}')
-                mismatches_with_ped_found = True
-            else:
-                df.loc[matching_sn[0], 'type'] = input_type
-                df.loc[matching_sn[0], 'file'] = fp
-                df.loc[matching_sn[0], 'index'] = index
-
-    if mismatches_with_ped_found:
-        logging.critical(
-            'Mismatches found between provided input bucket contents, '
-            'and the provided PED file. Make sure all files in the buckets are '
-            'named after sample names in the PED file as '
-            '{sample}.cram, {sample}.g.vcf.gz, etc'
+    if ped_snames - snames:
+        logging.warning(
+            f'No files found for the PED samples: {", ".join(ped_snames - snames)}'
         )
-    df = df[df.file.notnull()]
+    if snames - ped_snames:
+        logging.warning(
+            f'No PED records found for the inputs: {", ".join(snames - ped_snames)}'
+        )
+    if ped_snames != snames:
+        logging.warning(
+            'Mismatches found between provided inputs and the provided PED file. '
+            'Make sure all input files are named after sample names in the PED file: '
+            '{sample}.cram, {sample}.g.vcf.gz, etc.'
+        )
+
+    for sn in ped_snames:
+        df.loc[sn, 'Family.ID'] = ped_df.loc[sn, 'Family.ID']
+        df.loc[sn, 'Paternal.ID'] = ped_df.loc[sn, 'Paternal.ID']
+        df.loc[sn, 'Maternal.ID'] = ped_df.loc[sn, 'Maternal.ID']
+        df.loc[sn, 'Gender.ID'] = ped_df.loc[sn, 'Gender.ID']
+
     return df
 
 
@@ -239,3 +258,80 @@ def _get_file_base_name(file_path):
     assumed sample name (i.e. assumes file named as gs://path/to/{sample}.g.vcf.gz)
     """
     return re.sub('(.bam|.cram|.g.vcf.gz)$', '', os.path.basename(file_path))
+
+
+def splitext_gz(fname: str) -> Tuple[str, str]:
+    """
+    Split on file extensions, allowing for zipped extensions.
+    """
+    base, ext = splitext(fname)
+    if ext in ['.gz', '.bz2', '.zip']:
+        base, ext2 = splitext(base)
+        ext = ext2 + ext
+    return base, ext
+
+
+def _find_fastq_pairs(fpaths: List[str]) -> Dict[str, Tuple[str, str]]:
+    """
+    Find pairs of FASTQ files
+    """
+    logger.info('Finding FASTQ pairs...')
+
+    fastqs_by_sample_name: Dict[str, Tuple[Optional[str], Optional[str]]] = dict()
+    for fpath in fpaths:
+        fn, ext = splitext_gz(basename(fpath))
+        if ext in ['.fq', '.fq.gz', '.fastq', '.fastq.gz']:
+            sname, l_fpath, r_fpath = None, None, None
+            if fn.endswith('_1'):
+                sname = fn[:-2]
+                l_fpath = fpath
+            elif fn.endswith('_R1'):
+                sname = fn[:-3]
+                l_fpath = fpath
+            elif fn.endswith('_2'):
+                sname = fn[:-2]
+                r_fpath = fpath
+            elif fn.endswith('_R2'):
+                sname = fn[:-3]
+                r_fpath = fpath
+
+            if sname:
+                m = re.match(r'(.*)_S\d+', sname)
+                if m:
+                    sname = m.group(1)
+                sname = sname.replace('-', '_')
+            else:
+                sname = fn
+                logger.info('Cannot detect file for ' + sname)
+
+            l, r = fastqs_by_sample_name.get(sname, (None, None))
+            if l and l_fpath:
+                logger.critical(
+                    'Duplicated left FASTQ files for '
+                    + sname
+                    + ': '
+                    + l
+                    + ' and '
+                    + l_fpath
+                )
+            if r and r_fpath:
+                logger.critical(
+                    'Duplicated right FASTQ files for '
+                    + sname
+                    + ': '
+                    + r
+                    + ' and '
+                    + r_fpath
+                )
+            fastqs_by_sample_name[sname] = l or l_fpath, r or r_fpath
+
+    paired_fastqs_by_sample_name: Dict[str, Tuple[str, str]] = dict()
+    for sname, (l, r) in fastqs_by_sample_name.items():
+        if not l:
+            logger.error(f'ERROR: for sample {sname} left reads not found')
+        if not r:
+            logger.error(f'ERROR: for sample {sname} right reads not found')
+        if l and r:
+            paired_fastqs_by_sample_name[sname] = str(l), str(r)
+
+    return paired_fastqs_by_sample_name
