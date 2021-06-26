@@ -53,7 +53,7 @@ def find_inputs(
 
     data: Dict[str, List] = {
         'Family.ID': [],
-        'Individual.ID': [],
+        's': [],
         'Paternal.ID': [],
         'Maternal.ID': [],
         'Sex': [],
@@ -70,7 +70,7 @@ def find_inputs(
         | set(cram_with_index_to_realign_by_sn.keys())
     )
     for sn in all_sns:
-        data['Individual.ID'].append(sn)
+        data['s'].append(sn)
         data['Family.ID'].append(sn)
         data['Paternal.ID'].append('0')
         data['Maternal.ID'].append('0')
@@ -101,7 +101,7 @@ def find_inputs(
             data['index'].append(None)
             data['type'].append('fastq_to_realign')
 
-    df = pd.DataFrame(data=data).set_index('Individual.ID', drop=False)
+    df = pd.DataFrame(data=data).set_index('s', drop=False)
 
     # If PED file is provided, adding it and comparing to the found input files
     if ped_fpath:
@@ -215,16 +215,16 @@ def _add_ped_info(
         delimiter='\t',
         names=[
             'Family.ID',
-            'Individual.ID',
+            's',
             'Paternal.ID',
             'Maternal.ID',
             'Sex',
             'Phenotype',
         ],
-    ).set_index('Individual.ID', drop=False)
+    ).set_index('s', drop=False)
 
-    snames = set(df['Individual.ID'])
-    ped_snames = set(ped_df['Individual.ID'])
+    snames = set(df['s'])
+    ped_snames = set(ped_df['s'])
 
     # Checking that file base names have a 1-to-1 match with the samples in PED
     # First, checking the match of PED sample names to input files
