@@ -4,7 +4,7 @@ A loading pipeline, but formatted for Hail Batch, ultimately for automated inges
 
 The inputs are buckets with GVCFs, CRAMs or BAMs, as well as an optional PED file. It calls the variants if needed, and iteratively adds them into a [GenomicsDB](https://github.com/Intel-HLS/GenomicsDB/wiki), located on a bucket `gs://cpg-seqr-main/datasets`. Then it jointly re-genotypes all variants in a DB together, converts them into a Hail MatrixTable, and annotates.
 
-Analysis runner must be used to run the workflow. For examples of commands, see the [Makefile](../Makefile) at the root of the repository. 
+The analysis-runner must be used to run the workflow. For examples of commands, see the [Makefile](../Makefile) at the root of the repository. 
 
 
 ## Further work
