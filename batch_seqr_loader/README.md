@@ -9,6 +9,6 @@ Analysis runner must be used to run the workflow. For examples of commands, see 
 
 ## Further work
 
-* Upload to ElasticSearch if elastic search credentials have been provided.
+* Upload to Elasticsearch if corresponding credentials have been provided.
 * Load pedigree data if provided ([using this process](https://centrepopgen.slack.com/archives/C01R7CKJGHM/p1618551394039300)).
 * Support re-aligning input CRAMs/BAMs/FASTQs if needed.
