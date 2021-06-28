@@ -30,7 +30,7 @@ run_test:
 	batch_seqr_loader/batch_workflow.py \
 	--namespace   test \
 	--version     $(TEST_VERSION) \
-	--dataset     "BB01-BB02" \
+	--seqr-dataset     "BB01-BB02" \
 	--gvcf-bucket "gs://cpg-seqr-test/batches/BB01" \
 	--ped-file    "gs://cpg-seqr-test/batches/BB01/BB01.ped" \
 	--keep-scratch \
@@ -46,7 +46,7 @@ run_test_extend:
 	batch_seqr_loader/batch_workflow.py \
 	--namespace   test \
 	--version     $(TEST_VERSION) \
-	--dataset     "BB01-BB02" \
+	--seqr-dataset     "BB01-BB02" \
 	--gvcf-bucket "gs://cpg-seqr-test/batches/BB02" \
 	--ped-file    "gs://cpg-seqr-test/batches/BB02/BB02.ped" \
 	--keep-scratch \
@@ -62,7 +62,7 @@ run_test_mismatched:
 	batch_seqr_loader/batch_workflow.py \
 	--namespace   test \
 	--version     $(TEST_VERSION) \
-	--dataset     "BB01-BB02-mismatched" \
+	--seqr-dataset     "BB01-BB02-mismatched" \
 	--gvcf-bucket "gs://cpg-seqr-test/batches/BB01" \
 	--ped-file    "gs://cpg-seqr-test/batches/BB01/BB01-mismatched.ped" \
 	--keep-scratch \
@@ -78,7 +78,7 @@ run_test_cram:
 	batch_seqr_loader/batch_workflow.py \
 	--namespace   test \
 	--version     $(TEST_VERSION) \
-	--dataset     "NA12878-cram" \
+	--seqr-dataset     "NA12878-cram" \
 	--cram-bucket "gs://cpg-seqr-test/batches/NA12878-cram" \
 	--keep-scratch \
 	--reuse
@@ -93,7 +93,7 @@ run_zornitza-stark:
 	batch_seqr_loader/batch_workflow.py \
 	--namespace   test \
 	--version     "v1-0" \
-	--dataset     "zornitza-stark" \
+	--seqr-dataset     "zornitza-stark" \
 	--bam-bucket  "gs://cpg-seqr-upload-zornitza-stark" \
 	--ped-file    "gs://cpg-seqr-upload-zornitza-stark/cpg_acute-fixed.ped" \
 	--reuse
@@ -108,7 +108,7 @@ run_zornitza-stark-kccg-gvcf:
 	batch_seqr_loader/batch_workflow.py \
 	--namespace   test \
 	--version     "v1-0" \
-	--dataset     "zornitza-stark-kccg-gvcf" \
+	--seqr-dataset     "zornitza-stark-kccg-gvcf" \
 	--gvcf-bucket "gs://cpg-seqr-upload-zornitza-stark" \
 	--ped-file    "gs://cpg-seqr-upload-zornitza-stark/cpg_acute-fixed.ped" \
 	--reuse

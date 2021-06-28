@@ -80,7 +80,7 @@ logger.setLevel(logging.INFO)
     help='Bucket path with input BAM or CRAM files that need re-alignment',
 )
 @click.option(
-    '--dataset',
+    '--seqr-dataset',
     'dataset_name',
     required=True,
     help='Name of the dataset. If a genomics DB already exists for this dataset, '
