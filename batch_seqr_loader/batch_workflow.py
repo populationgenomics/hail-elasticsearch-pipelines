@@ -87,10 +87,10 @@ logger.setLevel(logging.INFO)
     'GATK HaplotypeCaller',
 )
 @click.option(
-    '--dataset',
+    '--seqr-dataset',
     'dataset_name',
     required=True,
-    help='Name of the dataset. If a genomics DB already exists for this dataset, '
+    help='Name of the seqr callset. If a genomics DB already exists for this dataset, '
     'it will be extended with the new samples',
 )
 @click.option('--version', 'dataset_version', type=str, required=True)
