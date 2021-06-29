@@ -1,4 +1,4 @@
-VERSION := v1_2
+TEST_VERSION := v1-0
 
 .PHONY: package
 package:
@@ -25,14 +25,14 @@ run_test:
 	analysis-runner \
 	--dataset seqr \
 	--access-level test \
-	--output-dir "gs://cpg-seqr-test-tmp/seqr_$(VERSION)/hail" \
-	--description "test seqr loader - batch small1" \
+	--output-dir  "gs://cpg-seqr-test-tmp/hail" \
+	--description "test seqr loader - test" \
 	batch_seqr_loader/batch_workflow.py \
-	--gvcf-bucket "gs://cpg-seqr-test/gvcf/small1" \
-	--cram-bucket "gs://cpg-seqr-test/cram/small1" \
-	--ped-file    "gs://cpg-seqr-test/gvcf/small1/samples.ped" \
-	--data-bucket "gs://cpg-seqr-test/data/test-$(VERSION)" \
-	--work-bucket "gs://cpg-seqr-test-tmp/work/loader-$(VERSION)/work-small1-cram" \
+	--namespace   test \
+	--version     $(TEST_VERSION) \
+	--seqr-dataset     "BB01-BB02" \
+	--gvcf-bucket "gs://cpg-seqr-test/batches/BB01" \
+	--ped-file    "gs://cpg-seqr-test/batches/BB01/BB01.ped" \
 	--keep-scratch \
 	--reuse
 
@@ -41,27 +41,74 @@ run_test_extend:
 	analysis-runner \
 	--dataset seqr \
 	--access-level test \
-	--output-dir "gs://cpg-seqr-test-tmp/seqr_$(VERSION)/hail" \
-	--description "test seqr loader - extend with batch small2" \
+	--output-dir  "gs://cpg-seqr-test-tmp/hail" \
+	--description "test seqr loader - extend" \
 	batch_seqr_loader/batch_workflow.py \
-	--gvcf-bucket  "gs://cpg-seqr-test/gvcf/small2" \
-	--ped-file     "gs://cpg-seqr-test/gvcf/small2/samples.ped" \
-	--data-bucket  "gs://cpg-seqr-test/data/test-$(VERSION)" \
-	--work-bucket  "gs://cpg-seqr-test-tmp/work/loader-$(VERSION)/work-small2" \
+	--namespace   test \
+	--version     $(TEST_VERSION) \
+	--seqr-dataset     "BB01-BB02" \
+	--gvcf-bucket "gs://cpg-seqr-test/batches/BB02" \
+	--ped-file    "gs://cpg-seqr-test/batches/BB02/BB02.ped" \
 	--keep-scratch \
 	--reuse
 
-.PHONY: run_full_family
-run_full_family:
+.PHONY: run_test_mismatched
+run_test_mismatched:
 	analysis-runner \
 	--dataset seqr \
 	--access-level test \
-	--output-dir "gs://cpg-seqr-test-tmp/seqr_$(VERSION)/hail" \
-	--description "test seqr loader - families" \
+	--output-dir  "gs://cpg-seqr-test-tmp/hail" \
+	--description "test seqr loader - mismatched" \
 	batch_seqr_loader/batch_workflow.py \
-	--gvcf-bucket "gs://cpg-seqr-test/gvcf/families" \
-	--ped-file    "gs://cpg-seqr-test/gvcf/families/samples.ped" \
-	--data-bucket "gs://cpg-seqr-test/data/families-$(VERSION)" \
-	--work-bucket "gs://cpg-seqr-test-tmp/work/loader-$(VERSION)/work-families" \
+	--namespace   test \
+	--version     $(TEST_VERSION) \
+	--seqr-dataset     "BB01-BB02-mismatched" \
+	--gvcf-bucket "gs://cpg-seqr-test/batches/BB01" \
+	--ped-file    "gs://cpg-seqr-test/batches/BB01/BB01-mismatched.ped" \
 	--keep-scratch \
+	--reuse
+
+.PHONY: run_test_cram
+run_test_cram:
+	analysis-runner \
+	--dataset seqr \
+	--access-level test \
+	--output-dir  "gs://cpg-seqr-test-tmp/hail" \
+	--description "test seqr loader - cram" \
+	batch_seqr_loader/batch_workflow.py \
+	--namespace   test \
+	--version     $(TEST_VERSION) \
+	--seqr-dataset     "NA12878-cram" \
+	--cram-bucket "gs://cpg-seqr-test/batches/NA12878-cram" \
+	--keep-scratch \
+	--reuse
+
+.PHONY: run_zornitza-stark
+run_zornitza-stark:
+	analysis-runner \
+	--dataset seqr \
+	--access-level test \
+	--output-dir  "gs://cpg-seqr-test-tmp/hail" \
+	--description "test seqr loader - zornitza-stark" \
+	batch_seqr_loader/batch_workflow.py \
+	--namespace   test \
+	--version     "v1-0" \
+	--seqr-dataset     "zornitza-stark" \
+	--bam-bucket  "gs://cpg-seqr-upload-zornitza-stark" \
+	--ped-file    "gs://cpg-seqr-upload-zornitza-stark/cpg_acute-fixed.ped" \
+	--reuse
+
+.PHONY: run_zornitza-stark-kccg-gvcf
+run_zornitza-stark-kccg-gvcf:
+	analysis-runner \
+	--dataset seqr \
+	--access-level test \
+	--output-dir  "gs://cpg-seqr-test-tmp/hail" \
+	--description "seqr loader - zornitza-stark KCCG GVCFs" \
+	batch_seqr_loader/batch_workflow.py \
+	--namespace   test \
+	--version     "v1-0" \
+	--seqr-dataset     "zornitza-stark-kccg-gvcf" \
+	--gvcf-bucket "gs://cpg-seqr-upload-zornitza-stark" \
+	--ped-file    "gs://cpg-seqr-upload-zornitza-stark/cpg_acute-fixed.ped" \
 	--reuse

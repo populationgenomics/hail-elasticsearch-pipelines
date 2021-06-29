@@ -2,8 +2,9 @@
 
 """
 This script parses `somalier relate` (https://github.com/brentp/somalier) outputs,
-and returns a non-zero code if either sex or pedigree is mismatching
+and returns a non-zero code if either sex or pedigree mismatches the data in a provided PED file.
 """
+
 import contextlib
 import logging
 import subprocess
@@ -51,34 +52,44 @@ def main(
             check=False,
             shell=True,
         )
-        somalier_pairs_fpath = join(local_tmp_dir, basename(somalier_pairs_fpath))
-        somalier_samples_fpath = join(local_tmp_dir, basename(somalier_samples_fpath))
+        local_somalier_pairs_fpath = join(local_tmp_dir, basename(somalier_pairs_fpath))
+        local_somalier_samples_fpath = join(
+            local_tmp_dir, basename(somalier_samples_fpath)
+        )
+    else:
+        local_somalier_pairs_fpath = somalier_pairs_fpath
+        local_somalier_samples_fpath = somalier_samples_fpath
 
     logger.info('* Checking sex *')
-    df = pd.read_csv(somalier_samples_fpath, delimiter='\t')
-    mismatching_female = (df['sex'] == 2) & (df['original_pedigree_sex'] != 'female')
-    mismatching_male = (df['sex'] == 1) & (df['original_pedigree_sex'] != 'male')
+    df = pd.read_csv(local_somalier_samples_fpath, delimiter='\t')
+    missing_sex = df['original_pedigree_sex'] == 'unknown'
+    mismatching_female = (df['sex'] == 2) & (df['original_pedigree_sex'] == 'male')
+    mismatching_male = (df['sex'] == 1) & (df['original_pedigree_sex'] == 'female')
     mismatching_sex = mismatching_female | mismatching_male
 
-    if mismatching_sex.any():
-        logger.info(f'Found samples with mismatched sex:')
-        for _, row in df[mismatching_sex].iterrows():
+    if (mismatching_sex | missing_sex).any():
+        logger.info(f'Found PED samples with mismatching or missing sex:')
+        for _, row in df[mismatching_sex | missing_sex].iterrows():
             inferred_sex = {1: 'male', 2: 'female'}[row.sex]
             logger.info(
                 f'\t{row.sample_id} (provided: {row.original_pedigree_sex}, inferred: {inferred_sex})'
             )
-        if somalier_html_fpath:
+
+    if not mismatching_sex.any():
+        if missing_sex.any():
             logger.info(
-                f'Review the somalier results for more detail: {somalier_html_fpath}'
+                f'Inferred sex and pedigree matches or can be inferred for all samples.'
             )
-        logger.info('-' * 10)
+        else:
+            logger.info(f'Inferred sex and pedigree matches for all samples.')
+    logger.info('-' * 10)
 
     logger.info('* Checking relatedness *')
-    ped = Ped(somalier_samples_fpath)
+    ped = Ped(local_somalier_samples_fpath)
     sample_by_id = {s.sample_id: s for s in ped.samples()}
     mismatching_pairs = []
-    df = pd.read_csv(somalier_pairs_fpath, delimiter='\t')
-    for _, row in df.iterrows():
+    pairs_df = pd.read_csv(local_somalier_pairs_fpath, delimiter='\t')
+    for idx, row in pairs_df.iterrows():
         s1 = row['#sample_a']
         s2 = row['sample_b']
         inferred_rel = infer_relationship(row['relatedness'], row['ibs0'], row['ibs2'])
@@ -102,29 +113,29 @@ def main(
         }
         if inferred_rel not in provided_to_inferred[provided_rel]:
             mismatching_pairs.append(
-                f'{s1}-{s2}, '
+                f'"{s1}" and "{s2}", '
                 f'provided relationship: "{provided_rel}", inferred: "{inferred_rel}"'
             )
+        pairs_df.loc[idx, 'provided_rel'] = provided_rel
+        pairs_df.loc[idx, 'inferred_rel'] = inferred_rel
+
     if mismatching_pairs:
         logger.info(f'Found sample pairs with mismatched relatedness:')
         for pair in mismatching_pairs:
             logger.info(f'\t{pair}')
-        if somalier_html_fpath:
-            logger.info(
-                f'Review the somalier results for more detail: {somalier_html_fpath}'
-            )
+    else:
+        logger.info(f'Inferred pedigree matches for all samples.')
 
+    logger.info('-' * 10)
+    print_info(
+        df,
+        pairs_df,
+        somalier_samples_fpath,
+        somalier_pairs_fpath,
+        somalier_html_fpath,
+    )
     if mismatching_sex.any() or mismatching_pairs:
         sys.exit(1)
-
-    logger.info(
-        f'\nInferred sex and pedigree matches for all samples with the data in the PED file. '
-        + (
-            f'Review the somalier results for more detail: {somalier_html_fpath}'
-            if somalier_html_fpath
-            else ''
-        )
-    )
 
 
 def infer_relationship(coeff: float, ibs0: float, ibs2: float) -> str:
@@ -133,9 +144,9 @@ def infer_relationship(coeff: float, ibs0: float, ibs2: float) -> str:
     and ibs0 and ibs2 values.
     """
     result = 'ambiguous'
-    if coeff < 0.05:
+    if coeff < 0.1:
         result = 'unrelated'
-    elif 0.1 < coeff < 0.38:
+    elif 0.1 <= coeff < 0.38:
         result = 'below_first_degree'
     elif 0.38 <= coeff <= 0.62:
         if ibs0 / ibs2 < 0.005:
@@ -147,6 +158,39 @@ def infer_relationship(coeff: float, ibs0: float, ibs2: float) -> str:
     elif coeff > 0.8:
         result = 'duplicate_or_twins'
     return result
+
+
+def print_info(
+    samples_df,
+    pairs_df,
+    somalier_samples_fpath,
+    somalier_pairs_fpath,
+    somalier_html_fpath,
+):
+    """
+    Print useful information to manually review pedigree check results
+    """
+    samples_str = samples_df.to_string()
+    pairs_str = pairs_df[
+        [
+            '#sample_a',
+            'sample_b',
+            'relatedness',
+            'ibs0',
+            'ibs2',
+            'n',
+            'expected_relatedness',
+        ]
+    ].to_string()
+    logger.info('')
+    logger.info(
+        f'Somalier results, samples (based on {somalier_samples_fpath}):\n{samples_str}\n'
+    )
+    logger.info(
+        f'Somalier results, sample pairs (based on {somalier_pairs_fpath}):\n{pairs_str}\n'
+    )
+    if somalier_html_fpath:
+        logger.info(f'Somalier HTML report: {somalier_html_fpath}\n')
 
 
 if __name__ == '__main__':
