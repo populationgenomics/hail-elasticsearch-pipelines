@@ -69,7 +69,6 @@ def main(
                 f'must be specified: --es-host, --es-port, --es-username, --es-password. '
                 f'If none are specified, defaults for the CPG are used'
             )
-    else:
         es_host = 'elasticsearch.es.australia-southeast1.gcp.elastic-cloud.com'
         es_port = '9243'
         es_username = 'seqr'
