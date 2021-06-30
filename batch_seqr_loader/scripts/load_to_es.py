@@ -29,13 +29,17 @@ logger.setLevel(logging.INFO)
     'es_host',
     help='ElasticSearch host',
 )
-@click.option('--es-port', 'es_port', type='str', help='ElasticSearch port')
-@click.option('--es-username', 'es_username', type='str', help='ElasticSearch username')
-@click.option('--es-password', 'es_password', type='str', help='ElasticSearch password')
+@click.option('--es-port', 'es_port', type=click.STRING, help='ElasticSearch port')
+@click.option(
+    '--es-username', 'es_username', type=click.STRING, help='ElasticSearch username'
+)
+@click.option(
+    '--es-password', 'es_password', type=click.STRING, help='ElasticSearch password'
+)
 @click.option(
     '--es-index',
     'es_index',
-    type='str',
+    type=click.STRING,
     help='ElasticSearch index. Usually the dataset name',
 )
 @click.option(
