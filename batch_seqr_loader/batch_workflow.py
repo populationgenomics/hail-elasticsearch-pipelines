@@ -53,10 +53,6 @@ DATAPROC_PACKAGES = [
     'gcloud',
 ]
 
-ES_HOST = 'elasticsearch.es.australia-southeast1.gcp.elastic-cloud.com'
-ES_PORT = 9243
-ES_USERNAME = 'seqr'
-
 logger = logging.getLogger(__file__)
 logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
 logger.setLevel(logging.INFO)
@@ -290,10 +286,6 @@ def main(
         b,
         f'batch_seqr_loader/scripts/load_to_es.py '
         f'--mt-path {annotated_mt_path} '
-        f'--es-host {ES_HOST} '
-        f'--es-port {ES_PORT} '
-        f'--es-use-ssl '
-        f'--es-username {ES_USERNAME} '
         f'--es-index {dataset_name} '
         f'--es-index-min-num-shards 1 '
         f'--genome-version GRCh38',
@@ -796,7 +788,7 @@ def _add_import_gvcfs_job(
         job_name = 'Creating GenomicsDB'
 
         samples_to_add = set(new_samples_df.s)
-        samples_to_skip = {}
+        samples_to_skip = set()
         samples_to_add_df = new_samples_df
         samples_will_be_in_db = samples_to_add
 

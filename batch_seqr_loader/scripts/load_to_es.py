@@ -9,7 +9,7 @@ import logging
 import math
 import click
 import hail as hl
-
+from google.cloud import secretmanager
 from lib.model.seqr_mt_schema import SeqrVariantsAndGenotypesSchema
 from hail_scripts.v02.utils.elasticsearch_client import ElasticsearchClient
 
@@ -27,18 +27,16 @@ logger.setLevel(logging.INFO)
 @click.option(
     '--es-host',
     'es_host',
-    default='elasticsearch.es.australia-southeast1.gcp.elastic-cloud.com',
     help='ElasticSearch host',
 )
-@click.option('--es-port', 'es_port', default=9243, help='ElasticSearch port')
+@click.option('--es-port', 'es_port', type='str', help='ElasticSearch port')
+@click.option('--es-username', 'es_username', type='str', help='ElasticSearch username')
+@click.option('--es-password', 'es_password', type='str', help='ElasticSearch password')
 @click.option(
-    '--es-use-ssl', 'es_use_ssl', is_flag=True, help='Use SSL for ElasticSearch'
-)
-@click.option(
-    '--es-username', 'es_username', help='ElasticSearch username', default='seqr'
-)
-@click.option(
-    '--es-index', 'es_index', help='ElasticSearch index. Usually the dataset name'
+    '--es-index',
+    'es_index',
+    type='str',
+    help='ElasticSearch index. Usually the dataset name',
 )
 @click.option(
     '--es-index-min-num-shards',
@@ -51,25 +49,38 @@ logger.setLevel(logging.INFO)
 def main(
     mt_path: str,
     es_host: str,
-    es_port: int,
-    es_use_ssl: bool,
+    es_port: str,
     es_username: str,
+    es_password: str,
     es_index: str,
     es_index_min_num_shards: int,
     genome_version: str,
 ):  # pylint: disable=missing-function-docstring
     hl.init(default_reference=genome_version)
 
+    if not all([es_host, es_port, es_username, es_password]):
+        if any([es_host, es_port, es_username, es_password]):
+            raise click.BadParameter(
+                f'Either none, or all ES configuration parameters '
+                f'must be specified: --es-host, --es-port, --es-username, --es-password. '
+                f'If none are specified, defaults for the CPG are used'
+            )
+    else:
+        es_host = 'elasticsearch.es.australia-southeast1.gcp.elastic-cloud.com'
+        es_port = '9243'
+        es_username = 'seqr'
+        es_password = _read_es_password()
+
     logger.info('Starting the seqr_load pipeline')
     mt = hl.read_matrix_table(mt_path)
     row_table = SeqrVariantsAndGenotypesSchema.elasticsearch_row(mt)
-    es_password = '<TODO: load from a secret?>'
+
     es = ElasticsearchClient(
         host=es_host,
         port=str(es_port),
         es_username=es_username,
         es_password=es_password,
-        es_use_ssl=es_use_ssl,
+        es_use_ssl=(es_host != 'localhost'),
     )
     es.export_table_to_elasticsearch(
         row_table,
@@ -77,6 +88,21 @@ def main(
         num_shards=_mt_num_shards(mt, es_index_min_num_shards),
         write_null_values=True,
     )
+
+
+def _read_es_password(
+    project_id='seqr-308602',
+    secret_id='es-password-for-loader',
+    version_id='latest',
+) -> str:
+    """
+    Read a payload for a GCP secret storing the ES password
+    """
+
+    client = secretmanager.SecretManagerServiceClient()
+    name = f'projects/{project_id}/secrets/{secret_id}/versions/{version_id}'
+    response = client.access_secret_version(request={'name': name})
+    return response.payload.data.decode('UTF-8')
 
 
 def _mt_num_shards(mt, es_index_min_num_shards):
