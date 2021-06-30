@@ -1,4 +1,8 @@
 TEST_VERSION := v1-3
+TEST_DATASET := NA12878-trio
+
+ZORNITA_STARK_DATASET := zornitza-stark
+ZORNITA_STARK_VERSION := v1-0
 
 .PHONY: package
 package:
@@ -25,12 +29,12 @@ run_test:
 	analysis-runner \
 	--dataset seqr \
 	--access-level test \
-	--output-dir   "gs://cpg-seqr-test-tmp/hail" \
-	--description  "seqr loader - NA12878 trio test - from GVCFs" \
+	--output-dir   "datasets/$(TEST_DATASET)/$(TEST_VERSION)" \
+	--description  "seqr loader - $(TEST_DATASET) test - from GVCFs" \
 	batch_seqr_loader/batch_workflow.py \
 	--namespace    test \
 	--version      $(TEST_VERSION) \
-	--seqr-dataset "NA12878-trio" \
+	--seqr-dataset $(TEST_DATASET) \
 	--gvcf         'gs://cpg-seqr-test/batches/NA12878-trio/*.g.vcf.gz' \
 	--ped-file     "gs://cpg-seqr-test/batches/NA12878-trio/NA12878-trio.ped" \
 	--keep-scratch \
@@ -41,8 +45,8 @@ run_test_extend_with_cram:
 	analysis-runner \
 	--dataset seqr \
 	--access-level test \
-	--output-dir   "gs://cpg-seqr-test-tmp/hail" \
-	--description  "seqr loader - NA12878 trio test - extend with CRAM" \
+	--output-dir   "datasets/$(TEST_DATASET)/$(TEST_VERSION)" \
+	--description  "seqr loader - $(TEST_DATASET) test - extend with CRAM" \
 	batch_seqr_loader/batch_workflow.py \
 	--namespace    test \
 	--version      $(TEST_VERSION) \
@@ -57,8 +61,8 @@ run_test_mismatched:
 	analysis-runner \
 	--dataset seqr \
 	--access-level test \
-	--output-dir   "gs://cpg-seqr-test-tmp/hail" \
-	--description  "seqr loader - NA12878 trio test - mismatched PED" \
+	--output-dir   "datasets/$(TEST_DATASET)/$(TEST_VERSION)" \
+	--description  "seqr loader - $(TEST_DATASET) test - mismatched PED" \
 	batch_seqr_loader/batch_workflow.py \
 	--namespace    test \
 	--version      $(TEST_VERSION) \
@@ -74,12 +78,12 @@ run_zornitza-stark:
 	analysis-runner \
 	--dataset seqr \
 	--access-level test \
-	--output-dir   "gs://cpg-seqr-test-tmp/hail" \
-	--description  "test seqr loader - zornitza-stark" \
+	--output-dir   "datasets/$(ZORNITA_STARK_DATASET)/$(ZORNITA_STARK_VERSION)" \
+	--description  "seqr loader - $(ZORNITA_STARK_DATASET)" \
 	batch_seqr_loader/batch_workflow.py \
 	--namespace    test \
-	--version      "v1-0" \
-	--seqr-dataset "zornitza-stark" \
+	--version      $(ZORNITA_STARK_VERSION) \
+	--seqr-dataset $(ZORNITA_STARK_DATASET) \
 	--cram         'gs://cpg-seqr-upload-zornitza-stark/*.bam' \
 	--ped-file     "gs://cpg-seqr-upload-zornitza-stark/cpg_acute-fixed.ped" \
 	--reuse
@@ -89,12 +93,12 @@ run_zornitza-stark-kccg-gvcf:
 	analysis-runner \
 	--dataset seqr \
 	--access-level test \
-	--output-dir   "gs://cpg-seqr-test-tmp/hail" \
-	--description  "seqr loader - zornitza-stark KCCG GVCFs" \
+	--output-dir   "datasets/$(ZORNITA_STARK_DATASET)/$(ZORNITA_STARK_VERSION)" \
+	--description  "seqr loader - $(ZORNITA_STARK_DATASET) from KCCG GVCFs" \
 	batch_seqr_loader/batch_workflow.py \
 	--namespace    test \
-	--version      "v1-0" \
-	--seqr-dataset "zornitza-stark-kccg-gvcf" \
+	--version      $(ZORNITA_STARK_VERSION) \
+	--seqr-dataset $(ZORNITA_STARK_DATASET)-kccg-gvcf \
 	--gvcf         'gs://cpg-seqr-upload-zornitza-stark/*.g.vcf.gz' \
 	--ped-file     "gs://cpg-seqr-upload-zornitza-stark/cpg_acute-fixed.ped" \
 	--reuse
