@@ -51,6 +51,7 @@ DATAPROC_PACKAGES = [
     'fsspec',
     'sklearn',
     'gcloud',
+    'google-cloud-secret-manager',
 ]
 
 logger = logging.getLogger(__file__)
@@ -261,7 +262,6 @@ def main(
     )
 
     annotated_mt_path = join(dirname(gathered_vcf_path), 'annotated.mt')
-    annotate_job = None
     if overwrite or not file_exists(annotated_mt_path):
         annotate_job = dataproc.hail_dataproc_job(
             b,
@@ -281,6 +281,8 @@ def main(
             vep='GRCh38',
             depends_on=[joint_genotype_job],
         )
+    else:
+        annotate_job = b.new_job('make_annotated_mt.py [reuse]')
 
     dataproc.hail_dataproc_job(
         b,
@@ -293,7 +295,7 @@ def main(
         packages=DATAPROC_PACKAGES,
         num_secondary_workers=2,
         job_name='load_to_es.py',
-        depends_on=[annotate_job] if annotate_job else [],
+        depends_on=[annotate_job],
     )
 
     b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch)
