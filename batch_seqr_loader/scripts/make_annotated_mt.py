@@ -8,15 +8,12 @@ into a matrix table, which annotates and prepares to load into ES.
 import logging
 from typing import Optional, List
 from os.path import join
-
 import click
 import hail as hl
-
 from lib.model.seqr_mt_schema import SeqrVariantsAndGenotypesSchema
-from hail_scripts.v02.utils.elasticsearch_client import ElasticsearchClient
 
-logger = logging.getLogger('seqr-load')
-logging.basicConfig(format="%(levelname)s (%(name)s %(lineno)s): %(message)s")
+logger = logging.getLogger('make_annotated_mt')
+logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
 logger.setLevel(logging.INFO)
 
 SEQR_REF_BUCKET = 'gs://cpg-seqr-reference-data'
@@ -93,7 +90,8 @@ def main(
     vep_block_size: Optional[int] = None,
 ):  # pylint: disable=missing-function-docstring
     logger.info('Starting the seqr_load pipeline')
-    genome_version = genome_version.replace('GRCh', '')
+
+    hl.init(default_reference=genome_version)
     mt = import_vcf(source_paths, genome_version)
     mt = annotate_old_and_split_multi_hts(mt)
     if not disable_validation:
@@ -102,7 +100,7 @@ def main(
         mt = remap_sample_ids(mt, remap_path)
     if subset_path:
         mt = subset_samples_and_variants(mt, subset_path)
-    if genome_version == '38':
+    if genome_version == 'GRCh38':
         mt = add_37_coordinates(mt)
         if make_checkpoints:
             mt.write(join(work_bucket, 'add_37_coordinates.mt'), overwrite=True)
@@ -121,7 +119,7 @@ def main(
 
     mt = mt.annotate_globals(
         sourceFilePath=','.join(source_paths),
-        genomeVersion=genome_version,
+        genomeVersion=genome_version.replace('GRCh', ''),
         sampleType='WGS',
         hail_version=hl.version(),
     )
@@ -130,64 +128,24 @@ def main(
     mt.write(dest_path, stage_locally=True, overwrite=True)
 
 
-class ElasticSearchCredentials:
-    """
-    Describes elastic search credentials. Used in _dump_to_estask
-    """
-
-    def __init__(
-        self,
-        host='localhost',
-        port=9200,
-        index='data',
-        username='pipeline',
-        password=None,
-        index_min_num_shards=6,
-        use_ssl=None,
-    ):
-        self.host = host
-        self.port = port
-        self.index = index
-        self.username = username
-        self.password = password
-        self.index_min_num_shards = index_min_num_shards
-        self.use_ssl = use_ssl
-        if self.use_ssl is None:
-            self.use_ssl = host != 'localhost'
-
-
-def _dump_to_estask(mt, es_credentials: ElasticSearchCredentials):
-    row_table = elasticsearch_row(mt)
-    es = ElasticsearchClient(
-        host=es_credentials.host,
-        port=str(es_credentials.port),
-        es_username=es_credentials.username,
-        es_password=es_credentials.password,
-        es_use_ssl=es_credentials.use_ssl,
-    )
-    es.export_table_to_elasticsearch(row_table)
-
-    return True
-
-
 def import_vcf(source_paths, genome_version):
     """
     https://github.com/populationgenomics/hail-elasticsearch-pipelines/blob/e41582d4842bc0d2e06b1d1e348eb071e00e01b3/luigi_pipeline/lib/hail_tasks.py#L77-L89
     Import the VCFs from inputs. Set min partitions so that local pipeline execution
     takes advantage of all CPUs.
     :source_paths: list of paths to multi-sample VCFs
-    :genome_version: 37 or 38
+    :genome_version: GRCh37 or GRCh38
     :return a MatrixTable
     """
     recode = {}
-    if genome_version == '38':
+    if genome_version == 'GRCh38':
         recode = {f'{i}': f'chr{i}' for i in (list(range(1, 23)) + ['X', 'Y'])}
-    elif genome_version == '37':
+    elif genome_version == 'GRCh37':
         recode = {f'chr{i}': f'{i}' for i in (list(range(1, 23)) + ['X', 'Y'])}
 
     return hl.import_vcf(
         source_paths,
-        reference_genome=f'GRCh{genome_version}',
+        reference_genome=genome_version,
         skip_invalid_loci=True,
         contig_recoding=recode,
         force_bgz=True,

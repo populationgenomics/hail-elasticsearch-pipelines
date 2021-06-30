@@ -53,6 +53,10 @@ DATAPROC_PACKAGES = [
     'gcloud',
 ]
 
+ES_HOST = 'elasticsearch.es.australia-southeast1.gcp.elastic-cloud.com'
+ES_PORT = 9243
+ES_USERNAME = 'seqr'
+
 logger = logging.getLogger(__file__)
 logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
 logger.setLevel(logging.INFO)
@@ -261,23 +265,43 @@ def main(
     )
 
     annotated_mt_path = join(dirname(gathered_vcf_path), 'annotated.mt')
+    annotate_job = None
+    if overwrite or not file_exists(annotated_mt_path):
+        annotate_job = dataproc.hail_dataproc_job(
+            b,
+            f'batch_seqr_loader/scripts/make_annotated_mt.py '
+            f'--source-path {gathered_vcf_path} '
+            f'--dest-mt-path {annotated_mt_path} '
+            f'--bucket {join(work_bucket, "seqr_load")} '
+            + (f'--disable-validation ' if disable_validation else '')
+            + (f'--make-checkpoints ' if make_checkpoints else '')
+            + (f'--remap-tsv ' if remap_path else '')
+            + (f'--subset-tsv ' if subset_path else '')
+            + (f'--vep-block-size ' if vep_block_size else ''),
+            max_age='8h',
+            packages=DATAPROC_PACKAGES,
+            num_secondary_workers=10,
+            job_name='make_annotated_mt.py',
+            vep='GRCh38',
+            depends_on=[joint_genotype_job],
+        )
+
     dataproc.hail_dataproc_job(
         b,
-        f'batch_seqr_loader/seqr_load.py '
-        f'--source-path {gathered_vcf_path} '
-        f'--dest-mt-path {annotated_mt_path} '
-        f'--bucket {join(work_bucket, "seqr_load")} '
-        + (f'--disable-validation ' if disable_validation else '')
-        + (f'--make-checkpoints ' if make_checkpoints else '')
-        + (f'--remap-tsv ' if remap_path else '')
-        + (f'--subset-tsv ' if subset_path else '')
-        + (f'--vep-block-size ' if vep_block_size else ''),
+        f'batch_seqr_loader/scripts/load_to_es.py '
+        f'--mt-path {annotated_mt_path} '
+        f'--es-host {ES_HOST} '
+        f'--es-port {ES_PORT} '
+        f'--es-use-ssl '
+        f'--es-username {ES_USERNAME} '
+        f'--es-index {dataset_name} '
+        f'--es-index-min-num-shards 1 '
+        f'--genome-version GRCh38',
         max_age='8h',
         packages=DATAPROC_PACKAGES,
         num_secondary_workers=2,
-        job_name='seqr_load.py',
-        vep='GRCh38',
-        depends_on=[joint_genotype_job],
+        job_name='load_to_es.py',
+        depends_on=[annotate_job] if annotate_job else [],
     )
 
     b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch)
@@ -772,6 +796,7 @@ def _add_import_gvcfs_job(
         job_name = 'Creating GenomicsDB'
 
         samples_to_add = set(new_samples_df.s)
+        samples_to_skip = {}
         samples_to_add_df = new_samples_df
         samples_will_be_in_db = samples_to_add
 
@@ -821,6 +846,10 @@ def _add_import_gvcfs_job(
     {untar_genomicsdb_cmd}
 
     (while true; do df -h; pwd; free -m; sleep 300; done) &
+
+    echo "Adding samples: {', '.join(samples_to_add)}"
+    {f'echo "Skipping adding samples that are already in the DB: '
+     f'{", ".join(samples_to_skip)}"' if samples_to_skip else ''}
 
     gatk --java-options -Xms{java_mem}g \
       GenomicsDBImport \
