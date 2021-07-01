@@ -40,7 +40,7 @@ logger.setLevel(logging.INFO)
     '--es-index',
     'es_index',
     type=click.STRING,
-    help='ElasticSearch index. Usually the dataset name',
+    help='ElasticSearch index. Usually the dataset name. Will be lowercased',
 )
 @click.option(
     '--es-index-min-num-shards',
@@ -74,10 +74,6 @@ def main(
         es_username = 'seqr'
         es_password = _read_es_password()
 
-    logger.info('Starting the seqr_load pipeline')
-    mt = hl.read_matrix_table(mt_path)
-    row_table = SeqrVariantsAndGenotypesSchema.elasticsearch_row(mt)
-
     es = ElasticsearchClient(
         host=es_host,
         port=str(es_port),
@@ -85,9 +81,12 @@ def main(
         es_password=es_password,
         es_use_ssl=(es_host != 'localhost'),
     )
+
+    mt = hl.read_matrix_table(mt_path)
+    row_table = SeqrVariantsAndGenotypesSchema.elasticsearch_row(mt)
     es.export_table_to_elasticsearch(
         row_table,
-        index_name=es_index,
+        index_name=es_index.lower(),
         num_shards=_mt_num_shards(mt, es_index_min_num_shards),
         write_null_values=True,
     )
@@ -95,7 +94,7 @@ def main(
 
 def _read_es_password(
     project_id='seqr-308602',
-    secret_id='es-password-for-loader',
+    secret_id='seqr-es-password',
     version_id='latest',
 ) -> str:
     """
