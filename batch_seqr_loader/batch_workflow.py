@@ -51,7 +51,6 @@ DATAPROC_PACKAGES = [
     'fsspec',
     'sklearn',
     'gcloud',
-    'google-cloud-secret-manager',
 ]
 
 logger = logging.getLogger(__file__)
@@ -290,7 +289,8 @@ def main(
         f'--mt-path {annotated_mt_path} '
         f'--es-index {dataset_name} '
         f'--es-index-min-num-shards 1 '
-        f'--genome-version GRCh38',
+        f'--genome-version GRCh38 '
+        f'{"--prod" if namespace == "main" else ""}',
         max_age='8h',
         packages=DATAPROC_PACKAGES,
         num_secondary_workers=2,

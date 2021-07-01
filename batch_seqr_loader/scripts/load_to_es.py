@@ -7,9 +7,10 @@ into a matrix table, which annotates and prepares to load into ES.
 
 import logging
 import math
+import subprocess
+
 import click
 import hail as hl
-from google.cloud import secretmanager
 from lib.model.seqr_mt_schema import SeqrVariantsAndGenotypesSchema
 from hail_scripts.v02.utils.elasticsearch_client import ElasticsearchClient
 
@@ -49,6 +50,9 @@ logger.setLevel(logging.INFO)
     help='Number of shards for the index will be the greater of this value '
     'and a calculated value based on the matrix.',
 )
+@click.option(
+    '--prod', is_flag=True, help='Run under the production ES credentials instead'
+)
 @click.option('--genome-version', 'genome_version', default='GRCh38')
 def main(
     mt_path: str,
@@ -59,6 +63,7 @@ def main(
     es_index: str,
     es_index_min_num_shards: int,
     genome_version: str,
+    prod: bool,
 ):  # pylint: disable=missing-function-docstring
     hl.init(default_reference=genome_version)
 
@@ -71,7 +76,7 @@ def main(
             )
         es_host = 'elasticsearch.es.australia-southeast1.gcp.elastic-cloud.com'
         es_port = '9243'
-        es_username = 'seqr'
+        es_username = 'seqr' if prod else 'seqr-test'
         es_password = _read_es_password()
 
     es = ElasticsearchClient(
@@ -98,13 +103,11 @@ def _read_es_password(
     version_id='latest',
 ) -> str:
     """
-    Read a payload for a GCP secret storing the ES password
+    Read a GCP secret storing the ES password
     """
-
-    client = secretmanager.SecretManagerServiceClient()
-    name = f'projects/{project_id}/secrets/{secret_id}/versions/{version_id}'
-    response = client.access_secret_version(request={'name': name})
-    return response.payload.data.decode('UTF-8')
+    cmd = f'gcloud secrets versions access {version_id} --secret {secret_id} --project {project_id}'
+    logger.info(cmd)
+    return subprocess.check_output(cmd, shell=True).decode()
 
 
 def _mt_num_shards(mt, es_index_min_num_shards):
