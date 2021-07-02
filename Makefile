@@ -40,22 +40,6 @@ run_test:
 	--keep-scratch \
 	--reuse
 
-.PHONY: run_test_extend_with_cram
-run_test_extend_with_cram:
-	analysis-runner \
-	--dataset seqr \
-	--access-level test \
-	--output-dir   "datasets/$(TEST_DATASET)/$(TEST_VERSION)" \
-	--description  "seqr loader - $(TEST_DATASET) test - extend with CRAM" \
-	batch_seqr_loader/batch_workflow.py \
-	--namespace    test \
-	--version      $(TEST_VERSION) \
-	--seqr-dataset "NA12878-trio" \
-	--cram         "gs://cpg-seqr-test/batches/NA12878-trio/SS6004470.cram" \
-	--ped-file     "gs://cpg-seqr-test/batches/NA12878-trio/NA12878-trio.ped" \
-	--keep-scratch \
-	--reuse
-
 .PHONY: run_test_mismatched
 run_test_mismatched:
 	analysis-runner \
@@ -66,10 +50,43 @@ run_test_mismatched:
 	batch_seqr_loader/batch_workflow.py \
 	--namespace    test \
 	--version      $(TEST_VERSION) \
-	--seqr-dataset "NA12878-trio-mismatched" \
+	--seqr-dataset $(TEST_DATASET)-mismatched \
 	--gvcf         'gs://cpg-seqr-test/batches/NA12878-trio/*.g.vcf.gz' \
 	--cram         "gs://cpg-seqr-test/batches/NA12878-trio/SS6004470.cram" \
 	--ped-file     "gs://cpg-seqr-test/batches/NA12878-trio/NA12878-trio-mismatched.ped" \
+	--keep-scratch \
+	--reuse
+
+.PHONY: run_test_extend
+run_test_extend:
+	analysis-runner \
+	--dataset seqr \
+	--access-level test \
+	--output-dir   "datasets/$(TEST_DATASET)/$(TEST_VERSION)" \
+	--description  "seqr loader - $(TEST_DATASET) test - extend" \
+	batch_seqr_loader/batch_workflow.py \
+	--namespace    test \
+	--version      $(TEST_VERSION) \
+	--seqr-dataset $(TEST_DATASET)-extend \
+	--cram         "gs://cpg-seqr-test/batches/NA12878-trio/SS6004470.cram" \
+	--ped-file     "gs://cpg-seqr-test/batches/NA12878-trio/NA12878-trio.ped" \
+	--keep-scratch \
+	--reuse
+
+.PHONY: run_test_from_cram
+run_test_from_cram:
+	analysis-runner \
+	--dataset seqr \
+	--access-level test \
+	--output-dir   "datasets/$(TEST_DATASET)/$(TEST_VERSION)" \
+	--description  "seqr loader - $(TEST_DATASET) test - from CRAM" \
+	batch_seqr_loader/batch_workflow.py \
+	--namespace    test \
+	--version      $(TEST_VERSION) \
+	--seqr-dataset $(TEST_DATASET)-from-cram \
+	--data-to-realign 'gs://cpg-seqr-test/batches/NA12878-trio/NA12878.cram' \
+	--cram         'gs://cpg-seqr-test/batches/NA12878-trio/NA1289*.cram' \
+	--ped-file     "gs://cpg-seqr-test/batches/NA12878-trio/NA12878-trio.ped" \
 	--keep-scratch \
 	--reuse
 

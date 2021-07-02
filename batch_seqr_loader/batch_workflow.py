@@ -853,11 +853,9 @@ def _add_import_gvcfs_job(
         # This command will download the DB metadata file locally.
         # The `-O` argument to `tar` means "write the file being extracted to the stdout",
         # and the file to be extracted is specified as a positional argument to `tar`.
-        subprocess.run(
-            f'gsutil cat {genomicsdb_gcs_path} | tar -O --extract workspace/callset.json > {genomicsdb_metadata}',
-            check=False,
-            shell=True,
-        )
+        cmd = f'gsutil cat {genomicsdb_gcs_path} | tar -O --extract workspace/callset.json > {genomicsdb_metadata}'
+        logger.info(cmd)
+        subprocess.run(cmd, check=False, shell=True)
 
         with open(genomicsdb_metadata) as f:
             db_metadata = json.load(f)
