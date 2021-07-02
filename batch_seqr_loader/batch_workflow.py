@@ -296,6 +296,7 @@ def main(
         num_secondary_workers=2,
         job_name='load_to_es.py',
         depends_on=[annotate_job],
+        scopes=['cloud-platform'],
     )
 
     b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch)
