@@ -460,7 +460,7 @@ def _make_realign_bam_jobs(
     jobs = []
     realign_df = samples_df[samples_df['type'] == file_type]
     for sn, file1, file2 in zip(
-        realign_df['s'], realign_df['file1'], realign_df['file2']
+        realign_df['s'], realign_df['file'], realign_df['file2']
     ):
         job_name = f'BWA align, {sn}'
         output_cram_path = join(work_bucket, f'{sn}.cram')
