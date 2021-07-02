@@ -14,7 +14,7 @@ import subprocess
 import tempfile
 import hashlib
 from collections import defaultdict
-from os.path import join, dirname, abspath
+from os.path import join, dirname, abspath, splitext
 from typing import Optional, List, Tuple, Set, Iterable
 import pandas as pd
 import click
@@ -217,6 +217,17 @@ def main(
         + '.dict',
     )
 
+    # We can't do pedigree checks on FASTQs, so need to add alignment jobs for them
+    # first
+    align_bam_jobs = _make_realign_bam_jobs(
+        b=b,
+        samples_df=samples_df,
+        file_type='fastq_to_realign',
+        reference=reference,
+        work_bucket=work_bucket,
+        overwrite=overwrite,
+    )
+
     ped_check_j = None
     if not skip_ped_checks:
         ped_check_j, ped_fpath = _pedigree_checks(
@@ -229,15 +240,17 @@ def main(
             fingerprints_bucket=fingerprints_bucket,
             web_bucket=web_bucket,
             web_url=f'https://{namespace}-web.populationgenomics.org.au/{project}',
+            depends_on=align_bam_jobs,
         )
 
-    # realign_bam_jobs = _make_realign_bam_jobs(
-    #     b=b,
-    #     samples_df=samples_df,
-    #     reference=reference,
-    #     work_bucket=work_bucket,
-    #     overwrite=overwrite,
-    # )
+    realign_bam_jobs = _make_realign_bam_jobs(
+        b=b,
+        samples_df=samples_df,
+        file_type='cram_to_realign',
+        reference=reference,
+        work_bucket=work_bucket,
+        overwrite=overwrite,
+    )
 
     genotype_jobs, samples_df = _make_genotype_jobs(
         b=b,
@@ -245,7 +258,9 @@ def main(
         reference=reference,
         work_bucket=work_bucket,
         overwrite=overwrite,
-        depends_on=[ped_check_j] if ped_check_j else [],
+        depends_on=align_bam_jobs
+        + realign_bam_jobs
+        + ([ped_check_j] if ped_check_j else []),
     )
 
     joint_genotype_job, gathered_vcf_path = _make_joint_genotype_jobs(
@@ -301,16 +316,6 @@ def main(
 
     b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch)
     shutil.rmtree(local_tmp_dir)
-
-
-# def _make_realign_bam_jobs(
-#     b: hb.Batch,
-#     samples_df: pd.DataFrame,
-#     reference: hb.ResourceGroup,
-#     work_bucket: str,
-#     overwrite: bool,
-# ) -> List[Job]:
-#     return []
 
 
 def _pedigree_checks(
@@ -435,6 +440,103 @@ python check_pedigree.py \\
 
     check_j.depends_on(relate_j)
     return check_j, somalier_samples_path
+
+
+def _make_realign_bam_jobs(
+    b: hb.Batch,
+    samples_df: pd.DataFrame,
+    file_type: str,  # 'fastq_to_realign', 'cram_to_realign'
+    reference: hb.ResourceGroup,
+    work_bucket: str,
+    overwrite: bool,
+) -> List[Job]:
+    """
+    Takes all samples with a 'file' of 'type'='fastq_to_realign'|'cram_to_realign'
+    in `samples_df`, runs BWA to realign reads again, and sets a new 'file'
+    of 'type'='cram'.
+
+    When the input is CRAM/BAM, uses Bazam to stream reads to BWA.
+    """
+    jobs = []
+    realign_df = samples_df[samples_df['type'] == file_type]
+    for sn, file1, file2 in zip(
+        realign_df['s'], realign_df['file1'], realign_df['file2']
+    ):
+        job_name = f'BWA align, {sn}'
+        output_cram_path = join(work_bucket, f'{sn}.cram')
+        if can_reuse(output_cram_path, overwrite):
+            jobs.append(b.new_job(f'{job_name} [reuse]'))
+        else:
+            assert file1.endswith('.cram') or file1.endswith('.bam') or file2
+            use_bazam = file1.endswith('.cram') or file1.endswith('.bam')
+
+            j = b.new_job(job_name)
+            jobs.append(j)
+            j.image(BAZAM_CONTAINER)
+            bazam_cpu = 6 if use_bazam else 0
+            total_cpu = 32
+            bwa_cpu = 20
+            bamsormadup_cpu = total_cpu - bwa_cpu - bazam_cpu
+            j.cpu(total_cpu)
+            j.memory('highcpu')
+            j.storage('300G')
+            j.declare_resource_group(
+                output_cram={
+                    'base': '{root}.cram',
+                    'crai': '{root}.crai',
+                }
+            )
+
+            if use_bazam:
+                extract_fq_cmd = (
+                    f'bazam -Xmx16g -Dsamjdk.reference_fasta={reference.base}'
+                    f'-n{bazam_cpu} -bam {file1}'
+                )
+            else:
+                extract_fq_cmd = ''
+
+            rg_line = f'@RG\\tID:{sn}\\tSM:~{sn}'
+
+            # BWA command options:
+            # -K     process INT input bases in each batch regardless of nThreads (for reproducibility)
+            # -p     smart pairing (ignoring in2.fq)
+            # -v3    minimum score to output [30]
+            # -t16   threads
+            # -Y     use soft clipping for supplementary alignments
+            # -R     read group header line such as '@RG\tID:foo\tSM:bar'
+            # -M     mark shorter split hits as secondary
+            j.command(
+                f"""set -e
+
+            {extract_fq_cmd} | 
+            bwa mem -K 100000000 {'-p' if use_bazam else ''} -v3 -t{bwa_cpu} -Y 
+              -R '{rg_line}' {reference.base} 
+              {'/dev/stdin' if use_bazam else file1} {'-' if use_bazam else file2} \
+              2> >(tee {j.bwa_stderr_log} >&2) | \
+            bamsormadup inputformat=sam threads=~{bamsormadup_cpu} SO=coordinate \
+              M=~{j.duplicate_metrics} \
+              outputformat=sam | \
+            samtools view -T ~{reference.base} \
+              -O cram \
+              -o {j.output_cram.base}
+
+            samtools index -@{total_cpu} {j.output_cram.base} {j.output_cram.crai}
+            """
+            )
+            b.write_output(j.output_cram, splitext(output_cram_path)[0])
+            b.write_output(
+                j.bwa_stderr_log, join(work_bucket, 'bwa', f'{sn}-bwa-stderr.log')
+            )
+            b.write_output(
+                j.duplicate_metrics,
+                join(work_bucket, 'bwa', f'{sn}-duplicate-metrics.csv'),
+            )
+
+            samples_df.loc[sn, 'file'] = output_cram_path
+            samples_df.loc[sn, 'index'] = splitext(output_cram_path)[0] + '.crai'
+            samples_df.loc[sn, 'type'] = 'cram'
+
+    return jobs
 
 
 def _make_genotype_jobs(
