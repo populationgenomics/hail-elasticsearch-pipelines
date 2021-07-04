@@ -468,7 +468,13 @@ def _make_realign_bam_jobs(
             jobs.append(b.new_job(f'{job_name} [reuse]'))
         else:
             assert file1.endswith('.cram') or file1.endswith('.bam') or file2
-            use_bazam = file1.endswith('.cram') or file1.endswith('.bam')
+            if file1.endswith('.cram') or file1.endswith('.bam'):
+                use_bazam = True
+                file1 = b.read_input_group(base=file1, index=file2)
+            else:
+                use_bazam = False
+                file1 = b.read_input(file1)
+                file2 = b.read_input(file2)
 
             j = b.new_job(job_name)
             jobs.append(j)
@@ -490,7 +496,7 @@ def _make_realign_bam_jobs(
             if use_bazam:
                 extract_fq_cmd = (
                     f'bazam -Xmx16g -Dsamjdk.reference_fasta={reference.base}'
-                    f'-n{bazam_cpu} -bam {file1}'
+                    f'-n{bazam_cpu} -bam {file1.base}'
                 )
             else:
                 extract_fq_cmd = ''
