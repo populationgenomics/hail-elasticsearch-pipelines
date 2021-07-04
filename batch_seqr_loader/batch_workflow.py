@@ -514,9 +514,9 @@ def _make_realign_bam_jobs(
             j.command(
                 f"""set -e
 
-            {extract_fq_cmd} | 
-            bwa mem -K 100000000 {'-p' if use_bazam else ''} -v3 -t{bwa_cpu} -Y 
-              -R '{rg_line}' {reference.base} 
+            {extract_fq_cmd} | \
+            bwa mem -K 100000000 {'-p' if use_bazam else ''} -v3 -t{bwa_cpu} -Y \
+              -R '{rg_line}' {reference.base} \
               {'/dev/stdin' if use_bazam else file1} {'-' if use_bazam else file2} \
               2> >(tee {j.bwa_stderr_log} >&2) | \
             bamsormadup inputformat=sam threads=~{bamsormadup_cpu} SO=coordinate \
