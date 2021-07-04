@@ -220,7 +220,8 @@ def main(
     bwa_reference = b.read_input_group(
         base=REF_FASTA,
         fai=REF_FASTA + '.fai',
-        dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', ''),
+        dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
+        + '.dict',
         alt=REF_FASTA + '.64.alt',
         sa=REF_FASTA + '.64.sa',
         amb=REF_FASTA + '.64.amb',
