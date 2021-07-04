@@ -572,7 +572,7 @@ def _make_genotype_jobs(
                     REF_FASTA,
                 )
                 if depends_on:
-                    intervals_j.depends_on(depends_on)
+                    intervals_j.depends_on(*depends_on)
             for idx in range(NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS):
                 haplotype_caller_jobs.append(
                     _add_haplotype_caller_job(
@@ -610,7 +610,7 @@ def _make_joint_genotype_jobs(
     work_bucket: str,
     local_tmp_dir: str,
     overwrite: bool,
-    depends_on: List[Job] = None,
+    depends_on: Optional[List[Job]] = None,
 ) -> Tuple[Job, str]:
     """
     Assumes all samples have a 'file' of 'type'='gvcf' in `samples_df`.
@@ -624,7 +624,7 @@ def _make_joint_genotype_jobs(
         REF_FASTA,
     )
     if depends_on:
-        intervals_j.depends_on(depends_on)
+        intervals_j.depends_on(*depends_on)
 
     genotype_vcf_jobs = []
     genotyped_vcfs = []
@@ -853,7 +853,10 @@ def _add_import_gvcfs_job(
         # This command will download the DB metadata file locally.
         # The `-O` argument to `tar` means "write the file being extracted to the stdout",
         # and the file to be extracted is specified as a positional argument to `tar`.
-        cmd = f'gsutil cat {genomicsdb_gcs_path} | tar -O --extract workspace/callset.json > {genomicsdb_metadata}'
+        cmd = (
+            f'gsutil cat {genomicsdb_gcs_path} | '
+            f'tar -O --extract workspace/callset.json > {genomicsdb_metadata}'
+        )
         logger.info(cmd)
         subprocess.run(cmd, check=False, shell=True)
 

@@ -86,6 +86,7 @@ run_test_from_cram:
 	--seqr-dataset $(TEST_DATASET)-from-cram \
 	--data-to-realign 'gs://cpg-seqr-test/batches/NA12878-trio/NA12878.cram' \
 	--cram         'gs://cpg-seqr-test/batches/NA12878-trio/NA1289*.cram' \
+	--cram         'gs://cpg-seqr-test/batches/NA12878-trio/SS6004470.cram' \
 	--ped-file     "gs://cpg-seqr-test/batches/NA12878-trio/NA12878-trio.ped" \
 	--keep-scratch \
 	--reuse

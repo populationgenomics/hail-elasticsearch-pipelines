@@ -94,7 +94,7 @@ def find_inputs(
             data['file2'].append(None)
             data['index'].append(index)
             data['type'].append('cram_to_realign')
-        if sn in cram_with_index_to_realign_by_sn:
+        if sn in fastq_pairs_by_by_sn:
             file1, file2 = fastq_pairs_by_by_sn[sn]
             data['file'].append(file1)
             data['file2'].append(file2)
