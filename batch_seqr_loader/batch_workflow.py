@@ -496,7 +496,7 @@ def _make_realign_bam_jobs(
             if use_bazam:
                 extract_fq_cmd = (
                     f'bazam -Xmx16g -Dsamjdk.reference_fasta={reference.base}'
-                    f'-n{bazam_cpu} -bam {file1.base}'
+                    f' -n{bazam_cpu} -bam {file1.base}'
                 )
             else:
                 extract_fq_cmd = ''
