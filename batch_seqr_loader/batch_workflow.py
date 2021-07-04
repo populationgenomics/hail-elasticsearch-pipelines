@@ -222,12 +222,12 @@ def main(
         fai=REF_FASTA + '.fai',
         dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
         + '.dict',
-        alt=REF_FASTA + '.64.alt',
-        sa=REF_FASTA + '.64.sa',
-        amb=REF_FASTA + '.64.amb',
-        bwt=REF_FASTA + '.64.bwt',
-        ann=REF_FASTA + '.64.ann',
-        pac=REF_FASTA + '.64.pac',
+        alt=REF_FASTA + '.alt',
+        sa=REF_FASTA + '.sa',
+        amb=REF_FASTA + '.amb',
+        bwt=REF_FASTA + '.bwt',
+        ann=REF_FASTA + '.ann',
+        pac=REF_FASTA + '.pac',
     )
 
     # We can't do pedigree checks on FASTQs, so need to add alignment jobs for them
