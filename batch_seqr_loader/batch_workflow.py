@@ -459,18 +459,18 @@ def _make_realign_bam_jobs(
     """
     jobs = []
     realign_df = samples_df[samples_df['type'] == file_type]
-    for sn, file1, file2 in zip(
-        realign_df['s'], realign_df['file'], realign_df['file2']
+    for sn, file1, file2, index in zip(
+        realign_df['s'], realign_df['file'], realign_df['file2'], realign_df['index']
     ):
         job_name = f'BWA align, {sn}'
         output_cram_path = join(work_bucket, f'{sn}.cram')
         if can_reuse(output_cram_path, overwrite):
             jobs.append(b.new_job(f'{job_name} [reuse]'))
         else:
-            assert file1.endswith('.cram') or file1.endswith('.bam') or file2
+            assert (file1.endswith('.cram') or file1.endswith('.bam')) and index or file2
             if file1.endswith('.cram') or file1.endswith('.bam'):
                 use_bazam = True
-                file1 = b.read_input_group(base=file1, index=file2)
+                file1 = b.read_input_group(base=file1, index=index)
             else:
                 use_bazam = False
                 file1 = b.read_input(file1)
