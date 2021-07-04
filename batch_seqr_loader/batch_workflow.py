@@ -222,7 +222,6 @@ def main(
         fai=REF_FASTA + '.fai',
         dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
         + '.dict',
-        alt=REF_FASTA + '.alt',
         sa=REF_FASTA + '.sa',
         amb=REF_FASTA + '.amb',
         bwt=REF_FASTA + '.bwt',
