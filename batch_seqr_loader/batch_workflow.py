@@ -217,13 +217,25 @@ def main(
         + '.dict',
     )
 
+    bwa_reference = b.read_input_group(
+        base=REF_FASTA,
+        fai=REF_FASTA + '.fai',
+        dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', ''),
+        alt=REF_FASTA + '.64.alt',
+        sa=REF_FASTA + '.64.sa',
+        amb=REF_FASTA + '.64.amb',
+        bwt=REF_FASTA + '.64.bwt',
+        ann=REF_FASTA + '.64.ann',
+        pac=REF_FASTA + '.64.pac',
+    )
+
     # We can't do pedigree checks on FASTQs, so need to add alignment jobs for them
     # first
     align_bam_jobs = _make_realign_bam_jobs(
         b=b,
         samples_df=samples_df,
         file_type='fastq_to_realign',
-        reference=reference,
+        reference=bwa_reference,
         work_bucket=work_bucket,
         overwrite=overwrite,
     )
@@ -247,7 +259,7 @@ def main(
         b=b,
         samples_df=samples_df,
         file_type='cram_to_realign',
-        reference=reference,
+        reference=bwa_reference,
         work_bucket=work_bucket,
         overwrite=overwrite,
     )
