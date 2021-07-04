@@ -478,7 +478,7 @@ def _make_realign_bam_jobs(
             bwa_cpu = 20
             bamsormadup_cpu = total_cpu - bwa_cpu - bazam_cpu
             j.cpu(total_cpu)
-            j.memory('highcpu')
+            j.memory('standard')
             j.storage('300G')
             j.declare_resource_group(
                 output_cram={
