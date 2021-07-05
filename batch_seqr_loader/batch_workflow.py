@@ -37,7 +37,7 @@ PEDDY_CONTAINER = 'quay.io/biocontainers/peddy:0.4.8--pyh5e36f6f_0'
 NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS = 50
 NUMBER_OF_GENOMICS_DB_INTERVALS = 10
 
-REF_BUCKET = 'gs://cpg-reference/hg38/v0'
+REF_BUCKET = 'gs://cpg-reference/hg38/v1'
 REF_FASTA = join(REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
 DBSNP_VCF = join(REF_BUCKET, 'Homo_sapiens_assembly38.dbsnp138.vcf')
 UNPADDED_INTERVALS = join(REF_BUCKET, 'hg38.even.handcurated.20k.intervals')
@@ -443,9 +443,9 @@ def _pedigree_checks(
 cat <<EOT >> check_pedigree.py
 {script}
 EOT
-python check_pedigree.py \\
---somalier-samples {relate_j.output_samples} \\
---somalier-pairs {relate_j.output_pairs} \\
+python check_pedigree.py \
+--somalier-samples {relate_j.output_samples} \
+--somalier-pairs {relate_j.output_pairs} \
 {('--somalier-html ' + somalier_html_url) if somalier_html_url else ''}
     """
     )
@@ -479,7 +479,9 @@ def _make_realign_bam_jobs(
         if can_reuse(output_cram_path, overwrite):
             jobs.append(b.new_job(f'{job_name} [reuse]'))
         else:
-            assert (file1.endswith('.cram') or file1.endswith('.bam')) and index or file2
+            assert (
+                (file1.endswith('.cram') or file1.endswith('.bam')) and index or file2
+            )
             if file1.endswith('.cram') or file1.endswith('.bam'):
                 use_bazam = True
                 file1 = b.read_input_group(base=file1, index=index)
@@ -523,7 +525,8 @@ def _make_realign_bam_jobs(
             # -Y     use soft clipping for supplementary alignments
             # -R     read group header line such as '@RG\tID:foo\tSM:bar'
             # -M     mark shorter split hits as secondary
-            j.command(f"""
+            j.command(
+                f"""
 set -o pipefail
 set -ex
 
