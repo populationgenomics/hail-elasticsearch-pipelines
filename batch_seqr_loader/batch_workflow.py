@@ -523,22 +523,24 @@ def _make_realign_bam_jobs(
             # -Y     use soft clipping for supplementary alignments
             # -R     read group header line such as '@RG\tID:foo\tSM:bar'
             # -M     mark shorter split hits as secondary
-            j.command(
-                f"""set -e
+            j.command(f"""
+set -o pipefail
+set -ex
 
-            {extract_fq_cmd} | \
-            bwa mem -K 100000000 {'-p' if use_bazam else ''} -v3 -t{bwa_cpu} -Y \
-              -R '{rg_line}' {reference.base} \
-              {'/dev/stdin' if use_bazam else file1} {'-' if use_bazam else file2} \
-              2> >(tee {j.bwa_stderr_log} >&2) | \
-            bamsormadup inputformat=sam threads=~{bamsormadup_cpu} SO=coordinate \
-              M=~{j.duplicate_metrics} \
-              outputformat=sam | \
-            samtools view -T ~{reference.base} \
-              -O cram \
-              -o {j.output_cram.base}
+(while true; do df -h; pwd; du -sh *; free -m; sleep 300; done) &
 
-            samtools index -@{total_cpu} {j.output_cram.base} {j.output_cram.crai}
+{extract_fq_cmd} | \
+bwa mem -K 100000000 {'-p' if use_bazam else ''} -v3 -t{bwa_cpu} -Y \
+  -R '{rg_line}' {reference.base} \
+  {'/dev/stdin' if use_bazam else file1} {'-' if use_bazam else file2} \
+  2> >(tee {j.bwa_stderr_log} >&2) | \
+bamsormadup inputformat=sam threads={bamsormadup_cpu} SO=coordinate \
+  M={j.duplicate_metrics} outputformat=sam | \
+samtools view -T {reference.base} -O cram -o {j.output_cram.base}
+
+samtools index -@{total_cpu} {j.output_cram.base} {j.output_cram.crai}
+
+df -h; pwd; du -sh *
             """
             )
             b.write_output(j.output_cram, splitext(output_cram_path)[0])
