@@ -498,7 +498,7 @@ def _make_realign_bam_jobs(
             bwa_cpu = 20
             bamsormadup_cpu = total_cpu - bwa_cpu - bazam_cpu
             j.cpu(total_cpu)
-            j.memory('lowmem')
+            j.memory('standard')
             j.storage('300G')
             j.declare_resource_group(
                 output_cram={
@@ -532,13 +532,13 @@ set -ex
 
 (while true; do df -h; pwd; du -sh *; free -m; sleep 300; done) &
 
-{extract_fq_cmd} | \
-bwa mem -K 100000000 {'-p' if use_bazam else ''} -v3 -t{bwa_cpu} -Y \
-  -R '{rg_line}' {reference.base} \
-  {'/dev/stdin' if use_bazam else file1} {'-' if use_bazam else file2} \
-  2> >(tee {j.bwa_stderr_log} >&2) | \
-bamsormadup inputformat=sam threads={bamsormadup_cpu} SO=coordinate \
-  M={j.duplicate_metrics} outputformat=sam | \
+{extract_fq_cmd} | \\
+bwa mem -K 100000000 {'-p' if use_bazam else ''} -v3 -t{bwa_cpu} -Y \\
+  -R '{rg_line}' {reference.base} \\
+  {'/dev/stdin' if use_bazam else file1} {'-' if use_bazam else file2} \\
+  2> >(tee {j.bwa_stderr_log} >&2) | \\
+bamsormadup inputformat=sam threads={bamsormadup_cpu} SO=coordinate \\
+  M={j.duplicate_metrics} outputformat=sam | \\
 samtools view -T {reference.base} -O cram -o {j.output_cram.base}
 
 samtools index -@{total_cpu} {j.output_cram.base} {j.output_cram.crai}
@@ -795,15 +795,15 @@ def _add_haplotype_caller_job(
         f"""set -e
     (while true; do df -h; pwd; free -m; sleep 300; done) &
 
-    gatk --java-options "-Xms{java_mem}g -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10" \
-      HaplotypeCaller \
-      -R {reference.base} \
-      -I {bam_fpath} \
-      -L {interval} \
-      -O {j.output_gvcf['g.vcf.gz']} \
-      -G StandardAnnotation -G StandardHCAnnotation -G AS_StandardAnnotation \
-      -GQB 10 -GQB 20 -GQB 30 -GQB 40 -GQB 50 -GQB 60 -GQB 70 -GQB 80 -GQB 90 \
-      -ERC GVCF \
+    gatk --java-options "-Xms{java_mem}g -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10" \\
+      HaplotypeCaller \\
+      -R {reference.base} \\
+      -I {bam_fpath} \\
+      -L {interval} \\
+      -O {j.output_gvcf['g.vcf.gz']} \\
+      -G StandardAnnotation -G StandardHCAnnotation -G AS_StandardAnnotation \\
+      -GQB 10 -GQB 20 -GQB 30 -GQB 40 -GQB 50 -GQB 60 -GQB 70 -GQB 80 -GQB 90 \\
+      -ERC GVCF \\
 
     df -h; pwd
     """
