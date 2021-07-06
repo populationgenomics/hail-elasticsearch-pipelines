@@ -76,7 +76,7 @@ def main(
             )
         es_host = 'elasticsearch.es.australia-southeast1.gcp.elastic-cloud.com'
         es_port = '9243'
-        es_username = 'seqr' if prod else 'seqr-test'
+        es_username = 'seqr'  # if prod else 'seqr-test'
         es_password = _read_es_password()
 
     es = ElasticsearchClient(
