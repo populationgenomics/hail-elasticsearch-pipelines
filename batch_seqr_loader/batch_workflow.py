@@ -90,8 +90,9 @@ logger.setLevel(logging.INFO)
     '--seqr-dataset',
     'dataset_name',
     required=True,
-    help='Name of the seqr callset. If a genomics DB already exists for this dataset, '
-    'it will be extended with the new samples',
+    help='Name of the seqr dataset. If a genomics DB already exists for this dataset, '
+    'it will be extended with the new samples. When loading into the ES, '
+    'the name will be suffixed with the dataset version (set by --version)',
 )
 @click.option('--version', 'dataset_version', type=str, required=True)
 @click.option(
@@ -314,7 +315,7 @@ def main(
         b,
         f'batch_seqr_loader/scripts/load_to_es.py '
         f'--mt-path {annotated_mt_path} '
-        f'--es-index {dataset_name} '
+        f'--es-index {dataset_name}-{dataset_version} '
         f'--es-index-min-num-shards 1 '
         f'--genome-version GRCh38 '
         f'{"--prod" if namespace == "main" else ""}',
