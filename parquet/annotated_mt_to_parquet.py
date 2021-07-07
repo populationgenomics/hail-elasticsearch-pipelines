@@ -12,4 +12,4 @@ ht = ht.flatten()
 ht = ht.drop(ht.locus, ht.alleles)
 
 df = ht.to_spark()
-df.write.parquet(output_path('table.parquet', 'tmp')
+df.write.parquet(output_path('table.parquet', 'tmp'))
