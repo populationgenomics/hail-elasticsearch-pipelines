@@ -33,8 +33,8 @@ BAZAM_CONTAINER = f'australia-southeast1-docker.pkg.dev/cpg-common/images/bazam:
 SOMALIER_CONTAINER = 'brentp/somalier:latest'
 PEDDY_CONTAINER = 'quay.io/biocontainers/peddy:0.4.8--pyh5e36f6f_0'
 
-# Fixed scatter count, because we are storing a genomics DB per each interval
 NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS = 50
+NUMBER_OF_DATAPROC_WORKERS = 50
 NUMBER_OF_GENOMICS_DB_INTERVALS = 10
 
 REF_BUCKET = 'gs://cpg-reference/hg38/v1'
@@ -303,7 +303,7 @@ def main(
             + (f'--vep-block-size ' if vep_block_size else ''),
             max_age='8h',
             packages=DATAPROC_PACKAGES,
-            num_secondary_workers=50,
+            num_secondary_workers=NUMBER_OF_DATAPROC_WORKERS,
             job_name='make_annotated_mt.py',
             vep='GRCh38',
             depends_on=[joint_genotype_job],
@@ -321,7 +321,7 @@ def main(
         f'{"--prod" if namespace == "main" else ""}',
         max_age='8h',
         packages=DATAPROC_PACKAGES,
-        num_secondary_workers=50,
+        num_secondary_workers=10,
         job_name='load_to_es.py',
         depends_on=[annotate_job],
         scopes=['cloud-platform'],
