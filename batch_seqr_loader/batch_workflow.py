@@ -494,12 +494,16 @@ def _make_realign_bam_jobs(
             j = b.new_job(job_name)
             jobs.append(j)
             j.image(BAZAM_CONTAINER)
-            bazam_cpu = 6 if use_bazam else 0
-            total_cpu = 32
-            bwa_cpu = 20
-            bamsormadup_cpu = total_cpu - bwa_cpu - bazam_cpu
-            j.cpu(total_cpu)
-            j.memory('standard')
+            total_cpu = 16
+            if use_bazam:
+                bazam_cpu = 3
+                bwa_cpu = 10
+                bamsormadup_cpu = 3
+            else:
+                bazam_cpu = 0
+                bwa_cpu = 12
+                bamsormadup_cpu = 4
+            j.memory('highmem')
             j.storage('300G')
             j.declare_resource_group(
                 output_cram={
