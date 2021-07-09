@@ -12,4 +12,4 @@ ht = ht.flatten()
 ht = ht.drop(ht.locus, ht.alleles)
 
 df = ht.to_spark()
-df.write.option('compression', 'lz4').parquet(output_path('table.parquet', 'tmp'))
+df.write.option('compression', 'zstd').parquet(output_path('table.parquet', 'tmp'))
