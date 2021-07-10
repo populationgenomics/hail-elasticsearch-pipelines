@@ -61,6 +61,7 @@ mt = mt.select_entries(
     dp=mt.DP,
 )
 ht = mt.make_table()
+ht = ht.key_by()
 ht = ht.drop(ht.locus, ht.alleles)
 df = ht.to_spark()
 maybe_call(
