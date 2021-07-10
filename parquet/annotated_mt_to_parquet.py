@@ -23,7 +23,9 @@ df = ht.to_spark()
 df.write.option('compression', 'none').parquet(
     output_path('original_uncompressed.parquet', 'tmp')
 )
-df.write.option('compression', 'zstd').parquet(output_path('original_zstd.parquet', 'tmp'))
+df.write.option('compression', 'zstd').parquet(
+    output_path('original_zstd.parquet', 'tmp')
+)
 
 # Drop all sample-specific fields.
 mt = mt.drop(
@@ -41,7 +43,9 @@ mt = mt.select_entries(
     num_alt=mt.GT.n_alt_alleles(),
     gq=mt.GQ,
     ab=hl.bind(
-        lambda total: hl.or_missing(total > 0 & hl.len(mt.AD) > 1, mt.AD[1] / total),
+        lambda total: hl.or_missing(
+            (total > 0) & (hl.len(mt.AD) > 1), mt.AD[1] / total
+        ),
         hl.sum(mt.AD),
     ),
     dp=mt.DP,
