@@ -33,7 +33,7 @@ maybe_call(
 )
 maybe_call(
     df.write.option('compression', 'zstd').parquet,
-    output_path('original_zstd.parquet', 'tmp'),
+    output_path('original.parquet', 'tmp'),
 )
 
 # Drop all sample-specific fields.
@@ -45,7 +45,7 @@ ht = ht.drop(ht.locus, ht.alleles)
 df = ht.to_spark()
 maybe_call(
     df.write.option('compression', 'zstd').parquet,
-    output_path('sites_only_zstd.parquet', 'tmp'),
+    output_path('sites_only.parquet', 'tmp'),
 )
 
 # Annotate entries with genotype information instead.
