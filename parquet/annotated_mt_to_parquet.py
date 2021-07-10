@@ -10,21 +10,30 @@ mt = hl.read_matrix_table(
     )
 )
 
+
+def maybe_call(f, filename):
+    """Calls f(filename) iff filename doesn't exist yet."""
+    if not hl.hadoop_exists(filename):
+        f(filename)
+
+
 # Discard VEP, which was only used to derive other annotations.
 mt = mt.drop(mt.vep)
-mt.write(output_path('no_vep.mt', 'tmp'))
+maybe_call(mt.write, output_path('no_vep.mt', 'tmp'))
 
 # See https://github.com/populationgenomics/hail-elasticsearch-pipelines/blob/91f6adf07d4708391340dd2f568fca7d166c5735/luigi_pipeline/lib/model/seqr_mt_schema.py#L304.
 ht = mt.rows().flatten()
 ht = ht.drop(ht.locus, ht.alleles)
-ht.write(output_path('no_vep.ht', 'tmp'))
+maybe_call(ht.write, output_path('no_vep.ht', 'tmp'))
 
 df = ht.to_spark()
-df.write.option('compression', 'none').parquet(
-    output_path('original_uncompressed.parquet', 'tmp')
+maybe_call(
+    df.write.option('compression', 'none').parquet,
+    output_path('original_uncompressed.parquet', 'tmp'),
 )
-df.write.option('compression', 'zstd').parquet(
-    output_path('original_zstd.parquet', 'tmp')
+maybe_call(
+    df.write.option('compression', 'zstd').parquet,
+    output_path('original_zstd.parquet', 'tmp'),
 )
 
 # Drop all sample-specific fields.
@@ -34,8 +43,9 @@ mt = mt.drop(
 ht = mt.rows().flatten()
 ht = ht.drop(ht.locus, ht.alleles)
 df = ht.to_spark()
-df.write.option('compression', 'zstd').parquet(
-    output_path('sites_only_zstd.parquet', 'tmp')
+maybe_call(
+    df.write.option('compression', 'zstd').parquet,
+    output_path('sites_only_zstd.parquet', 'tmp'),
 )
 
 # Annotate entries with genotype information instead.
@@ -53,6 +63,7 @@ mt = mt.select_entries(
 ht = mt.make_table()
 ht = ht.drop(ht.locus, ht.alleles)
 df = ht.to_spark()
-df.write.option('compression', 'zstd').parquet(
-    output_path('genotype_columns.parquet', 'tmp')
+maybe_call(
+    df.write.option('compression', 'zstd').parquet,
+    output_path('genotype_columns.parquet', 'tmp'),
 )
