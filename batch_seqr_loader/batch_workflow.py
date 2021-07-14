@@ -581,12 +581,14 @@ set -ex
 
 (while true; do df -h; pwd; du -sh *; free -m; sleep 300; done) &
 
-{extract_fq_cmd} | \\
+{extract_fq_cmd} > tmp.fq
+
 bwa mem -K 100000000 {'-p' if use_bazam else ''} -v3 -t{bwa_cpu} -Y \\
   -R '{rg_line}' {reference.base} \\
-  {'/dev/stdin' if use_bazam else file1} {'-' if use_bazam else file2} | \\
+  {'tmp.fq' if use_bazam else file1} {'-' if use_bazam else file2} > aligned.sam
+  
 bamsormadup inputformat=sam threads={bamsormadup_cpu} SO=coordinate \\
-  M={j.duplicate_metrics} outputformat=sam | \\
+  M={j.duplicate_metrics} outputformat=sam < aligned.sam | \\
 samtools view -T {reference.base} -O cram -o {j.output_cram.base}
 
 samtools index -@{total_cpu} {j.output_cram.base} {j.output_cram.crai}
