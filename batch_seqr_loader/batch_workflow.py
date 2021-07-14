@@ -596,9 +596,6 @@ df -h; pwd; du -sh *
             )
             b.write_output(j.output_cram, splitext(output_cram_path)[0])
             b.write_output(
-                j.bwa_stderr_log, join(work_bucket, 'bwa', f'{sn}-bwa-stderr.log')
-            )
-            b.write_output(
                 j.duplicate_metrics,
                 join(work_bucket, 'bwa', f'{sn}-duplicate-metrics.csv'),
             )
