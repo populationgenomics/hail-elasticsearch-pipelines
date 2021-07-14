@@ -230,15 +230,25 @@ def main(
         pac=REF_FASTA + '.pac',
     )
 
-    # We can't do pedigree checks on FASTQs, so need to add alignment jobs for them
-    # first
-    align_bam_jobs = _make_realign_bam_jobs(
+    align_fastq_jobs = _make_realign_jobs(
         b=b,
         samples_df=samples_df,
         file_type='fastq_to_realign',
         reference=bwa_reference,
         work_bucket=work_bucket,
         overwrite=overwrite,
+    )
+
+    index_jobs = _make_index_jobs(b, samples_df)
+
+    realign_cram_jobs = _make_realign_jobs(
+        b=b,
+        samples_df=samples_df,
+        file_type='cram_to_realign',
+        reference=bwa_reference,
+        work_bucket=work_bucket,
+        overwrite=overwrite,
+        depends_on=index_jobs,
     )
 
     ped_check_j = None
@@ -253,17 +263,8 @@ def main(
             fingerprints_bucket=fingerprints_bucket,
             web_bucket=web_bucket,
             web_url=f'https://{namespace}-web.populationgenomics.org.au/{project}',
-            depends_on=align_bam_jobs,
+            depends_on=align_fastq_jobs + realign_cram_jobs,
         )
-
-    realign_bam_jobs = _make_realign_bam_jobs(
-        b=b,
-        samples_df=samples_df,
-        file_type='cram_to_realign',
-        reference=bwa_reference,
-        work_bucket=work_bucket,
-        overwrite=overwrite,
-    )
 
     genotype_jobs, samples_df = _make_genotype_jobs(
         b=b,
@@ -271,8 +272,8 @@ def main(
         reference=reference,
         work_bucket=work_bucket,
         overwrite=overwrite,
-        depends_on=align_bam_jobs
-        + realign_bam_jobs
+        depends_on=align_fastq_jobs
+        + realign_cram_jobs
         + ([ped_check_j] if ped_check_j else []),
     )
 
@@ -455,13 +456,53 @@ python check_pedigree.py \
     return check_j, somalier_samples_path
 
 
-def _make_realign_bam_jobs(
+def _make_index_jobs(
+    b: hb.Batch,
+    samples_df: pd.DataFrame,
+):
+    jobs = []
+    cram_df = samples_df[samples_df['type'].isin(['cram', 'cram_to_realign'])]
+    for sn, fpath, index_fpath in zip(cram_df['s'], cram_df['file'], cram_df['index']):
+        if index_fpath is None:
+            job_name = f'Index alignment file, {sn}'
+            file = b.read_input(fpath)
+            j = b.new_job(job_name)
+            jobs.append(j)
+            j.image(BAZAM_CONTAINER)
+            j.storage(('50G' if fpath.endswith('.cram') else '150G'))
+            j.command(f'samtools index {file} {j.output_crai}')
+            index_fpath = splitext(fpath)[0] + (
+                '.crai' if fpath.endswith('.cram') else '.bai'
+            )
+            b.write_output(j.output_crai, index_fpath)
+            samples_df.loc[sn, 'index'] = index_fpath
+            jobs.append(j)
+    gvcf_df = samples_df[samples_df['type'].isin(['gvcf'])]
+
+    for sn, fpath, index_fpath in zip(cram_df['s'], gvcf_df['file'], gvcf_df['index']):
+        if index_fpath is None:
+            job_name = f'Index GVCF, {sn}'
+            file = b.read_input(fpath)
+            j = b.new_job(job_name)
+            jobs.append(j)
+            j.image('quay.io/biocontainers/tabix')
+            j.storage('10G')
+            j.command(f'tabix -p vcf {file} && ln {file}.tbi {j.output_tbi}')
+            index_fpath = fpath + '.tbi'
+            b.write_output(j.output_tbi, index_fpath)
+            samples_df.loc[sn, 'index'] = index_fpath
+            jobs.append(j)
+    return jobs
+
+
+def _make_realign_jobs(
     b: hb.Batch,
     samples_df: pd.DataFrame,
     file_type: str,  # 'fastq_to_realign', 'cram_to_realign'
     reference: hb.ResourceGroup,
     work_bucket: str,
     overwrite: bool,
+    depends_on: Optional[List[Job]] = None,
 ) -> List[Job]:
     """
     Takes all samples with a 'file' of 'type'='fastq_to_realign'|'cram_to_realign'
@@ -512,6 +553,8 @@ def _make_realign_bam_jobs(
                     'crai': '{root}.crai',
                 }
             )
+            if depends_on:
+                j.depends_on(*depends_on)
 
             if use_bazam:
                 extract_fq_cmd = (

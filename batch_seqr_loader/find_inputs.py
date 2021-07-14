@@ -162,33 +162,37 @@ def _find_files_by_type(
     return gvcfs, crams, fastq_to_align, cram_to_realign
 
 
-def _find_file_indices(fpaths: List[str]) -> Dict[str, Tuple[str, str]]:
+def _find_file_indices(fpaths: List[str]) -> Dict[str, Tuple[str, Optional[str]]]:
     """
     Find corresponding index files. Will look for:
     '<sample>.g.vcf.gz.tbi' for '<sample>.g.vcf.gz',
     '<sample>.bam.bai' or '<sample>.bai' for '<sample>.bam',
     '<sample>.cram.crai' or '<sample>.crai' for '<sample>.cram',
 
-    Returns a dict mapping sample name to a pair of file paths (file, index)
+    Returns a dict mapping sample name to a pair of file paths (file, index).
+    if it can't find an index file, it will add None, which will trigger a re-index job
     """
-    result: Dict[str, Tuple[str, str]] = dict()
+    result: Dict[str, Tuple[str, Optional[str]]] = dict()
     for fp in fpaths:
-        index = fp + '.tbi'
+        index: Optional[str] = fp + '.tbi'
         if fp.endswith('.g.vcf.gz'):
             if not file_exists(index):
-                logger.critical(f'Not found TBI index for file {fp}')
+                logger.critical(f'Not found TBI index for file {fp}, will create')
+                index = None
         elif fp.endswith('.bam'):
             index = fp + '.bai'
             if not file_exists(index):
                 index = re.sub('.bam$', '.bai', fp)
                 if not file_exists(index):
-                    logger.critical(f'Not found BAI index for file {fp}')
+                    logger.warning(f'Not found BAI index for file {fp}, will create')
+                    index = None
         elif fp.endswith('.cram'):
             index = fp + '.crai'
             if not file_exists(index):
                 index = re.sub('.cram$', '.crai', fp)
                 if not file_exists(index):
-                    logger.critical(f'Not found CRAI index for file {fp}')
+                    logger.warning(f'Not found CRAI index for file {fp}, will create')
+                    index = None
         else:
             logger.critical(f'Unrecognised input file extention {fp}')
         result[_get_file_base_name(fp)] = fp, index
