@@ -584,8 +584,7 @@ set -ex
 {extract_fq_cmd} | \\
 bwa mem -K 100000000 {'-p' if use_bazam else ''} -v3 -t{bwa_cpu} -Y \\
   -R '{rg_line}' {reference.base} \\
-  {'/dev/stdin' if use_bazam else file1} {'-' if use_bazam else file2} \\
-  2> >(tee {j.bwa_stderr_log} >&2) | \\
+  {'/dev/stdin' if use_bazam else file1} {'-' if use_bazam else file2} | \\
 bamsormadup inputformat=sam threads={bamsormadup_cpu} SO=coordinate \\
   M={j.duplicate_metrics} outputformat=sam | \\
 samtools view -T {reference.base} -O cram -o {j.output_cram.base}
