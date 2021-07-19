@@ -544,6 +544,7 @@ def _make_realign_jobs(
                 bazam_cpu = 0
                 bwa_cpu = 12
                 bamsormadup_cpu = 4
+            bwa_cpu = 1
             j.memory('highmem')
             j.cpu(total_cpu)
             j.storage('300G')
