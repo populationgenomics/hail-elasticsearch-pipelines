@@ -42,6 +42,7 @@ logger.setLevel(logging.INFO)
     'es_index',
     type=click.STRING,
     help='Elasticsearch index. Usually the dataset name. Will be lowercased',
+    required=True,
 )
 @click.option(
     '--es-index-min-num-shards',
