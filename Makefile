@@ -91,6 +91,22 @@ run_test_from_cram:
 	--keep-scratch \
 	--reuse
 
+.PHONY: run_test_from_cram_tiny
+run_test_from_cram_tiny:
+	analysis-runner \
+	--dataset seqr \
+	--access-level test \
+	--output-dir   "datasets/$(TEST_DATASET)/$(TEST_VERSION)" \
+	--description  "seqr loader - $(TEST_DATASET) test - from CRAM - tiny" \
+	batch_seqr_loader/batch_workflow.py \
+	--namespace    test \
+	--version      $(TEST_VERSION) \
+	--seqr-dataset $(TEST_DATASET)-from-cram-tiny \
+	--data-to-realign 'gs://cpg-seqr-test/batches/NA12878-trio/NA12878-chr21.cram' \
+	--ped-file     "gs://cpg-seqr-test/batches/NA12878-trio/NA12878-trio.ped" \
+	--keep-scratch \
+	--reuse
+
 .PHONY: run_acute_care
 run_acute_care:
 	analysis-runner \
