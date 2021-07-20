@@ -217,16 +217,19 @@ def main(
         dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
         + '.dict',
     )
+
+    TINY_REF_BUCKET = 'gs://cpg-reference/hg38/v1/ref-tiny'
+    TINY_REF_FASTA = join(REF_BUCKET, 'Homo_sapiens_assembly38-tiny.fasta')
     bwa_reference = b.read_input_group(
-        base=REF_FASTA,
-        fai=REF_FASTA + '.fai',
-        dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
+        base=TINY_REF_FASTA,
+        fai=TINY_REF_FASTA + '.fai',
+        dict=TINY_REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
         + '.dict',
-        sa=REF_FASTA + '.sa',
-        amb=REF_FASTA + '.amb',
-        bwt=REF_FASTA + '.bwt',
-        ann=REF_FASTA + '.ann',
-        pac=REF_FASTA + '.pac',
+        sa=TINY_REF_FASTA + '.sa',
+        amb=TINY_REF_FASTA + '.amb',
+        bwt=TINY_REF_FASTA + '.bwt',
+        ann=TINY_REF_FASTA + '.ann',
+        pac=TINY_REF_FASTA + '.pac',
     )
 
     align_fastq_jobs = _make_realign_jobs(
@@ -244,6 +247,7 @@ def main(
         b=b,
         samples_df=samples_df,
         file_type='cram_to_realign',
+        input_ref=reference,
         reference=bwa_reference,
         work_bucket=work_bucket,
         overwrite=overwrite,
@@ -498,6 +502,7 @@ def _make_realign_jobs(
     b: hb.Batch,
     samples_df: pd.DataFrame,
     file_type: str,  # 'fastq_to_realign', 'cram_to_realign'
+    input_ref: hb.ResourceGroup,
     reference: hb.ResourceGroup,
     work_bucket: str,
     overwrite: bool,
@@ -558,7 +563,7 @@ def _make_realign_jobs(
 
             if use_bazam:
                 extract_fq_cmd = (
-                    f'bazam -Xmx16g -Dsamjdk.reference_fasta={reference.base}'
+                    f'bazam -Xmx16g -Dsamjdk.reference_fasta={input_ref.base}'
                     f' -n{bazam_cpu} -bam {file1.base}'
                 )
             else:
