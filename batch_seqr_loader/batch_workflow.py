@@ -585,7 +585,7 @@ def _make_realign_jobs(
 set -o pipefail
 set -ex
 
-(while true; do df -h; pwd; du -sh *; free -m; sleep 300; done) &
+(while true; do df -h; pwd; ls | grep -v proc | xargs du -sh; free -m; sleep 300; done) &
 
 {extract_fq_cmd} > {j.tmp_fq}
 
@@ -599,7 +599,7 @@ samtools view -T {reference.base} -O cram -o {j.output_cram.base}
 
 samtools index -@{total_cpu} {j.output_cram.base} {j.output_cram.crai}
 
-df -h; pwd; du -sh *
+df -h; pwd; ls | grep -v proc | xargs du -sh
             """
             )
             b.write_output(j.output_cram, splitext(output_cram_path)[0])
