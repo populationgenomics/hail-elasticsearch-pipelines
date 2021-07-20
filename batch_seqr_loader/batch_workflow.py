@@ -236,6 +236,7 @@ def main(
         b=b,
         samples_df=samples_df,
         file_type='fastq_to_realign',
+        input_ref=reference,
         reference=bwa_reference,
         work_bucket=work_bucket,
         overwrite=overwrite,
