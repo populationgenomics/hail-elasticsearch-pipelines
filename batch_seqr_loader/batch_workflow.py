@@ -219,7 +219,7 @@ def main(
     )
 
     TINY_REF_BUCKET = 'gs://cpg-reference/hg38/v1/ref-tiny'
-    TINY_REF_FASTA = join(REF_BUCKET, 'Homo_sapiens_assembly38-tiny.fasta')
+    TINY_REF_FASTA = join(TINY_REF_BUCKET, 'Homo_sapiens_assembly38-tiny.fasta')
     bwa_reference = b.read_input_group(
         base=TINY_REF_FASTA,
         fai=TINY_REF_FASTA + '.fai',
