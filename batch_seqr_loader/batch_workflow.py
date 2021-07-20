@@ -37,8 +37,8 @@ NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS = 50
 NUMBER_OF_DATAPROC_WORKERS = 50
 NUMBER_OF_GENOMICS_DB_INTERVALS = 10
 
-REF_BUCKET = 'gs://cpg-reference/hg38/v1'
-REF_FASTA = join(REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
+REF_BUCKET = 'gs://cpg-reference/hg38/v1/ref-tiny'
+REF_FASTA = join(REF_BUCKET, 'Homo_sapiens_assembly38-tiny.fasta')
 DBSNP_VCF = join(REF_BUCKET, 'Homo_sapiens_assembly38.dbsnp138.vcf')
 UNPADDED_INTERVALS = join(REF_BUCKET, 'hg38.even.handcurated.20k.intervals')
 SOMALIER_SITES = join(REF_BUCKET, 'sites.hg38.vcf.gz')

@@ -102,7 +102,7 @@ run_test_from_cram_tiny:
 	--namespace    test \
 	--version      $(TEST_VERSION) \
 	--seqr-dataset $(TEST_DATASET)-from-cram-tiny \
-	--data-to-realign 'gs://cpg-seqr-test/batches/NA12878-trio/NA12878-chr21.cram' \
+	--data-to-realign 'gs://cpg-seqr-test/batches/NA12878-trio/NA12878-chr21-tiny.cram' \
 	--ped-file     "gs://cpg-seqr-test/batches/NA12878-trio/NA12878-trio.ped" \
 	--keep-scratch \
 	--reuse
