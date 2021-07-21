@@ -549,7 +549,7 @@ def _make_realign_jobs(
             j.storage('300G')
             j.declare_resource_group(
                 output_cram={
-                    'base': '{root}.cram',
+                    'cram': '{root}.cram',
                     'crai': '{root}.crai',
                 }
             )
@@ -589,9 +589,9 @@ bwa mem -K 100000000 {'-p' if use_bazam else ''} -v3 -t{bwa_cpu} -Y \\
   
 bamsormadup inputformat=sam threads={bamsormadup_cpu} SO=coordinate \\
   M={j.duplicate_metrics} outputformat=sam < {j.aligned_sam} | \\
-samtools view -T {reference.base} -O cram -o {j.output_cram.base}
+samtools view -T {reference.base} -O cram -o {j.output_cram.cram}
 
-samtools index -@{total_cpu} {j.output_cram.base} {j.output_cram.crai}
+samtools index -@{total_cpu} {j.output_cram.cram} {j.output_cram.crai}
 
 df -h; pwd; ls | grep -v proc | xargs du -sh
             """
