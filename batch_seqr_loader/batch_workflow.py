@@ -236,8 +236,7 @@ def main(
         b=b,
         samples_df=samples_df,
         file_type='fastq_to_realign',
-        input_ref=reference,
-        reference=bwa_reference,
+        reference=reference,
         work_bucket=work_bucket,
         overwrite=overwrite,
     )
@@ -248,8 +247,7 @@ def main(
         b=b,
         samples_df=samples_df,
         file_type='cram_to_realign',
-        input_ref=reference,
-        reference=bwa_reference,
+        reference=reference,
         work_bucket=work_bucket,
         overwrite=overwrite,
         depends_on=index_jobs,
@@ -503,7 +501,6 @@ def _make_realign_jobs(
     b: hb.Batch,
     samples_df: pd.DataFrame,
     file_type: str,  # 'fastq_to_realign', 'cram_to_realign'
-    input_ref: hb.ResourceGroup,
     reference: hb.ResourceGroup,
     work_bucket: str,
     overwrite: bool,
@@ -564,7 +561,7 @@ def _make_realign_jobs(
 
             if use_bazam:
                 extract_fq_cmd = (
-                    f'bazam -Xmx16g -Dsamjdk.reference_fasta={input_ref.base}'
+                    f'bazam -Xmx16g -Dsamjdk.reference_fasta={reference.base}'
                     f' -n{bazam_cpu} -bam {file1.base}'
                 )
             else:
@@ -588,6 +585,8 @@ set -ex
 (while true; do df -h; pwd; ls | grep -v proc | xargs du -sh; free -m; sleep 300; done) &
 
 {extract_fq_cmd} > {j.tmp_fq}
+
+bwa index {reference.base}
 
 bwa mem -K 100000000 {'-p' if use_bazam else ''} -v3 -t{bwa_cpu} -Y \\
   -R '{rg_line}' {reference.base} \\
