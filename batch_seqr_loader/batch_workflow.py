@@ -217,26 +217,23 @@ def main(
         dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
         + '.dict',
     )
-
-    TINY_REF_BUCKET = 'gs://cpg-reference/hg38/v1/ref-tiny'
-    TINY_REF_FASTA = join(TINY_REF_BUCKET, 'Homo_sapiens_assembly38-tiny.fasta')
     bwa_reference = b.read_input_group(
-        base=TINY_REF_FASTA,
-        fai=TINY_REF_FASTA + '.fai',
-        dict=TINY_REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
+        base=REF_FASTA,
+        fai=REF_FASTA + '.fai',
+        dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
         + '.dict',
-        sa=TINY_REF_FASTA + '.sa',
-        amb=TINY_REF_FASTA + '.amb',
-        bwt=TINY_REF_FASTA + '.bwt',
-        ann=TINY_REF_FASTA + '.ann',
-        pac=TINY_REF_FASTA + '.pac',
+        sa=REF_FASTA + '.sa',
+        amb=REF_FASTA + '.amb',
+        bwt=REF_FASTA + '.bwt',
+        ann=REF_FASTA + '.ann',
+        pac=REF_FASTA + '.pac',
     )
-
+ 
     align_fastq_jobs = _make_realign_jobs(
         b=b,
         samples_df=samples_df,
         file_type='fastq_to_realign',
-        reference=reference,
+        reference=bwa_reference,
         work_bucket=work_bucket,
         overwrite=overwrite,
     )
@@ -247,7 +244,7 @@ def main(
         b=b,
         samples_df=samples_df,
         file_type='cram_to_realign',
-        reference=reference,
+        reference=bwa_reference,
         work_bucket=work_bucket,
         overwrite=overwrite,
         depends_on=index_jobs,
@@ -585,8 +582,6 @@ set -ex
 (while true; do df -h; pwd; ls | grep -v proc | xargs du -sh; free -m; sleep 300; done) &
 
 {extract_fq_cmd} > {j.tmp_fq}
-
-bwa index {reference.base}
 
 bwa mem -K 100000000 {'-p' if use_bazam else ''} -v3 -t{bwa_cpu} -Y \\
   -R '{rg_line}' {reference.base} \\

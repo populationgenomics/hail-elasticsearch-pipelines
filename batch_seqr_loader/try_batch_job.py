@@ -22,6 +22,31 @@ REF_BUCKET = 'gs://cpg-reference/hg38/v1'
 REF_FASTA = join(REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
 
 
+def _index_bwa_job(
+    b: hb.Batch,
+    reference: hb.ResourceGroup
+):
+    exts = ['.sa', '.amb', '.bwt', '.ann', '.pac']
+    j = b.new_job('Index BWA')
+    j.image(BAZAM_CONTAINER)
+    total_cpu = 16
+    j.cpu(total_cpu)
+    j.storage('40G')
+    j.declare_resource_group(bwa_index={e: '{root}.' + e for e in exts})
+    j.command(
+        f"""
+set -o pipefail
+set -ex
+
+bwa index {reference.base} -p {j.bwa_index}
+
+df -h; pwd; ls | grep -v proc | xargs du -sh
+    """
+    )
+    b.write_output(j.bwa_index, REF_FASTA)
+    return j
+
+
 def _make_realign_jobs(
     b: hb.Batch,
     reference: hb.ResourceGroup,
@@ -85,11 +110,7 @@ reference = b.read_input_group(
     fai=REF_FASTA + '.fai',
     dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
     + '.dict',
-    sa=REF_FASTA + '.sa',
-    amb=REF_FASTA + '.amb',
-    bwt=REF_FASTA + '.bwt',
-    ann=REF_FASTA + '.ann',
-    pac=REF_FASTA + '.pac',
 )
-_make_realign_jobs(b, reference)
+_index_bwa_job(b, reference)
+# _make_realign_jobs(b, reference)
 b.run(open=True)
