@@ -85,6 +85,11 @@ reference = b.read_input_group(
     fai=REF_FASTA + '.fai',
     dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
     + '.dict',
+    sa=REF_FASTA + '.sa',
+    amb=REF_FASTA + '.amb',
+    bwt=REF_FASTA + '.bwt',
+    ann=REF_FASTA + '.ann',
+    pac=REF_FASTA + '.pac',
 )
 _make_realign_jobs(b, reference)
 b.run(open=True)
