@@ -2,6 +2,7 @@
 
 import hailtop.batch as hb
 from os.path import join
+import os
 
 # import hailtop.batch as hb
 # backend = hb.ServiceBackend()
@@ -68,8 +69,16 @@ df -h; pwd; ls | grep -v proc | xargs du -sh
     """
     )
 
-
-backend = hb.ServiceBackend('vladislavsavelyev-trial', 'playground-au')
+billing_project = os.getenv('HAIL_BILLING_PROJECT') or 'seqr'
+hail_bucket = os.environ.get('HAIL_BUCKET')
+print(
+    f'Starting hail Batch with the project {billing_project}, '
+    f'bucket {hail_bucket}'
+)
+backend = hb.ServiceBackend(
+    billing_project=billing_project,
+    bucket=hail_bucket.replace('gs://', ''),
+)
 b = hb.Batch(backend=backend, name='test')
 reference = b.read_input_group(
     base=REF_FASTA,
