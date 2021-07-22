@@ -265,7 +265,7 @@ def main(
             depends_on=align_fastq_jobs + realign_cram_jobs,
         )
 
-    genotype_jobs, samples_df = _make_genotype_jobs(
+    genotype_jobs, samples_df = _make_haplotypecaller_jobs(
         b=b,
         samples_df=samples_df,
         reference=reference,
@@ -381,12 +381,10 @@ def _pedigree_checks(
             j.command(
                 f"""set -ex
                 
-                mkdir extracted
-                
                 somalier extract -d extracted/ --sites {sites} -f {reference.base} \\
                 {input_file['base']}
                 
-                mv extracted/{sn}.somalier {j.output_file}
+                mv extracted/*.somalier {j.output_file}
                 """
             )
             b.write_output(j.output_file, fp_file_by_sample[sn])
@@ -608,7 +606,7 @@ df -h; pwd; ls | grep -v proc | xargs du -sh
     return jobs
 
 
-def _make_genotype_jobs(
+def _make_haplotypecaller_jobs(
     b: hb.Batch,
     samples_df: pd.DataFrame,
     reference: hb.ResourceGroup,
