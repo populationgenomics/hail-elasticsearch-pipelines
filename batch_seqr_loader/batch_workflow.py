@@ -546,7 +546,7 @@ def _make_realign_jobs(
             bwa_cpu = 1
             j.memory('highmem')
             j.cpu(total_cpu)
-            j.storage('300G')
+            j.storage('1000G')
             j.declare_resource_group(
                 output_cram={
                     'cram': '{root}.cram',
@@ -579,21 +579,25 @@ def _make_realign_jobs(
 set -o pipefail
 set -ex
 
-(while true; do df -h; pwd; ls | grep -v proc | xargs du -sh; sleep 300; done) &
+(while true; do df -h; pwd; du -sh $(dirname {j.output_cram.cram})/*; sleep 300; done) &
 
 {extract_fq_cmd} > {j.tmp_fq}
 
 bwa mem -K 100000000 {'-p' if use_bazam else ''} -v3 -t{bwa_cpu} -Y \\
   -R '{rg_line}' {reference.base} \\
   {j.tmp_fq if use_bazam else file1} {'-' if use_bazam else file2} > {j.aligned_sam}
-  
+
+rm {j.tmp_fq}
+
 bamsormadup inputformat=sam threads={bamsormadup_cpu} SO=coordinate \\
   M={j.duplicate_metrics} outputformat=sam < {j.aligned_sam} | \\
 samtools view -T {reference.base} -O cram -o {j.output_cram.cram}
 
+rm {j.aligned_sam}
+
 samtools index -@{total_cpu} {j.output_cram.cram} {j.output_cram.crai}
 
-df -h; pwd; ls | grep -v proc | xargs du -sh
+df -h; pwd; du -sh $(dirname {j.output_cram.cram})/*
             """
             )
             b.write_output(j.output_cram, splitext(output_cram_path)[0])
@@ -840,7 +844,7 @@ def _add_haplotype_caller_job(
 
     j.command(
         f"""set -e
-    (while true; do df -h; pwd; free -m; sleep 300; done) &
+    (while true; do df -h; pwd; du -sh $(dirname {j.output_gvcf['g.vcf.gz']})/*; free -m; sleep 300; done) &
 
     gatk --java-options "-Xms{java_mem}g -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10" \\
       HaplotypeCaller \\
@@ -852,7 +856,7 @@ def _add_haplotype_caller_job(
       -GQB 10 -GQB 20 -GQB 30 -GQB 40 -GQB 50 -GQB 60 -GQB 70 -GQB 80 -GQB 90 \\
       -ERC GVCF \\
 
-    df -h; pwd
+    df -h; pwd; du -sh $(dirname {j.output_gvcf['g.vcf.gz']})/*; free -m
     """
     )
     return j
@@ -887,12 +891,12 @@ def _add_merge_gvcfs_job(
     j.command(
         f"""set -e
 
-    (while true; do df -h; pwd; free -m; sleep 300; done) &
+    (while true; do df -h; pwd; du -sh $(dirname {j.output_gvcf['g.vcf.gz']})/*; free -m; sleep 300; done) &
 
     java -Xms{java_mem}g -jar /usr/picard/picard.jar \
       MergeVcfs {input_cmd} OUTPUT={j.output_gvcf['g.vcf.gz']}
 
-    df -h; pwd
+    df -h; pwd; du -sh $(dirname {j.output_gvcf['g.vcf.gz']})/*; free -m
       """
     )
     if output_gvcf_path:
@@ -991,7 +995,6 @@ def _add_import_gvcfs_job(
         j.depends_on(*depends_on)
 
     j.declare_resource_group(output={'tar': '{root}.tar'})
-
     j.command(
         f"""set -e
 
@@ -1013,7 +1016,7 @@ def _add_import_gvcfs_job(
     
     {untar_genomicsdb_cmd}
 
-    (while true; do df -h; pwd; free -m; sleep 300; done) &
+    (while true; do df -h; pwd; du -sh $(dirname {j.output['tar']})/*; free -m; sleep 300; done) &
 
     echo "Adding samples: {', '.join(samples_to_add)}"
     {f'echo "Skipping adding samples that are already in the DB: '
@@ -1029,11 +1032,11 @@ def _add_import_gvcfs_job(
       --merge-input-intervals \
       --consolidate
 
-    df -h; pwd
+    do df -h; pwd; du -sh $(dirname {j.output['tar']})/*; free -m
 
     tar -cf {j.output['tar']} workspace
 
-    df -h; pwd
+    do df -h; pwd; du -sh $(dirname {j.output['tar']})/*; free -m
     """
     )
     b.write_output(j.output, genomicsdb_gcs_path.replace('.tar', ''))
@@ -1079,11 +1082,11 @@ def _add_gatk_genotype_gvcf_job(
     j.command(
         f"""set -e
         
-    (while true; do df -h; pwd; free -m; sleep 300; done) &
+    (while true; do df -h; pwd; du -sh $(dirname {j.output_gvcf['vcf.gz']})/*; free -m; sleep 300; done) &
 
     tar -xf {genomicsdb}
 
-    df -h; pwd
+    df -h; pwd; du -sh $(dirname {j.output_gvcf['vcf.gz']})/*; free -m
 
     gatk --java-options -Xms{java_mem}g \\
       GenotypeGVCFs \\
@@ -1095,7 +1098,7 @@ def _add_gatk_genotype_gvcf_job(
       -L {interval} \\
       --merge-input-intervals
 
-    df -h; pwd
+    df -h; pwd; du -sh $(dirname {j.output_gvcf['vcf.gz']})/*; free -m
     """
     )
     if output_vcf_path:
@@ -1133,7 +1136,7 @@ def _add_final_gather_vcf_step(
     j.command(
         f"""set -euo pipefail
 
-    (while true; do df -h; pwd; free -m; sleep 300; done) &
+    (while true; do df -h; pwd; du -sh $(dirname {j.output_gvcf['vcf.gz']})/*; free -m; sleep 300; done) &
 
     # --ignore-safety-checks makes a big performance difference so we include it in 
     # our invocation. This argument disables expensive checks that the file headers 
@@ -1148,7 +1151,7 @@ def _add_final_gather_vcf_step(
 
     tabix {j.output_vcf['vcf.gz']}
     
-    df -h; pwd
+    df -h; pwd; du -sh $(dirname {j.output_gvcf['vcf.gz']})/*; free -m
     """
     )
     if output_vcf_path:
