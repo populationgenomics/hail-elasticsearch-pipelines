@@ -379,12 +379,11 @@ def _pedigree_checks(
             )
 
             j.command(
-                f"""set -e
-        
-                somalier extract \\
-                -d extracted/ \\
-                --sites {sites} \\
-                -f {reference.base} \\
+                f"""set -ex
+                
+                mkdir extracted
+                
+                somalier extract -d extracted/ --sites {sites} -f {reference.base} \\
                 {input_file['base']}
                 
                 mv extracted/{sn}.somalier {j.output_file}
@@ -579,7 +578,7 @@ def _make_realign_jobs(
 set -o pipefail
 set -ex
 
-(while true; do df -h; pwd; ls | grep -v proc | xargs du -sh; free -m; sleep 300; done) &
+(while true; do df -h; pwd; ls | grep -v proc | xargs du -sh; sleep 300; done) &
 
 {extract_fq_cmd} > {j.tmp_fq}
 
