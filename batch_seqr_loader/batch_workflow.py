@@ -228,8 +228,9 @@ def main(
         ann=REF_FASTA + '.ann',
         pac=REF_FASTA + '.pac',
     )
- 
-    align_fastq_jobs = _make_realign_jobs(
+    
+    # Aligning available FASTQs
+    align_fastq_jobs, samples_df = _make_realign_jobs(
         b=b,
         samples_df=samples_df,
         file_type='fastq_to_realign',
@@ -238,9 +239,11 @@ def main(
         overwrite=overwrite,
     )
 
-    index_jobs = _make_index_jobs(b, samples_df)
+    # Indexing input CRAMs, BAMs, GVCFs when index files are missing
+    index_jobs, samples_df = _make_index_jobs(b, samples_df)
 
-    realign_cram_jobs = _make_realign_jobs(
+    # Realigning CRAMs
+    realign_cram_jobs, samples_df = _make_realign_jobs(
         b=b,
         samples_df=samples_df,
         file_type='cram_to_realign',
@@ -455,7 +458,7 @@ python check_pedigree.py \
 def _make_index_jobs(
     b: hb.Batch,
     samples_df: pd.DataFrame,
-):
+) -> Tuple[List[Job], pd.DataFrame]:
     jobs = []
     cram_df = samples_df[samples_df['type'].isin(['cram', 'cram_to_realign'])]
     for sn, fpath, index_fpath in zip(cram_df['s'], cram_df['file'], cram_df['index']):
@@ -488,7 +491,7 @@ def _make_index_jobs(
             b.write_output(j.output_tbi, index_fpath)
             samples_df.loc[sn, 'index'] = index_fpath
             jobs.append(j)
-    return jobs
+    return jobs, samples_df
 
 
 def _make_realign_jobs(
@@ -499,7 +502,7 @@ def _make_realign_jobs(
     work_bucket: str,
     overwrite: bool,
     depends_on: Optional[List[Job]] = None,
-) -> List[Job]:
+) -> Tuple[List[Job], pd.DataFrame]:
     """
     Takes all samples with a 'file' of 'type'='fastq_to_realign'|'cram_to_realign'
     in `samples_df`, runs BWA to realign reads again, and sets a new 'file'
@@ -599,11 +602,11 @@ df -h; pwd; ls | grep -v proc | xargs du -sh
                 join(work_bucket, 'bwa', f'{sn}-duplicate-metrics.csv'),
             )
 
-            samples_df.loc[sn, 'file'] = output_cram_path
-            samples_df.loc[sn, 'index'] = splitext(output_cram_path)[0] + '.crai'
-            samples_df.loc[sn, 'type'] = 'cram'
+        samples_df.loc[sn, 'file'] = output_cram_path
+        samples_df.loc[sn, 'index'] = splitext(output_cram_path)[0] + '.crai'
+        samples_df.loc[sn, 'type'] = 'cram'
 
-    return jobs
+    return jobs, samples_df
 
 
 def _make_haplotypecaller_jobs(
