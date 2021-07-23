@@ -1082,11 +1082,11 @@ def _add_gatk_genotype_gvcf_job(
     j.command(
         f"""set -e
         
-    (while true; do df -h; pwd; du -sh $(dirname {j.output_gvcf['vcf.gz']})/*; free -m; sleep 300; done) &
+    (while true; do df -h; pwd; du -sh $(dirname {j.output_vcf['vcf.gz']})/*; free -m; sleep 300; done) &
 
     tar -xf {genomicsdb}
 
-    df -h; pwd; du -sh $(dirname {j.output_gvcf['vcf.gz']})/*; free -m
+    df -h; pwd; du -sh $(dirname {j.output_vcf['vcf.gz']})/*; free -m
 
     gatk --java-options -Xms{java_mem}g \\
       GenotypeGVCFs \\
@@ -1098,7 +1098,7 @@ def _add_gatk_genotype_gvcf_job(
       -L {interval} \\
       --merge-input-intervals
 
-    df -h; pwd; du -sh $(dirname {j.output_gvcf['vcf.gz']})/*; free -m
+    df -h; pwd; du -sh $(dirname {j.output_vcf['vcf.gz']})/*; free -m
     """
     )
     if output_vcf_path:
@@ -1136,7 +1136,7 @@ def _add_final_gather_vcf_step(
     j.command(
         f"""set -euo pipefail
 
-    (while true; do df -h; pwd; du -sh $(dirname {j.output_gvcf['vcf.gz']})/*; free -m; sleep 300; done) &
+    (while true; do df -h; pwd; du -sh $(dirname {j.output_vcf['vcf.gz']})/*; free -m; sleep 300; done) &
 
     # --ignore-safety-checks makes a big performance difference so we include it in 
     # our invocation. This argument disables expensive checks that the file headers 
@@ -1151,7 +1151,7 @@ def _add_final_gather_vcf_step(
 
     tabix {j.output_vcf['vcf.gz']}
     
-    df -h; pwd; du -sh $(dirname {j.output_gvcf['vcf.gz']})/*; free -m
+    df -h; pwd; du -sh $(dirname {j.output_vcf['vcf.gz']})/*; free -m
     """
     )
     if output_vcf_path:
