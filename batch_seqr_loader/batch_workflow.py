@@ -534,19 +534,18 @@ def _make_realign_jobs(
             j = b.new_job(job_name)
             jobs.append(j)
             j.image(BAZAM_CONTAINER)
-            total_cpu = 16
+            total_cpu = 32
             if use_bazam:
-                bazam_cpu = 3
-                bwa_cpu = 10
-                bamsormadup_cpu = 3
+                bazam_cpu = 6
+                bwa_cpu = 20
+                bamsormadup_cpu = 6
             else:
                 bazam_cpu = 0
-                bwa_cpu = 12
-                bamsormadup_cpu = 4
-            bwa_cpu = 1
-            j.memory('highmem')
+                bwa_cpu = 24
+                bamsormadup_cpu = 8
+            j.memory('highcpu')
             j.cpu(total_cpu)
-            j.storage('1000G')
+            j.storage('300G')
             j.declare_resource_group(
                 output_cram={
                     'cram': '{root}.cram',
