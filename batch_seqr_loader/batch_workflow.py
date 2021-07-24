@@ -228,7 +228,7 @@ def main(
         ann=REF_FASTA + '.ann',
         pac=REF_FASTA + '.pac',
     )
-    
+
     # Aligning available FASTQs
     align_fastq_jobs, samples_df = _make_realign_jobs(
         b=b,
@@ -579,21 +579,15 @@ def _make_realign_jobs(
 set -o pipefail
 set -ex
 
-(while true; do df -h; pwd; du -sh $(dirname {j.output_cram.cram})/*; sleep 300; done) &
+(while true; do df -h; pwd; du -sh $(dirname {j.output_cram.cram})/*; sleep 600; done) &
 
-{extract_fq_cmd} > {j.tmp_fq}
-
+{extract_fq_cmd} | \\
 bwa mem -K 100000000 {'-p' if use_bazam else ''} -v3 -t{bwa_cpu} -Y \\
   -R '{rg_line}' {reference.base} \\
-  {j.tmp_fq if use_bazam else file1} {'-' if use_bazam else file2} > {j.aligned_sam}
-
-rm {j.tmp_fq}
-
+  {'/dev/stdin' if use_bazam else file1} {'-' if use_bazam else file2} | \\
 bamsormadup inputformat=sam threads={bamsormadup_cpu} SO=coordinate \\
-  M={j.duplicate_metrics} outputformat=sam < {j.aligned_sam} | \\
+  M={j.duplicate_metrics} outputformat=sam | \\
 samtools view -T {reference.base} -O cram -o {j.output_cram.cram}
-
-rm {j.aligned_sam}
 
 samtools index -@{total_cpu} {j.output_cram.cram} {j.output_cram.crai}
 
