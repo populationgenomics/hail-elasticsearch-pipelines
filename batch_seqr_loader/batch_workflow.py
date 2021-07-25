@@ -536,9 +536,9 @@ def _make_realign_jobs(
             j.image(BAZAM_CONTAINER)
             total_cpu = 16
             if use_bazam:
-                bazam_cpu = 6 / 2
-                bwa_cpu = 20 / 2
-                bamsormadup_cpu = 6 / 2
+                bazam_cpu = 6 // 2
+                bwa_cpu = 20 // 2
+                bamsormadup_cpu = 6 // 2
             else:
                 bazam_cpu = 0
                 bwa_cpu = 24
