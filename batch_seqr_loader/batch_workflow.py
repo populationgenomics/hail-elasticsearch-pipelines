@@ -534,16 +534,16 @@ def _make_realign_jobs(
             j = b.new_job(job_name)
             jobs.append(j)
             j.image(BAZAM_CONTAINER)
-            total_cpu = 32
+            total_cpu = 16
             if use_bazam:
-                bazam_cpu = 6
-                bwa_cpu = 20
-                bamsormadup_cpu = 6
+                bazam_cpu = 6 / 2
+                bwa_cpu = 20 / 2
+                bamsormadup_cpu = 6 / 2
             else:
                 bazam_cpu = 0
                 bwa_cpu = 24
                 bamsormadup_cpu = 8
-            j.cpu(32)
+            j.cpu(total_cpu)
             j.memory('standard')
             j.storage('300G')
             j.declare_resource_group(
