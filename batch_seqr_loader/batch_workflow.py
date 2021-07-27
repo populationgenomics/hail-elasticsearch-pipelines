@@ -154,7 +154,6 @@ def main(
     subset_path: str,
     make_checkpoints: bool,
     skip_ped_checks: bool,
-    namespace: Optional[str] = None,
     vep_block_size: Optional[int] = None,  # pylint: disable=unused-argument
 ):  # pylint: disable=missing-function-docstring
     if not (gvcfs or crams or data_to_realign):
@@ -264,7 +263,7 @@ def main(
             overwrite=overwrite,
             fingerprints_bucket=fingerprints_bucket,
             web_bucket=web_bucket,
-            web_url=f'https://{namespace}-web.populationgenomics.org.au/{project}',
+            web_url=f'https://{output_namespace}-web.populationgenomics.org.au/{project}',
             depends_on=align_fastq_jobs + realign_cram_jobs,
         )
 
@@ -321,7 +320,7 @@ def main(
         f'--es-index {dataset_name}-{dataset_version} '
         f'--es-index-min-num-shards 1 '
         f'--genome-version GRCh38 '
-        f'{"--prod" if namespace == "main" else ""}',
+        f'{"--prod" if output_namespace == "main" else ""}',
         max_age='8h',
         packages=DATAPROC_PACKAGES,
         num_secondary_workers=10,
@@ -563,7 +562,7 @@ def _make_realign_jobs(
             else:
                 extract_fq_cmd = ''
 
-            rg_line = f'@RG\\tID:{sn}\\tSM:~{sn}'
+            rg_line = f'@RG\\tID:{sn}\\tSM:{sn}'
 
             # BWA command options:
             # -K     process INT input bases in each batch regardless of nThreads (for reproducibility)
