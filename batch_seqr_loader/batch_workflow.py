@@ -568,11 +568,9 @@ def _make_realign_jobs(
             # BWA command options:
             # -K     process INT input bases in each batch regardless of nThreads (for reproducibility)
             # -p     smart pairing (ignoring in2.fq)
-            # -v3    minimum score to output [30]
             # -t16   threads
             # -Y     use soft clipping for supplementary alignments
             # -R     read group header line such as '@RG\tID:foo\tSM:bar'
-            # -M     mark shorter split hits as secondary
             j.command(
                 f"""
 set -o pipefail
@@ -581,7 +579,7 @@ set -ex
 (while true; do df -h; pwd; du -sh $(dirname {j.output_cram.cram}); sleep 600; done) &
 
 {extract_fq_cmd} | \\
-bwa mem -K 100000000 {'-p' if use_bazam else ''} -v3 -t{bwa_cpu} -Y \\
+bwa mem -K 100000000 {'-p' if use_bazam else ''} -t{bwa_cpu} -Y \\
   -R '{rg_line}' {reference.base} \\
   {'/dev/stdin' if use_bazam else file1} {'-' if use_bazam else file2} | \\
 bamsormadup inputformat=sam threads={bamsormadup_cpu} SO=coordinate \\
