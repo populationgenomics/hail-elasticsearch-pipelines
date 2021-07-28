@@ -1,8 +1,8 @@
 TEST_VERSION := v1-7
 TEST_DATASET := na12878-trio
 
-ZORNITA_STARK_DATASET := acute-care
-ZORNITA_STARK_VERSION := v1-0
+ACUTE_CARE_DATASET := acute-care
+ACUTE_CARE_VERSION := v1-0
 
 .PHONY: package
 package:
@@ -128,12 +128,12 @@ run_acute_care:
 	analysis-runner \
 	--dataset seqr \
 	--access-level test \
-	--output-dir   "datasets/$(ZORNITA_STARK_DATASET)/$(ZORNITA_STARK_VERSION)" \
-	--description  "seqr loader - $(ZORNITA_STARK_DATASET) from KCCG GVCFs" \
+	--output-dir   "datasets/$(ACUTE_CARE_DATASET)/$(ACUTE_CARE_VERSION)" \
+	--description  "seqr loader - $(ACUTE_CARE_DATASET) from KCCG GVCFs" \
 	batch_seqr_loader/batch_workflow.py \
 	--namespace    test \
-	--version      $(ZORNITA_STARK_VERSION) \
-	--seqr-dataset $(ZORNITA_STARK_DATASET) \
+	--version      $(ACUTE_CARE_VERSION) \
+	--seqr-dataset $(ACUTE_CARE_DATASET) \
 	--gvcf         'gs://cpg-seqr-upload-zornitza-stark/*.g.vcf.gz' \
 	--ped-file     "gs://cpg-seqr-upload-zornitza-stark/cpg_acute-fixed.ped" \
 	--reuse
