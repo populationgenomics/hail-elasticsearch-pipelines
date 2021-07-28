@@ -1,7 +1,7 @@
-TEST_VERSION := v1-3
-TEST_DATASET := NA12878-trio
+TEST_VERSION := v1-7
+TEST_DATASET := na12878-trio
 
-ZORNITA_STARK_DATASET := zornitza-stark
+ZORNITA_STARK_DATASET := acute-care
 ZORNITA_STARK_VERSION := v1-0
 
 .PHONY: package
@@ -40,22 +40,6 @@ run_test:
 	--keep-scratch \
 	--reuse
 
-.PHONY: run_test_extend_with_cram
-run_test_extend_with_cram:
-	analysis-runner \
-	--dataset seqr \
-	--access-level test \
-	--output-dir   "datasets/$(TEST_DATASET)/$(TEST_VERSION)" \
-	--description  "seqr loader - $(TEST_DATASET) test - extend with CRAM" \
-	batch_seqr_loader/batch_workflow.py \
-	--namespace    test \
-	--version      $(TEST_VERSION) \
-	--seqr-dataset "NA12878-trio" \
-	--cram         "gs://cpg-seqr-test/batches/NA12878-trio/SS6004470.cram" \
-	--ped-file     "gs://cpg-seqr-test/batches/NA12878-trio/NA12878-trio.ped" \
-	--keep-scratch \
-	--reuse
-
 .PHONY: run_test_mismatched
 run_test_mismatched:
 	analysis-runner \
@@ -66,30 +50,81 @@ run_test_mismatched:
 	batch_seqr_loader/batch_workflow.py \
 	--namespace    test \
 	--version      $(TEST_VERSION) \
-	--seqr-dataset "NA12878-trio-mismatched" \
+	--seqr-dataset $(TEST_DATASET)-mismatched \
 	--gvcf         'gs://cpg-seqr-test/batches/NA12878-trio/*.g.vcf.gz' \
 	--cram         "gs://cpg-seqr-test/batches/NA12878-trio/SS6004470.cram" \
 	--ped-file     "gs://cpg-seqr-test/batches/NA12878-trio/NA12878-trio-mismatched.ped" \
 	--keep-scratch \
 	--reuse
 
-.PHONY: run_zornitza-stark
-run_zornitza-stark:
+.PHONY: run_test_extend
+run_test_extend:
 	analysis-runner \
 	--dataset seqr \
 	--access-level test \
-	--output-dir   "datasets/$(ZORNITA_STARK_DATASET)/$(ZORNITA_STARK_VERSION)" \
-	--description  "seqr loader - $(ZORNITA_STARK_DATASET)" \
+	--output-dir   "datasets/$(TEST_DATASET)/$(TEST_VERSION)" \
+	--description  "seqr loader - $(TEST_DATASET) test - extend" \
 	batch_seqr_loader/batch_workflow.py \
 	--namespace    test \
-	--version      $(ZORNITA_STARK_VERSION) \
-	--seqr-dataset $(ZORNITA_STARK_DATASET) \
-	--cram         'gs://cpg-seqr-upload-zornitza-stark/*.bam' \
-	--ped-file     "gs://cpg-seqr-upload-zornitza-stark/cpg_acute-fixed.ped" \
+	--version      $(TEST_VERSION) \
+	--seqr-dataset $(TEST_DATASET)-extend \
+	--cram         "gs://cpg-seqr-test/batches/NA12878-trio/SS6004470.cram" \
+	--ped-file     "gs://cpg-seqr-test/batches/NA12878-trio/NA12878-trio.ped" \
+	--keep-scratch \
 	--reuse
 
-.PHONY: run_zornitza-stark-kccg-gvcf
-run_zornitza-stark-kccg-gvcf:
+.PHONY: run_test_from_cram
+run_test_from_cram:
+	analysis-runner \
+	--dataset seqr \
+	--access-level test \
+	--output-dir   "datasets/$(TEST_DATASET)/$(TEST_VERSION)" \
+	--description  "seqr loader - $(TEST_DATASET) test - from CRAM" \
+	batch_seqr_loader/batch_workflow.py \
+	--namespace    test \
+	--version      $(TEST_VERSION) \
+	--seqr-dataset $(TEST_DATASET)-from-cram \
+	--data-to-realign 'gs://cpg-seqr-test/batches/NA12878-trio/NA12878.cram' \
+	--cram         'gs://cpg-seqr-test/batches/NA12878-trio/NA1289*.cram' \
+	--cram         'gs://cpg-seqr-test/batches/NA12878-trio/SS6004470.cram' \
+	--ped-file     "gs://cpg-seqr-test/batches/NA12878-trio/NA12878-trio.ped" \
+	--keep-scratch \
+	--reuse
+
+.PHONY: run_test_from_cram_tiny
+run_test_from_cram_tiny:
+	analysis-runner \
+	--dataset seqr \
+	--access-level test \
+	--output-dir   "datasets/$(TEST_DATASET)/$(TEST_VERSION)" \
+	--description  "seqr loader - $(TEST_DATASET) test - from CRAM - tiny" \
+	batch_seqr_loader/batch_workflow.py \
+	--namespace    test \
+	--version      $(TEST_VERSION) \
+	--seqr-dataset $(TEST_DATASET)-from-cram-tiny \
+	--data-to-realign gs://cpg-seqr-test/batches/NA12878-trio-tiny/NA12878.cram \
+	--ped-file     "gs://cpg-seqr-test/batches/NA12878-trio/NA12878-trio.ped" \
+	--keep-scratch \
+	--reuse
+
+.PHONY: run_test_from_fq_tiny
+run_test_from_fq_tiny:
+	analysis-runner \
+	--dataset seqr \
+	--access-level test \
+	--output-dir   "datasets/$(TEST_DATASET)/$(TEST_VERSION)" \
+	--description  "seqr loader - $(TEST_DATASET) test - from FQ - tiny" \
+	batch_seqr_loader/batch_workflow.py \
+	--namespace    test \
+	--version      $(TEST_VERSION) \
+	--seqr-dataset $(TEST_DATASET)-from-fq-tiny \
+	--data-to-realign 'gs://cpg-seqr-test/batches/NA12878-trio-tiny/NA12878*.fq' \
+	--ped-file     "gs://cpg-seqr-test/batches/NA12878-trio/NA12878-trio.ped" \
+	--keep-scratch \
+	--reuse
+
+.PHONY: run_acute_care
+run_acute_care:
 	analysis-runner \
 	--dataset seqr \
 	--access-level test \
@@ -98,7 +133,7 @@ run_zornitza-stark-kccg-gvcf:
 	batch_seqr_loader/batch_workflow.py \
 	--namespace    test \
 	--version      $(ZORNITA_STARK_VERSION) \
-	--seqr-dataset $(ZORNITA_STARK_DATASET)-kccg-gvcf \
+	--seqr-dataset $(ZORNITA_STARK_DATASET) \
 	--gvcf         'gs://cpg-seqr-upload-zornitza-stark/*.g.vcf.gz' \
 	--ped-file     "gs://cpg-seqr-upload-zornitza-stark/cpg_acute-fixed.ped" \
 	--reuse

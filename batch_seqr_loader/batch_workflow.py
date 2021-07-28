@@ -14,7 +14,7 @@ import subprocess
 import tempfile
 import hashlib
 from collections import defaultdict
-from os.path import join, dirname, abspath
+from os.path import join, dirname, abspath, splitext
 from typing import Optional, List, Tuple, Set, Iterable
 import pandas as pd
 import click
@@ -29,15 +29,15 @@ GATK_CONTAINER = (
     f'australia-southeast1-docker.pkg.dev/cpg-common/images/gatk:{GATK_VERSION}'
 )
 PICARD_CONTAINER = f'us.gcr.io/broad-gotc-prod/picard-cloud:2.23.8'
-BAZAM_CONTAINER = f'australia-southeast1-docker.pkg.dev/fewgenomes/images/bazam:v2'
+BAZAM_CONTAINER = f'australia-southeast1-docker.pkg.dev/cpg-common/images/bazam:v2'
 SOMALIER_CONTAINER = 'brentp/somalier:latest'
 PEDDY_CONTAINER = 'quay.io/biocontainers/peddy:0.4.8--pyh5e36f6f_0'
 
-# Fixed scatter count, because we are storing a genomics DB per each interval
 NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS = 50
+NUMBER_OF_DATAPROC_WORKERS = 50
 NUMBER_OF_GENOMICS_DB_INTERVALS = 10
 
-REF_BUCKET = 'gs://cpg-reference/hg38/v0'
+REF_BUCKET = 'gs://cpg-reference/hg38/v1'
 REF_FASTA = join(REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
 DBSNP_VCF = join(REF_BUCKET, 'Homo_sapiens_assembly38.dbsnp138.vcf')
 UNPADDED_INTERVALS = join(REF_BUCKET, 'hg38.even.handcurated.20k.intervals')
@@ -90,8 +90,9 @@ logger.setLevel(logging.INFO)
     '--seqr-dataset',
     'dataset_name',
     required=True,
-    help='Name of the seqr callset. If a genomics DB already exists for this dataset, '
-    'it will be extended with the new samples',
+    help='Name of the seqr dataset. If a genomics DB already exists for this dataset, '
+    'it will be extended with the new samples. When loading into the ES, '
+    'the name will be suffixed with the dataset version (set by --version)',
 )
 @click.option('--version', 'dataset_version', type=str, required=True)
 @click.option(
@@ -153,7 +154,6 @@ def main(
     subset_path: str,
     make_checkpoints: bool,
     skip_ped_checks: bool,
-    namespace: Optional[str] = None,
     vep_block_size: Optional[int] = None,  # pylint: disable=unused-argument
 ):  # pylint: disable=missing-function-docstring
     if not (gvcfs or crams or data_to_realign):
@@ -216,6 +216,41 @@ def main(
         dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
         + '.dict',
     )
+    bwa_reference = b.read_input_group(
+        base=REF_FASTA,
+        fai=REF_FASTA + '.fai',
+        dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
+        + '.dict',
+        sa=REF_FASTA + '.sa',
+        amb=REF_FASTA + '.amb',
+        bwt=REF_FASTA + '.bwt',
+        ann=REF_FASTA + '.ann',
+        pac=REF_FASTA + '.pac',
+    )
+
+    # Aligning available FASTQs
+    align_fastq_jobs, samples_df = _make_realign_jobs(
+        b=b,
+        samples_df=samples_df,
+        file_type='fastq_to_realign',
+        reference=bwa_reference,
+        work_bucket=work_bucket,
+        overwrite=overwrite,
+    )
+
+    # Indexing input CRAMs, BAMs, GVCFs when index files are missing
+    index_jobs, samples_df = _make_index_jobs(b, samples_df)
+
+    # Realigning CRAMs
+    realign_cram_jobs, samples_df = _make_realign_jobs(
+        b=b,
+        samples_df=samples_df,
+        file_type='cram_to_realign',
+        reference=bwa_reference,
+        work_bucket=work_bucket,
+        overwrite=overwrite,
+        depends_on=index_jobs,
+    )
 
     ped_check_j = None
     if not skip_ped_checks:
@@ -228,24 +263,19 @@ def main(
             overwrite=overwrite,
             fingerprints_bucket=fingerprints_bucket,
             web_bucket=web_bucket,
-            web_url=f'https://{namespace}-web.populationgenomics.org.au/{project}',
+            web_url=f'https://{output_namespace}-web.populationgenomics.org.au/{project}',
+            depends_on=align_fastq_jobs + realign_cram_jobs,
         )
 
-    # realign_bam_jobs = _make_realign_bam_jobs(
-    #     b=b,
-    #     samples_df=samples_df,
-    #     reference=reference,
-    #     work_bucket=work_bucket,
-    #     overwrite=overwrite,
-    # )
-
-    genotype_jobs, samples_df = _make_genotype_jobs(
+    genotype_jobs, samples_df = _make_haplotypecaller_jobs(
         b=b,
         samples_df=samples_df,
         reference=reference,
         work_bucket=work_bucket,
         overwrite=overwrite,
-        depends_on=[ped_check_j] if ped_check_j else [],
+        depends_on=align_fastq_jobs
+        + realign_cram_jobs
+        + ([ped_check_j] if ped_check_j else []),
     )
 
     joint_genotype_job, gathered_vcf_path = _make_joint_genotype_jobs(
@@ -275,7 +305,7 @@ def main(
             + (f'--vep-block-size ' if vep_block_size else ''),
             max_age='8h',
             packages=DATAPROC_PACKAGES,
-            num_secondary_workers=10,
+            num_secondary_workers=NUMBER_OF_DATAPROC_WORKERS,
             job_name='make_annotated_mt.py',
             vep='GRCh38',
             depends_on=[joint_genotype_job],
@@ -287,13 +317,13 @@ def main(
         b,
         f'batch_seqr_loader/scripts/load_to_es.py '
         f'--mt-path {annotated_mt_path} '
-        f'--es-index {dataset_name} '
+        f'--es-index {dataset_name}-{dataset_version} '
         f'--es-index-min-num-shards 1 '
         f'--genome-version GRCh38 '
-        f'{"--prod" if namespace == "main" else ""}',
+        f'{"--prod" if output_namespace == "main" else ""}',
         max_age='8h',
         packages=DATAPROC_PACKAGES,
-        num_secondary_workers=2,
+        num_secondary_workers=10,
         job_name='load_to_es.py',
         depends_on=[annotate_job],
         scopes=['cloud-platform'],
@@ -301,16 +331,6 @@ def main(
 
     b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch)
     shutil.rmtree(local_tmp_dir)
-
-
-# def _make_realign_bam_jobs(
-#     b: hb.Batch,
-#     samples_df: pd.DataFrame,
-#     reference: hb.ResourceGroup,
-#     work_bucket: str,
-#     overwrite: bool,
-# ) -> List[Job]:
-#     return []
 
 
 def _pedigree_checks(
@@ -361,15 +381,12 @@ def _pedigree_checks(
             )
 
             j.command(
-                f"""set -e
-        
-                somalier extract \\
-                -d extracted/ \\
-                --sites {sites} \\
-                -f {reference.base} \\
+                f"""set -ex
+                
+                somalier extract -d extracted/ --sites {sites} -f {reference.base} \\
                 {input_file['base']}
                 
-                mv extracted/{sn}.somalier {j.output_file}
+                mv extracted/*.somalier {j.output_file}
                 """
             )
             b.write_output(j.output_file, fp_file_by_sample[sn])
@@ -426,9 +443,9 @@ def _pedigree_checks(
 cat <<EOT >> check_pedigree.py
 {script}
 EOT
-python check_pedigree.py \\
---somalier-samples {relate_j.output_samples} \\
---somalier-pairs {relate_j.output_pairs} \\
+python check_pedigree.py \
+--somalier-samples {relate_j.output_samples} \
+--somalier-pairs {relate_j.output_pairs} \
 {('--somalier-html ' + somalier_html_url) if somalier_html_url else ''}
     """
     )
@@ -437,7 +454,153 @@ python check_pedigree.py \\
     return check_j, somalier_samples_path
 
 
-def _make_genotype_jobs(
+def _make_index_jobs(
+    b: hb.Batch,
+    samples_df: pd.DataFrame,
+) -> Tuple[List[Job], pd.DataFrame]:
+    jobs = []
+    cram_df = samples_df[samples_df['type'].isin(['cram', 'cram_to_realign'])]
+    for sn, fpath, index_fpath in zip(cram_df['s'], cram_df['file'], cram_df['index']):
+        if index_fpath is None:
+            job_name = f'Index alignment file, {sn}'
+            file = b.read_input(fpath)
+            j = b.new_job(job_name)
+            jobs.append(j)
+            j.image(BAZAM_CONTAINER)
+            j.storage(('50G' if fpath.endswith('.cram') else '150G'))
+            j.command(f'samtools index {file} {j.output_crai}')
+            index_fpath = splitext(fpath)[0] + (
+                '.crai' if fpath.endswith('.cram') else '.bai'
+            )
+            b.write_output(j.output_crai, index_fpath)
+            samples_df.loc[sn, 'index'] = index_fpath
+            jobs.append(j)
+    gvcf_df = samples_df[samples_df['type'].isin(['gvcf'])]
+
+    for sn, fpath, index_fpath in zip(cram_df['s'], gvcf_df['file'], gvcf_df['index']):
+        if index_fpath is None:
+            job_name = f'Index GVCF, {sn}'
+            file = b.read_input(fpath)
+            j = b.new_job(job_name)
+            jobs.append(j)
+            j.image('quay.io/biocontainers/tabix')
+            j.storage('10G')
+            j.command(f'tabix -p vcf {file} && ln {file}.tbi {j.output_tbi}')
+            index_fpath = fpath + '.tbi'
+            b.write_output(j.output_tbi, index_fpath)
+            samples_df.loc[sn, 'index'] = index_fpath
+            jobs.append(j)
+    return jobs, samples_df
+
+
+def _make_realign_jobs(
+    b: hb.Batch,
+    samples_df: pd.DataFrame,
+    file_type: str,  # 'fastq_to_realign', 'cram_to_realign'
+    reference: hb.ResourceGroup,
+    work_bucket: str,
+    overwrite: bool,
+    depends_on: Optional[List[Job]] = None,
+) -> Tuple[List[Job], pd.DataFrame]:
+    """
+    Takes all samples with a 'file' of 'type'='fastq_to_realign'|'cram_to_realign'
+    in `samples_df`, runs BWA to realign reads again, and sets a new 'file'
+    of 'type'='cram'.
+
+    When the input is CRAM/BAM, uses Bazam to stream reads to BWA.
+    """
+    jobs = []
+    realign_df = samples_df[samples_df['type'] == file_type]
+    for sn, file1, file2, index in zip(
+        realign_df['s'], realign_df['file'], realign_df['file2'], realign_df['index']
+    ):
+        job_name = f'BWA align, {sn}'
+        output_cram_path = join(work_bucket, f'{sn}.cram')
+        if can_reuse(output_cram_path, overwrite):
+            jobs.append(b.new_job(f'{job_name} [reuse]'))
+        else:
+            assert (
+                (file1.endswith('.cram') or file1.endswith('.bam')) and index or file2
+            )
+            j = b.new_job(job_name)
+            jobs.append(j)
+            j.image(BAZAM_CONTAINER)
+            total_cpu = 32
+            use_bazam = file1.endswith('.cram') or file1.endswith('.bam')
+            if use_bazam:
+                bazam_cpu = 4
+                bwa_cpu = 24
+                bamsormadup_cpu = 4
+            else:
+                bazam_cpu = 0
+                bwa_cpu = 24
+                bamsormadup_cpu = 8
+            j.cpu(total_cpu)
+            j.memory('standard')
+            j.storage('500G')
+            j.declare_resource_group(
+                output_cram={
+                    'cram': '{root}.cram',
+                    'crai': '{root}.crai',
+                }
+            )
+            if depends_on:
+                j.depends_on(*depends_on)
+
+            if use_bazam:
+                file1 = b.read_input_group(base=file1, index=index)
+                r1_param = (
+                    f'<(bazam -Xmx16g -Dsamjdk.reference_fasta={reference.base}'
+                    f' -n{bazam_cpu} -bam {file1.base})'
+                )
+                r2_param = '-'
+            else:
+                files1 = [b.read_input(f1) for f1 in file1.split(',')]
+                files2 = [b.read_input(f1) for f1 in file2.split(',')]
+                r1_param = f'<(cat {" ".join(files1)})'
+                r2_param = f'<(cat {" ".join(files2)})'
+
+            rg_line = f'@RG\\tID:{sn}\\tSM:{sn}'
+
+            # BWA command options:
+            # -K     process INT input bases in each batch regardless of nThreads (for reproducibility)
+            # -p     smart pairing (ignoring in2.fq)
+            # -t16   threads
+            # -Y     use soft clipping for supplementary alignments
+            # -R     read group header line such as '@RG\tID:foo\tSM:bar'
+            j.command(
+                f"""
+set -o pipefail
+set -ex
+
+(while true; do df -h; pwd; du -sh $(dirname {j.output_cram.cram}); sleep 600; done) &
+
+bwa mem -K 100000000 {'-p' if use_bazam else ''} -t{bwa_cpu} -Y \\
+  -R '{rg_line}' {reference.base} {r1_param} {r2_param} | \\
+bamsormadup inputformat=sam threads={bamsormadup_cpu} SO=coordinate \\
+  M={j.duplicate_metrics} outputformat=sam \\
+  tmpfile=$(dirname {j.output_cram.cram})/bamsormadup-tmp | \\
+samtools view -T {reference.base} -O cram -o {j.output_cram.cram}
+
+samtools index -@{total_cpu} {j.output_cram.cram} {j.output_cram.crai}
+
+df -h; pwd; du -sh $(dirname {j.output_cram.cram})
+            """
+            )
+            b.write_output(j.output_cram, splitext(output_cram_path)[0])
+            b.write_output(
+                j.duplicate_metrics,
+                join(work_bucket, 'bwa', f'{sn}-duplicate-metrics.csv'),
+            )
+
+        samples_df.loc[sn, 'file'] = output_cram_path
+        samples_df.loc[sn, 'index'] = splitext(output_cram_path)[0] + '.crai'
+        samples_df.loc[sn, 'type'] = 'cram'
+
+    return jobs, samples_df
+
+
+def _make_haplotypecaller_jobs(
     b: hb.Batch,
     samples_df: pd.DataFrame,
     reference: hb.ResourceGroup,
@@ -470,7 +633,7 @@ def _make_genotype_jobs(
                     REF_FASTA,
                 )
                 if depends_on:
-                    intervals_j.depends_on(depends_on)
+                    intervals_j.depends_on(*depends_on)
             for idx in range(NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS):
                 haplotype_caller_jobs.append(
                     _add_haplotype_caller_job(
@@ -508,7 +671,7 @@ def _make_joint_genotype_jobs(
     work_bucket: str,
     local_tmp_dir: str,
     overwrite: bool,
-    depends_on: List[Job] = None,
+    depends_on: Optional[List[Job]] = None,
 ) -> Tuple[Job, str]:
     """
     Assumes all samples have a 'file' of 'type'='gvcf' in `samples_df`.
@@ -522,7 +685,7 @@ def _make_joint_genotype_jobs(
         REF_FASTA,
     )
     if depends_on:
-        intervals_j.depends_on(depends_on)
+        intervals_j.depends_on(*depends_on)
 
     genotype_vcf_jobs = []
     genotyped_vcfs = []
@@ -668,19 +831,19 @@ def _add_haplotype_caller_job(
 
     j.command(
         f"""set -e
-    (while true; do df -h; pwd; free -m; sleep 300; done) &
+    (while true; do df -h; pwd; du -sh $(dirname {j.output_gvcf['g.vcf.gz']}); free -m; sleep 300; done) &
 
-    gatk --java-options "-Xms{java_mem}g -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10" \
-      HaplotypeCaller \
-      -R {reference.base} \
-      -I {bam_fpath} \
-      -L {interval} \
-      -O {j.output_gvcf['g.vcf.gz']} \
-      -G StandardAnnotation -G StandardHCAnnotation -G AS_StandardAnnotation \
-      -GQB 10 -GQB 20 -GQB 30 -GQB 40 -GQB 50 -GQB 60 -GQB 70 -GQB 80 -GQB 90 \
-      -ERC GVCF \
+    gatk --java-options "-Xms{java_mem}g -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10" \\
+      HaplotypeCaller \\
+      -R {reference.base} \\
+      -I {bam_fpath} \\
+      -L {interval} \\
+      -O {j.output_gvcf['g.vcf.gz']} \\
+      -G StandardAnnotation -G StandardHCAnnotation -G AS_StandardAnnotation \\
+      -GQB 20 \
+      -ERC GVCF \\
 
-    df -h; pwd
+    df -h; pwd; du -sh $(dirname {j.output_gvcf['g.vcf.gz']}); free -m
     """
     )
     return j
@@ -715,12 +878,12 @@ def _add_merge_gvcfs_job(
     j.command(
         f"""set -e
 
-    (while true; do df -h; pwd; free -m; sleep 300; done) &
+    (while true; do df -h; pwd; du -sh $(dirname {j.output_gvcf['g.vcf.gz']}); free -m; sleep 300; done) &
 
     java -Xms{java_mem}g -jar /usr/picard/picard.jar \
       MergeVcfs {input_cmd} OUTPUT={j.output_gvcf['g.vcf.gz']}
 
-    df -h; pwd
+    df -h; pwd; du -sh $(dirname {j.output_gvcf['g.vcf.gz']}); free -m
       """
     )
     if output_gvcf_path:
@@ -751,11 +914,12 @@ def _add_import_gvcfs_job(
         # This command will download the DB metadata file locally.
         # The `-O` argument to `tar` means "write the file being extracted to the stdout",
         # and the file to be extracted is specified as a positional argument to `tar`.
-        subprocess.run(
-            f'gsutil cat {genomicsdb_gcs_path} | tar -O --extract workspace/callset.json > {genomicsdb_metadata}',
-            check=False,
-            shell=True,
+        cmd = (
+            f'gsutil cat {genomicsdb_gcs_path} | '
+            f'tar -O --extract workspace/callset.json > {genomicsdb_metadata}'
         )
+        logger.info(cmd)
+        subprocess.run(cmd, check=False, shell=True)
 
         with open(genomicsdb_metadata) as f:
             db_metadata = json.load(f)
@@ -818,7 +982,6 @@ def _add_import_gvcfs_job(
         j.depends_on(*depends_on)
 
     j.declare_resource_group(output={'tar': '{root}.tar'})
-
     j.command(
         f"""set -e
 
@@ -840,7 +1003,7 @@ def _add_import_gvcfs_job(
     
     {untar_genomicsdb_cmd}
 
-    (while true; do df -h; pwd; free -m; sleep 300; done) &
+    (while true; do df -h; pwd; du -sh $(dirname {j.output['tar']}); free -m; sleep 300; done) &
 
     echo "Adding samples: {', '.join(samples_to_add)}"
     {f'echo "Skipping adding samples that are already in the DB: '
@@ -856,11 +1019,11 @@ def _add_import_gvcfs_job(
       --merge-input-intervals \
       --consolidate
 
-    df -h; pwd
+    df -h; pwd; du -sh $(dirname {j.output['tar']}); free -m
 
     tar -cf {j.output['tar']} workspace
 
-    df -h; pwd
+    df -h; pwd; du -sh $(dirname {j.output['tar']}); free -m
     """
     )
     b.write_output(j.output, genomicsdb_gcs_path.replace('.tar', ''))
@@ -910,7 +1073,7 @@ def _add_gatk_genotype_gvcf_job(
 
     tar -xf {genomicsdb}
 
-    df -h; pwd
+    df -h; pwd; free -m
 
     gatk --java-options -Xms{java_mem}g \\
       GenotypeGVCFs \\
@@ -922,7 +1085,7 @@ def _add_gatk_genotype_gvcf_job(
       -L {interval} \\
       --merge-input-intervals
 
-    df -h; pwd
+    df -h; pwd; free -m
     """
     )
     if output_vcf_path:
@@ -960,7 +1123,7 @@ def _add_final_gather_vcf_step(
     j.command(
         f"""set -euo pipefail
 
-    (while true; do df -h; pwd; free -m; sleep 300; done) &
+    (while true; do df -h; pwd free -m; sleep 300; done) &
 
     # --ignore-safety-checks makes a big performance difference so we include it in 
     # our invocation. This argument disables expensive checks that the file headers 
@@ -975,7 +1138,7 @@ def _add_final_gather_vcf_step(
 
     tabix {j.output_vcf['vcf.gz']}
     
-    df -h; pwd
+    df -h; pwd; free -m
     """
     )
     if output_vcf_path:

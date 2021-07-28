@@ -94,7 +94,7 @@ def find_inputs(
             data['file2'].append(None)
             data['index'].append(index)
             data['type'].append('cram_to_realign')
-        if sn in cram_with_index_to_realign_by_sn:
+        if sn in fastq_pairs_by_by_sn:
             file1, file2 = fastq_pairs_by_by_sn[sn]
             data['file'].append(file1)
             data['file2'].append(file2)
@@ -162,33 +162,37 @@ def _find_files_by_type(
     return gvcfs, crams, fastq_to_align, cram_to_realign
 
 
-def _find_file_indices(fpaths: List[str]) -> Dict[str, Tuple[str, str]]:
+def _find_file_indices(fpaths: List[str]) -> Dict[str, Tuple[str, Optional[str]]]:
     """
     Find corresponding index files. Will look for:
     '<sample>.g.vcf.gz.tbi' for '<sample>.g.vcf.gz',
     '<sample>.bam.bai' or '<sample>.bai' for '<sample>.bam',
     '<sample>.cram.crai' or '<sample>.crai' for '<sample>.cram',
 
-    Returns a dict mapping sample name to a pair of file paths (file, index)
+    Returns a dict mapping sample name to a pair of file paths (file, index).
+    if it can't find an index file, it will add None, which will trigger a re-index job
     """
-    result: Dict[str, Tuple[str, str]] = dict()
+    result: Dict[str, Tuple[str, Optional[str]]] = dict()
     for fp in fpaths:
-        index = fp + '.tbi'
+        index: Optional[str] = fp + '.tbi'
         if fp.endswith('.g.vcf.gz'):
             if not file_exists(index):
-                logger.critical(f'Not found TBI index for file {fp}')
+                logger.critical(f'Not found TBI index for file {fp}, will create')
+                index = None
         elif fp.endswith('.bam'):
             index = fp + '.bai'
             if not file_exists(index):
                 index = re.sub('.bam$', '.bai', fp)
                 if not file_exists(index):
-                    logger.critical(f'Not found BAI index for file {fp}')
+                    logger.warning(f'Not found BAI index for file {fp}, will create')
+                    index = None
         elif fp.endswith('.cram'):
             index = fp + '.crai'
             if not file_exists(index):
                 index = re.sub('.cram$', '.crai', fp)
                 if not file_exists(index):
-                    logger.critical(f'Not found CRAI index for file {fp}')
+                    logger.warning(f'Not found CRAI index for file {fp}, will create')
+                    index = None
         else:
             logger.critical(f'Unrecognised input file extention {fp}')
         result[_get_file_base_name(fp)] = fp, index
@@ -275,65 +279,87 @@ def splitext_gz(fname: str) -> Tuple[str, str]:
 
 def _find_fastq_pairs(fpaths: List[str]) -> Dict[str, Tuple[str, str]]:
     """
-    Find pairs of FASTQ files
+    Find pairs of FASTQ files for each sample
     """
     logger.info('Finding FASTQ pairs...')
 
-    fastqs_by_sample_name: Dict[str, Tuple[Optional[str], Optional[str]]] = dict()
+    fastqs_by_sample_name: Dict[str, Tuple[List[str], List[str]]] = dict()
     for fpath in fpaths:
         fn, ext = splitext_gz(basename(fpath))
-        if ext in ['.fq', '.fq.gz', '.fastq', '.fastq.gz']:
-            sname, l_fpath, r_fpath = None, None, None
-            if fn.endswith('_1'):
-                sname = fn[:-2]
-                l_fpath = fpath
-            elif fn.endswith('_R1'):
-                sname = fn[:-3]
-                l_fpath = fpath
-            elif fn.endswith('_2'):
-                sname = fn[:-2]
-                r_fpath = fpath
-            elif fn.endswith('_R2'):
-                sname = fn[:-3]
-                r_fpath = fpath
+        if ext not in ['.fq', '.fq.gz', '.fastq', '.fastq.gz']:
+            continue
+        sname, l_fpath, r_fpath = None, None, None
+        
+        # Parsing the file name according to the Illumina spec
+        # https://support.illumina.com/help/BaseSpace_OLH_009008/Content/Source/Informatics/BS/NamingConvention_FASTQ-files-swBS.htm
+        # Example: SampleName_S1_L001_R1_001.fastq.gz
 
-            if sname:
-                m = re.match(r'(.*)_S\d+', sname)
+        # Stripping the segment number
+        m = re.match(r'(.*)_\d+', fn)
+        if m:
+            fn = m.group(1)
+            
+        # Parsing the number in pair
+        if fn.endswith('_1'):
+            sname = fn[:-2]
+            l_fpath = fpath
+        elif fn.endswith('_R1'):
+            sname = fn[:-3]
+            l_fpath = fpath
+        elif fn.endswith('_2'):
+            sname = fn[:-2]
+            r_fpath = fpath
+        elif fn.endswith('_R2'):
+            sname = fn[:-3]
+            r_fpath = fpath
+        else:
+            logger.critical(
+                f'Fastq file name is expected to have a _1/_2/_R1/_R2 '
+                f'suffix. Found: {fpath}'
+            )
+
+        if sname:
+            # Stripping different combinations of S_ (sample number) and L_ (lane)
+            for suf in [r'_L\d+', r'_S\d+']:
+                m = re.match(r'(.*)' + suf, sname)
                 if m:
                     sname = m.group(1)
                 sname = sname.replace('-', '_')
-            else:
-                sname = fn
-                logger.info('Cannot detect file for ' + sname)
+        else:
+            sname = fn
+            logger.info('Cannot detect file for ' + sname)
 
-            l, r = fastqs_by_sample_name.get(sname, (None, None))
-            if l and l_fpath:
-                logger.critical(
-                    'Duplicated left FASTQ files for '
-                    + sname
-                    + ': '
-                    + l
-                    + ' and '
-                    + l_fpath
-                )
-            if r and r_fpath:
-                logger.critical(
-                    'Duplicated right FASTQ files for '
-                    + sname
-                    + ': '
-                    + r
-                    + ' and '
-                    + r_fpath
-                )
-            fastqs_by_sample_name[sname] = l or l_fpath, r or r_fpath
+        if sname not in fastqs_by_sample_name:
+            fastqs_by_sample_name[sname] = ([], [])
+        ls, rs = fastqs_by_sample_name[sname]
 
-    paired_fastqs_by_sample_name: Dict[str, Tuple[str, str]] = dict()
-    for sname, (l, r) in fastqs_by_sample_name.items():
-        if not l:
+        if l_fpath:
+            if ls and l_fpath in ls:
+                logger.critical(
+                    'Duplicated left FASTQ files for ' + sname + ': ' + l_fpath
+                )
+            ls.append(str(l_fpath))
+
+        if r_fpath:
+            if rs and r_fpath in rs:
+                logger.critical(
+                    'Duplicated right FASTQ files for ' + sname + ': ' + r_fpath
+                )
+            rs.append(str(r_fpath))
+        fastqs_by_sample_name[sname] = ls, rs
+
+    for sname, (ls, rs) in fastqs_by_sample_name.items():
+        if len(ls) == 0:
             logger.error(f'ERROR: for sample {sname} left reads not found')
-        if not r:
+        if len(rs) == 0:
             logger.error(f'ERROR: for sample {sname} right reads not found')
-        if l and r:
-            paired_fastqs_by_sample_name[sname] = str(l), str(r)
-
-    return paired_fastqs_by_sample_name
+        if len(ls) != len(rs):
+            logger.error(
+                f'ERROR: for sample {sname}, the number of '
+                f'left fastqs ({len(ls)}) != the number of '
+                f'right fastqs ({len(rs)})'
+            )
+    
+    # Joining muiltiple pairs with comma
+    return {sn: (','.join(rs), ','.join(ls)) 
+            for sn, (rs, ls) in fastqs_by_sample_name.items()}

@@ -28,20 +28,21 @@ logger.setLevel(logging.INFO)
 @click.option(
     '--es-host',
     'es_host',
-    help='ElasticSearch host',
+    help='Elasticsearch host',
 )
-@click.option('--es-port', 'es_port', type=click.STRING, help='ElasticSearch port')
+@click.option('--es-port', 'es_port', type=click.STRING, help='Elasticsearch port')
 @click.option(
-    '--es-username', 'es_username', type=click.STRING, help='ElasticSearch username'
+    '--es-username', 'es_username', type=click.STRING, help='Elasticsearch username'
 )
 @click.option(
-    '--es-password', 'es_password', type=click.STRING, help='ElasticSearch password'
+    '--es-password', 'es_password', type=click.STRING, help='Elasticsearch password'
 )
 @click.option(
     '--es-index',
     'es_index',
     type=click.STRING,
-    help='ElasticSearch index. Usually the dataset name. Will be lowercased',
+    help='Elasticsearch index. Usually the dataset name. Will be lowercased',
+    required=True,
 )
 @click.option(
     '--es-index-min-num-shards',
