@@ -840,7 +840,7 @@ def _add_haplotype_caller_job(
       -L {interval} \\
       -O {j.output_gvcf['g.vcf.gz']} \\
       -G StandardAnnotation -G StandardHCAnnotation -G AS_StandardAnnotation \\
-      -GQB 10 -GQB 20 -GQB 30 -GQB 40 -GQB 50 -GQB 60 -GQB 70 -GQB 80 -GQB 90 \\
+      -GQB 20 \
       -ERC GVCF \\
 
     df -h; pwd; du -sh $(dirname {j.output_gvcf['g.vcf.gz']}); free -m
