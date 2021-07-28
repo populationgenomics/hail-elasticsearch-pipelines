@@ -277,7 +277,7 @@ def splitext_gz(fname: str) -> Tuple[str, str]:
     return base, ext
 
 
-def _find_fastq_pairs(fpaths: List[str]) -> Dict[str, Tuple[List[str], List[str]]]:
+def _find_fastq_pairs(fpaths: List[str]) -> Dict[str, Tuple[str, str]]:
     """
     Find pairs of FASTQ files for each sample
     """
@@ -286,58 +286,68 @@ def _find_fastq_pairs(fpaths: List[str]) -> Dict[str, Tuple[List[str], List[str]
     fastqs_by_sample_name: Dict[str, Tuple[List[str], List[str]]] = dict()
     for fpath in fpaths:
         fn, ext = splitext_gz(basename(fpath))
-        if ext in ['.fq', '.fq.gz', '.fastq', '.fastq.gz']:
-            sname, l_fpath, r_fpath = None, None, None
-            if fn.endswith('_1'):
-                sname = fn[:-2]
-                l_fpath = fpath
-            elif fn.endswith('_R1'):
-                sname = fn[:-3]
-                l_fpath = fpath
-            elif fn.endswith('_2'):
-                sname = fn[:-2]
-                r_fpath = fpath
-            elif fn.endswith('_R2'):
-                sname = fn[:-3]
-                r_fpath = fpath
-            else:
+        if ext not in ['.fq', '.fq.gz', '.fastq', '.fastq.gz']:
+            continue
+        sname, l_fpath, r_fpath = None, None, None
+        
+        # Parsing the file name according to the Illumina spec
+        # https://support.illumina.com/help/BaseSpace_OLH_009008/Content/Source/Informatics/BS/NamingConvention_FASTQ-files-swBS.htm
+        # Example: SampleName_S1_L001_R1_001.fastq.gz
+
+        # Stripping the segment number
+        m = re.match(r'(.*)_\d+', fn)
+        if m:
+            fn = m.group(1)
+            
+        # Parsing the number in pair
+        if fn.endswith('_1'):
+            sname = fn[:-2]
+            l_fpath = fpath
+        elif fn.endswith('_R1'):
+            sname = fn[:-3]
+            l_fpath = fpath
+        elif fn.endswith('_2'):
+            sname = fn[:-2]
+            r_fpath = fpath
+        elif fn.endswith('_R2'):
+            sname = fn[:-3]
+            r_fpath = fpath
+        else:
+            logger.critical(
+                f'Fastq file name is expected to have a _1/_2/_R1/_R2 '
+                f'suffix. Found: {fpath}'
+            )
+
+        if sname:
+            # Stripping different combinations of S_ (sample number) and L_ (lane)
+            for suf in [r'_L\d+', r'_S\d+']:
+                m = re.match(r'(.*)' + suf, sname)
+                if m:
+                    sname = m.group(1)
+                sname = sname.replace('-', '_')
+        else:
+            sname = fn
+            logger.info('Cannot detect file for ' + sname)
+
+        if sname not in fastqs_by_sample_name:
+            fastqs_by_sample_name[sname] = ([], [])
+        ls, rs = fastqs_by_sample_name[sname]
+
+        if l_fpath:
+            if ls and l_fpath in ls:
                 logger.critical(
-                    f'Fastq file name is expected to have a _1/_2/_R1/_R2 '
-                    f'suffix. Found: {fpath}'
+                    'Duplicated left FASTQ files for ' + sname + ': ' + l_fpath
                 )
+            ls.append(str(l_fpath))
 
-            if sname:
-                # Stripping different combinations of S_ (sample number) and L_ (lane),
-                # according to the Illumina naming convention https://support.illumina.com/help/BaseSpace_OLH_009008/Content/Source/Informatics/BS/NamingConvention_FASTQ-files-swBS.htm
-                for suf in [r'_S\d+_L\d+', r'_S\d+', r'_L\d+']:
-                    m = re.match(r'(.*)' + suf, sname)
-                    if m:
-                        sname = m.group(1)
-                    sname = sname.replace('-', '_')
-            else:
-                sname = fn
-                logger.info('Cannot detect file for ' + sname)
+        if r_fpath:
+            if rs and r_fpath in rs:
+                logger.critical(
+                    'Duplicated right FASTQ files for ' + sname + ': ' + r_fpath
+                )
+            rs.append(str(r_fpath))
+        fastqs_by_sample_name[sname] = ls, rs
 
-            if sname not in fastqs_by_sample_name:
-                fastqs_by_sample_name[sname] = ([], [])
-            ls, rs = fastqs_by_sample_name[sname]
-
-            if l_fpath:
-                if ls and l_fpath in ls:
-                    logger.critical(
-                        'Duplicated left FASTQ files for ' + sname + ': ' + l_fpath
-                    )
-                ls.append(str(l_fpath))
-
-            if r_fpath:
-                if rs and r_fpath in rs:
-                    logger.critical(
-                        'Duplicated right FASTQ files for ' + sname + ': ' + r_fpath
-                    )
-                rs.append(str(r_fpath))
-            fastqs_by_sample_name[sname] = ls, rs
-
-    # paired_fastqs_by_sample_name: Dict[str, Tuple[str, str]] = dict()
     for sname, (ls, rs) in fastqs_by_sample_name.items():
         if len(ls) == 0:
             logger.error(f'ERROR: for sample {sname} left reads not found')
@@ -349,5 +359,7 @@ def _find_fastq_pairs(fpaths: List[str]) -> Dict[str, Tuple[List[str], List[str]
                 f'left fastqs ({len(ls)}) != the number of '
                 f'right fastqs ({len(rs)})'
             )
-
-    return fastqs_by_sample_name
+    
+    # Joining muiltiple pairs with comma
+    return {sn: (','.join(rs), ','.join(ls)) 
+            for sn, (rs, ls) in fastqs_by_sample_name.items()}
