@@ -1023,7 +1023,7 @@ def _add_import_gvcfs_job(
 
     tar -cf {j.output['tar']} workspace
 
-    do df -h; pwd; du -sh $(dirname {j.output['tar']}); free -m
+    df -h; pwd; du -sh $(dirname {j.output['tar']}); free -m
     """
     )
     b.write_output(j.output, genomicsdb_gcs_path.replace('.tar', ''))
