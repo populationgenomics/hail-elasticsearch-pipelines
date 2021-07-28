@@ -522,22 +522,15 @@ def _make_realign_jobs(
             assert (
                 (file1.endswith('.cram') or file1.endswith('.bam')) and index or file2
             )
-            if file1.endswith('.cram') or file1.endswith('.bam'):
-                use_bazam = True
-                file1 = b.read_input_group(base=file1, index=index)
-            else:
-                use_bazam = False
-                file1 = b.read_input(file1)
-                file2 = b.read_input(file2)
-
             j = b.new_job(job_name)
             jobs.append(j)
             j.image(BAZAM_CONTAINER)
             total_cpu = 32
+            use_bazam = file1.endswith('.cram') or file1.endswith('.bam')
             if use_bazam:
-                bazam_cpu = 6
-                bwa_cpu = 20
-                bamsormadup_cpu = 6
+                bazam_cpu = 4
+                bwa_cpu = 24
+                bamsormadup_cpu = 4
             else:
                 bazam_cpu = 0
                 bwa_cpu = 24
@@ -555,12 +548,17 @@ def _make_realign_jobs(
                 j.depends_on(*depends_on)
 
             if use_bazam:
-                extract_fq_cmd = (
-                    f'bazam -Xmx16g -Dsamjdk.reference_fasta={reference.base}'
-                    f' -n{bazam_cpu} -bam {file1.base}'
+                file1 = b.read_input_group(base=file1, index=index)
+                r1_param = (
+                    f'<(bazam -Xmx16g -Dsamjdk.reference_fasta={reference.base}'
+                    f' -n{bazam_cpu} -bam {file1.base})'
                 )
+                r2_param = '-'
             else:
-                extract_fq_cmd = ''
+                files1 = [b.read_input(f1) for f1 in file1.split(',')]
+                files2 = [b.read_input(f1) for f1 in file2.split(',')]
+                r1_param = f'<(cat {" ".join(files1)})'
+                r2_param = f'<(cat {" ".join(files2)})'
 
             rg_line = f'@RG\\tID:{sn}\\tSM:{sn}'
 
@@ -577,10 +575,8 @@ set -ex
 
 (while true; do df -h; pwd; du -sh $(dirname {j.output_cram.cram}); sleep 600; done) &
 
-{extract_fq_cmd} | \\
 bwa mem -K 100000000 {'-p' if use_bazam else ''} -t{bwa_cpu} -Y \\
-  -R '{rg_line}' {reference.base} \\
-  {'/dev/stdin' if use_bazam else file1} {'-' if use_bazam else file2} | \\
+  -R '{rg_line}' {reference.base} {r1_param} {r2_param} | \\
 bamsormadup inputformat=sam threads={bamsormadup_cpu} SO=coordinate \\
   M={j.duplicate_metrics} outputformat=sam \\
   tmpfile=$(dirname {j.output_cram.cram})/bamsormadup-tmp | \\
