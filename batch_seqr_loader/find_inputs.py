@@ -277,13 +277,13 @@ def splitext_gz(fname: str) -> Tuple[str, str]:
     return base, ext
 
 
-def _find_fastq_pairs(fpaths: List[str]) -> Dict[str, Tuple[str, str]]:
+def _find_fastq_pairs(fpaths: List[str]) -> Dict[str, Tuple[List[str], List[str]]]:
     """
-    Find pairs of FASTQ files
+    Find pairs of FASTQ files for each sample
     """
     logger.info('Finding FASTQ pairs...')
 
-    fastqs_by_sample_name: Dict[str, Tuple[Optional[str], Optional[str]]] = dict()
+    fastqs_by_sample_name: Dict[str, Tuple[List[str], List[str]]] = dict()
     for fpath in fpaths:
         fn, ext = splitext_gz(basename(fpath))
         if ext in ['.fq', '.fq.gz', '.fastq', '.fastq.gz']:
@@ -300,44 +300,54 @@ def _find_fastq_pairs(fpaths: List[str]) -> Dict[str, Tuple[str, str]]:
             elif fn.endswith('_R2'):
                 sname = fn[:-3]
                 r_fpath = fpath
+            else:
+                logger.critical(
+                    f'Fastq file name is expected to have a _1/_2/_R1/_R2 '
+                    f'suffix. Found: {fpath}'
+                )
 
             if sname:
-                m = re.match(r'(.*)_S\d+', sname)
-                if m:
-                    sname = m.group(1)
-                sname = sname.replace('-', '_')
+                # Stripping different combinations of S_ (sample number) and L_ (lane),
+                # according to the Illumina naming convention https://support.illumina.com/help/BaseSpace_OLH_009008/Content/Source/Informatics/BS/NamingConvention_FASTQ-files-swBS.htm
+                for suf in [r'_S\d+_L\d+', r'_S\d+', r'_L\d+']:
+                    m = re.match(r'(.*)' + suf, sname)
+                    if m:
+                        sname = m.group(1)
+                    sname = sname.replace('-', '_')
             else:
                 sname = fn
                 logger.info('Cannot detect file for ' + sname)
 
-            l, r = fastqs_by_sample_name.get(sname, (None, None))
-            if l and l_fpath:
-                logger.critical(
-                    'Duplicated left FASTQ files for '
-                    + sname
-                    + ': '
-                    + l
-                    + ' and '
-                    + l_fpath
-                )
-            if r and r_fpath:
-                logger.critical(
-                    'Duplicated right FASTQ files for '
-                    + sname
-                    + ': '
-                    + r
-                    + ' and '
-                    + r_fpath
-                )
-            fastqs_by_sample_name[sname] = l or l_fpath, r or r_fpath
+            if sname not in fastqs_by_sample_name:
+                fastqs_by_sample_name[sname] = ([], [])
+            ls, rs = fastqs_by_sample_name[sname]
 
-    paired_fastqs_by_sample_name: Dict[str, Tuple[str, str]] = dict()
-    for sname, (l, r) in fastqs_by_sample_name.items():
-        if not l:
+            if l_fpath:
+                if ls and l_fpath in ls:
+                    logger.critical(
+                        'Duplicated left FASTQ files for ' + sname + ': ' + l_fpath
+                    )
+                ls.append(str(l_fpath))
+
+            if r_fpath:
+                if rs and r_fpath in rs:
+                    logger.critical(
+                        'Duplicated right FASTQ files for ' + sname + ': ' + r_fpath
+                    )
+                rs.append(str(r_fpath))
+            fastqs_by_sample_name[sname] = ls, rs
+
+    # paired_fastqs_by_sample_name: Dict[str, Tuple[str, str]] = dict()
+    for sname, (ls, rs) in fastqs_by_sample_name.items():
+        if len(ls) == 0:
             logger.error(f'ERROR: for sample {sname} left reads not found')
-        if not r:
+        if len(rs) == 0:
             logger.error(f'ERROR: for sample {sname} right reads not found')
-        if l and r:
-            paired_fastqs_by_sample_name[sname] = str(l), str(r)
+        if len(ls) != len(rs):
+            logger.error(
+                f'ERROR: for sample {sname}, the number of '
+                f'left fastqs ({len(ls)}) != the number of '
+                f'right fastqs ({len(rs)})'
+            )
 
-    return paired_fastqs_by_sample_name
+    return fastqs_by_sample_name
