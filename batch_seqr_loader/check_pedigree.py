@@ -70,7 +70,7 @@ def main(
     if (mismatching_sex | missing_sex).any():
         logger.info(f'Found PED samples with mismatching or missing sex:')
         for _, row in df[mismatching_sex | missing_sex].iterrows():
-            inferred_sex = {1: 'male', 2: 'female'}[row.sex]
+            inferred_sex = {1: 'male', 2: 'female'}.get(row.sex, 'unknown')
             logger.info(
                 f'\t{row.sample_id} (provided: {row.original_pedigree_sex}, inferred: {inferred_sex})'
             )
