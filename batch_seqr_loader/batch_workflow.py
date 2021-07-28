@@ -1019,7 +1019,7 @@ def _add_import_gvcfs_job(
       --merge-input-intervals \
       --consolidate
 
-    do df -h; pwd; du -sh $(dirname {j.output['tar']}); free -m
+    df -h; pwd; du -sh $(dirname {j.output['tar']}); free -m
 
     tar -cf {j.output['tar']} workspace
 
