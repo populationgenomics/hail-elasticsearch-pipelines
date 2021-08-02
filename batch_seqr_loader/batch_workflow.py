@@ -22,37 +22,12 @@ import click
 import hailtop.batch as hb
 from analysis_runner import dataproc
 from hailtop.batch.job import Job
-from find_inputs import find_inputs, pull_inputs_from_sm_server
-from utils import file_exists
 
-GATK_VERSION = '4.2.0.0'
-GATK_CONTAINER = (
-    f'australia-southeast1-docker.pkg.dev/cpg-common/images/gatk:{GATK_VERSION}'
-)
-PICARD_CONTAINER = f'us.gcr.io/broad-gotc-prod/picard-cloud:2.23.8'
-BAZAM_CONTAINER = f'australia-southeast1-docker.pkg.dev/cpg-common/images/bazam:v2'
-SOMALIER_CONTAINER = 'brentp/somalier:latest'
-PEDDY_CONTAINER = 'quay.io/biocontainers/peddy:0.4.8--pyh5e36f6f_0'
+from batch_seqr_loader.find_inputs import find_inputs, pull_inputs_from_sm_server
+from batch_seqr_loader.vqsr import make_vqsr_jobs
+from batch_seqr_loader import utils
+from batch_seqr_loader.utils import file_exists
 
-NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS = 50
-NUMBER_OF_DATAPROC_WORKERS = 50
-NUMBER_OF_GENOMICS_DB_INTERVALS = 10
-
-REF_BUCKET = 'gs://cpg-reference/hg38/v1'
-REF_FASTA = join(REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
-DBSNP_VCF = join(REF_BUCKET, 'Homo_sapiens_assembly38.dbsnp138.vcf')
-UNPADDED_INTERVALS = join(REF_BUCKET, 'hg38.even.handcurated.20k.intervals')
-SOMALIER_SITES = join(REF_BUCKET, 'sites.hg38.vcf.gz')
-
-DATAPROC_PACKAGES = [
-    'seqr-loader',
-    'click',
-    'google',
-    'slackclient',
-    'fsspec',
-    'sklearn',
-    'gcloud',
-]
 
 logger = logging.getLogger(__file__)
 logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
@@ -65,7 +40,7 @@ logger.setLevel(logging.INFO)
     'use_sm_server',
     is_flag=True,
     help='Query the sample metadata server for samples that need reprocessing, and'
-         'update back statuses on progress',
+    'update back statuses on progress',
 )
 @click.option(
     '--sm-server-db-name',
@@ -223,9 +198,7 @@ def main(
                 'Can\'t mix direct inputs (--cram, --gvcf, etc) and --use-sm-server'
             )
             sys.exit(1)
-        samples_df, ped_fpath = pull_inputs_from_sm_server(
-            sm_server_db_name, ped_fpath
-        )
+        samples_df, ped_fpath = pull_inputs_from_sm_server(sm_server_db_name, ped_fpath)
     else:
         samples_df, ped_fpath = find_inputs(
             gvcfs,
@@ -237,21 +210,25 @@ def main(
         )
 
     reference = b.read_input_group(
-        base=REF_FASTA,
-        fai=REF_FASTA + '.fai',
-        dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
+        base=utils.REF_FASTA,
+        fai=utils.REF_FASTA + '.fai',
+        dict=utils.REF_FASTA.replace('.fasta', '')
+        .replace('.fna', '')
+        .replace('.fa', '')
         + '.dict',
     )
     bwa_reference = b.read_input_group(
-        base=REF_FASTA,
-        fai=REF_FASTA + '.fai',
-        dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
+        base=utils.REF_FASTA,
+        fai=utils.REF_FASTA + '.fai',
+        dict=utils.REF_FASTA.replace('.fasta', '')
+        .replace('.fna', '')
+        .replace('.fa', '')
         + '.dict',
-        sa=REF_FASTA + '.sa',
-        amb=REF_FASTA + '.amb',
-        bwt=REF_FASTA + '.bwt',
-        ann=REF_FASTA + '.ann',
-        pac=REF_FASTA + '.pac',
+        sa=utils.REF_FASTA + '.sa',
+        amb=utils.REF_FASTA + '.amb',
+        bwt=utils.REF_FASTA + '.bwt',
+        ann=utils.REF_FASTA + '.ann',
+        pac=utils.REF_FASTA + '.pac',
     )
 
     # Aligning available FASTQs
@@ -284,7 +261,7 @@ def main(
             b=b,
             samples_df=samples_df,
             reference=reference,
-            sites=b.read_input(SOMALIER_SITES),
+            sites=b.read_input(utils.SOMALIER_SITES),
             ped_file=b.read_input(ped_fpath),
             overwrite=overwrite,
             fingerprints_bucket=fingerprints_bucket,
@@ -309,7 +286,7 @@ def main(
         genomicsdb_bucket=genomicsdb_bucket,
         samples_df=samples_df,
         reference=reference,
-        dbsnp=DBSNP_VCF,
+        dbsnp=utils.DBSNP_VCF,
         work_bucket=work_bucket,
         local_tmp_dir=local_tmp_dir,
         overwrite=overwrite,
@@ -330,8 +307,8 @@ def main(
             + (f'--subset-tsv ' if subset_path else '')
             + (f'--vep-block-size ' if vep_block_size else ''),
             max_age='8h',
-            packages=DATAPROC_PACKAGES,
-            num_secondary_workers=NUMBER_OF_DATAPROC_WORKERS,
+            packages=utils.DATAPROC_PACKAGES,
+            num_secondary_workers=utils.NUMBER_OF_DATAPROC_WORKERS,
             job_name='make_annotated_mt.py',
             vep='GRCh38',
             depends_on=[joint_genotype_job],
@@ -348,7 +325,7 @@ def main(
         f'--genome-version GRCh38 '
         f'{"--prod" if output_namespace == "main" else ""}',
         max_age='8h',
-        packages=DATAPROC_PACKAGES,
+        packages=utils.DATAPROC_PACKAGES,
         num_secondary_workers=10,
         job_name='load_to_es.py',
         depends_on=[annotate_job],
@@ -389,7 +366,7 @@ def _pedigree_checks(
             extract_jobs.append(b.new_job(f'Somalier extract, {sn} [reuse]'))
         else:
             j = b.new_job(f'Somalier extract, {sn}')
-            j.image(SOMALIER_CONTAINER)
+            j.image(utils.SOMALIER_CONTAINER)
             j.cpu(2)
             j.memory('highmem')  # ~ 4G/core ~ 8G
             if input_path.endswith('.bam'):
@@ -419,7 +396,7 @@ def _pedigree_checks(
             extract_jobs.append(j)
 
     relate_j = b.new_job(f'Somalier relate')
-    relate_j.image(SOMALIER_CONTAINER)
+    relate_j.image(utils.SOMALIER_CONTAINER)
     relate_j.cpu(1)
     relate_j.memory('standard')  # ~ 4G/core ~ 4G
     # Size of one somalier file is 212K, so we add another G only if the number of
@@ -459,7 +436,7 @@ def _pedigree_checks(
     b.write_output(relate_j.output_html, somalier_html_path)
 
     check_j = b.new_job(f'Check relatedness and sex')
-    check_j.image(PEDDY_CONTAINER)
+    check_j.image(utils.PEDDY_CONTAINER)
     check_j.cpu(1)
     check_j.memory('standard')  # ~ 4G/core ~ 4G
     with open(join(dirname(abspath(__file__)), 'check_pedigree.py')) as f:
@@ -492,7 +469,7 @@ def _make_index_jobs(
             file = b.read_input(fpath)
             j = b.new_job(job_name)
             jobs.append(j)
-            j.image(BAZAM_CONTAINER)
+            j.image(utils.BAZAM_CONTAINER)
             j.storage(('50G' if fpath.endswith('.cram') else '150G'))
             j.command(f'samtools index {file} {j.output_crai}')
             index_fpath = splitext(fpath)[0] + (
@@ -550,7 +527,7 @@ def _make_realign_jobs(
             )
             j = b.new_job(job_name)
             jobs.append(j)
-            j.image(BAZAM_CONTAINER)
+            j.image(utils.BAZAM_CONTAINER)
             total_cpu = 32
             use_bazam = file1.endswith('.cram') or file1.endswith('.bam')
             if use_bazam:
@@ -654,13 +631,13 @@ def _make_haplotypecaller_jobs(
             if intervals_j is None:
                 intervals_j = _add_split_intervals_job(
                     b,
-                    UNPADDED_INTERVALS,
-                    NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS,
-                    REF_FASTA,
+                    utils.UNPADDED_INTERVALS,
+                    utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS,
+                    utils.REF_FASTA,
                 )
                 if depends_on:
                     intervals_j.depends_on(*depends_on)
-            for idx in range(NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS):
+            for idx in range(utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS):
                 haplotype_caller_jobs.append(
                     _add_haplotype_caller_job(
                         b,
@@ -669,7 +646,7 @@ def _make_haplotypecaller_jobs(
                         reference=reference,
                         sample_name=sn,
                         interval_idx=idx,
-                        number_of_intervals=NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS,
+                        number_of_intervals=utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS,
                         depends_on=depends_on,
                     )
                 )
@@ -706,9 +683,9 @@ def _make_joint_genotype_jobs(
     """
     intervals_j = _add_split_intervals_job(
         b,
-        UNPADDED_INTERVALS,
-        NUMBER_OF_GENOMICS_DB_INTERVALS,
-        REF_FASTA,
+        utils.UNPADDED_INTERVALS,
+        utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
+        utils.REF_FASTA,
     )
     if depends_on:
         intervals_j.depends_on(*depends_on)
@@ -717,10 +694,10 @@ def _make_joint_genotype_jobs(
     genotyped_vcfs = []
 
     samples_to_be_in_db_per_interval = dict()
-    for idx in range(NUMBER_OF_GENOMICS_DB_INTERVALS):
+    for idx in range(utils.NUMBER_OF_GENOMICS_DB_INTERVALS):
         genomicsdb_gcs_path = join(
             genomicsdb_bucket,
-            f'interval_{idx}_outof_{NUMBER_OF_GENOMICS_DB_INTERVALS}.tar',
+            f'interval_{idx}_outof_{utils.NUMBER_OF_GENOMICS_DB_INTERVALS}.tar',
         )
 
         import_gvcfs_job, samples_to_be_in_db = _add_import_gvcfs_job(
@@ -731,7 +708,7 @@ def _make_joint_genotype_jobs(
             local_tmp_dir=local_tmp_dir,
             interval=intervals_j.intervals[f'interval_{idx}'],
             interval_idx=idx,
-            number_of_intervals=NUMBER_OF_GENOMICS_DB_INTERVALS,
+            number_of_intervals=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
         )
 
         samples_to_be_in_db_per_interval[idx] = samples_to_be_in_db
@@ -748,7 +725,7 @@ def _make_joint_genotype_jobs(
             overwrite=overwrite,
             interval_idx=idx,
             number_of_samples=len(samples_to_be_in_db),
-            number_of_intervals=NUMBER_OF_GENOMICS_DB_INTERVALS,
+            number_of_intervals=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
             output_vcf_path=output_vcf_path,
         )
         if import_gvcfs_job:
@@ -769,17 +746,38 @@ def _make_joint_genotype_jobs(
 
     samples_to_be_in_db = list(samples_to_be_in_db_per_interval.values())[0]
     samples_hash = hash_sample_names(samples_to_be_in_db)
-    output_vcf_path = join(
+    gathered_vcf_path = join(
         work_bucket, 'jointly-called', samples_hash, f'gathered.vcf.gz'
     )
     final_gathered_vcf_job = _add_final_gather_vcf_step(
         b,
         input_vcfs=genotyped_vcfs,
         overwrite=overwrite,
-        output_vcf_path=output_vcf_path,
+        output_vcf_path=gathered_vcf_path,
     )
 
-    return final_gathered_vcf_job, output_vcf_path
+    vqsr_bucket = join(work_bucket, 'vqsrred', samples_hash)
+    vqsred_vcf_path = join(vqsr_bucket, f'output.vcf.gz')
+    if overwrite or not utils.file_exists(vqsred_vcf_path):
+        vqsr_job = make_vqsr_jobs(
+            b,
+            input_vcf_path=final_gathered_vcf_job,
+            gvcf_count=len(samples_df),
+            work_bucket=vqsr_bucket,
+            web_bucket=vqsr_bucket,
+            depends_on=[final_gathered_vcf_job],
+            vqsr_params_d={
+                'min_excess_het': 54.69,
+                'snp_filter_level': 99.7,
+                'indel_filter_level': 99.0,
+            },
+            intervals=intervals_j.intervals,
+            output_vcf_path=vqsred_vcf_path,
+        )
+    else:
+        vqsr_job = b.new_job('VQSR [reuse]')
+
+    return vqsr_job, vqsred_vcf_path
 
 
 def _add_split_intervals_job(
@@ -794,7 +792,7 @@ def _add_split_intervals_job(
     Returns: a Job object with a single output j.intervals of type ResourceGroup
     """
     j = b.new_job(f'Make {scatter_count} intervals')
-    j.image(GATK_CONTAINER)
+    j.image(utils.GATK_CONTAINER)
     java_mem = 3
     j.memory('standard')  # ~ 4G/core ~ 4G
     j.storage('16G')
@@ -841,7 +839,7 @@ def _add_haplotype_caller_job(
         job_name += f', {sample_name} {interval_idx}/{number_of_intervals}'
 
     j = b.new_job(job_name)
-    j.image(GATK_CONTAINER)
+    j.image(utils.GATK_CONTAINER)
     j.cpu(2)
     java_mem = 7
     j.memory('standard')  # ~ 4G/core ~ 7.5G
@@ -887,7 +885,7 @@ def _add_merge_gvcfs_job(
 
     job_name = f'Merge {len(gvcfs)} GVCFs, {sample_name}'
     j = b.new_job(job_name)
-    j.image(PICARD_CONTAINER)
+    j.image(utils.PICARD_CONTAINER)
     j.cpu(2)
     java_mem = 7
     j.memory('standard')  # ~ 4G/core ~ 7.5G
@@ -998,7 +996,7 @@ def _add_import_gvcfs_job(
         job_name += f' {interval_idx}/{number_of_intervals}'
 
     j = b.new_job(job_name)
-    j.image(GATK_CONTAINER)
+    j.image(utils.GATK_CONTAINER)
     j.cpu(16)
     java_mem = 14
     j.memory('lowmem')  # ~ 1G/core ~ 14.4G
@@ -1079,7 +1077,7 @@ def _add_gatk_genotype_gvcf_job(
         return b.new_job(job_name + ' [reuse]')
 
     j = b.new_job(job_name)
-    j.image(GATK_CONTAINER)
+    j.image(utils.GATK_CONTAINER)
     j.cpu(2)
     java_mem = 7
     j.memory('standard')  # ~ 4G/core ~ 8G
@@ -1136,7 +1134,7 @@ def _add_final_gather_vcf_step(
         return b.new_job(job_name + ' [reuse]')
 
     j = b.new_job(job_name)
-    j.image(GATK_CONTAINER)
+    j.image(utils.GATK_CONTAINER)
     j.cpu(2)
     java_mem = 7
     j.memory('standard')  # ~ 4G/core ~ 7.5G

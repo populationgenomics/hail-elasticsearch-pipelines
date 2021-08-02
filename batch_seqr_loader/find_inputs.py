@@ -19,17 +19,18 @@ logger.setLevel(logging.INFO)
 
 
 def pull_inputs_from_sm_server(
-    sm_server_db_name: str, 
-    ped_fpath: str
-) -> Tuple[pd.DataFrame, str]:
+    sm_server_db_name: str,  # pylint: disable=unused-argument
+    ped_fpath: str,  # pylint: disable=unused-argument
+) -> Tuple[pd.DataFrame, str]:  
     """
     Query the SM server for input files
-    :param sm_server_db_name: the SM database name (usually defaults to `seqr` 
+    :param sm_server_db_name: the SM database name (usually defaults to `seqr`
     for production runs)
     :param ped_fpath: path to PED file
     :return: a tuple of a DataFrame with the pedigree information and paths to
         input files (columns: s, file, index, type), and a path to a PED file
     """
+    return None, None
 
 
 def find_inputs(
@@ -303,7 +304,7 @@ def _find_fastq_pairs(fpaths: List[str]) -> Dict[str, Tuple[str, str]]:
         if ext not in ['.fq', '.fq.gz', '.fastq', '.fastq.gz']:
             continue
         sname, l_fpath, r_fpath = None, None, None
-        
+
         # Parsing the file name according to the Illumina spec
         # https://support.illumina.com/help/BaseSpace_OLH_009008/Content/Source/Informatics/BS/NamingConvention_FASTQ-files-swBS.htm
         # Example: SampleName_S1_L001_R1_001.fastq.gz
@@ -373,7 +374,9 @@ def _find_fastq_pairs(fpaths: List[str]) -> Dict[str, Tuple[str, str]]:
                 f'left fastqs ({len(ls)}) != the number of '
                 f'right fastqs ({len(rs)})'
             )
-    
+
     # Joining muiltiple pairs with comma
-    return {sn: (','.join(rs), ','.join(ls)) 
-            for sn, (rs, ls) in fastqs_by_sample_name.items()}
+    return {
+        sn: (','.join(rs), ','.join(ls))
+        for sn, (rs, ls) in fastqs_by_sample_name.items()
+    }
