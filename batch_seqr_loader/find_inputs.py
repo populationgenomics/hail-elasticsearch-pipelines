@@ -21,7 +21,7 @@ logger.setLevel(logging.INFO)
 def pull_inputs_from_sm_server(
     sm_server_db_name: str,  # pylint: disable=unused-argument
     ped_fpath: str,  # pylint: disable=unused-argument
-) -> Tuple[pd.DataFrame, str]:  
+) -> Tuple[pd.DataFrame, str]:
     """
     Query the SM server for input files
     :param sm_server_db_name: the SM database name (usually defaults to `seqr`
