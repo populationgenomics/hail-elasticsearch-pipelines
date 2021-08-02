@@ -23,10 +23,10 @@ import hailtop.batch as hb
 from analysis_runner import dataproc
 from hailtop.batch.job import Job
 
-from batch_seqr_loader.find_inputs import find_inputs, pull_inputs_from_sm_server
-from batch_seqr_loader.vqsr import make_vqsr_jobs
-from batch_seqr_loader import utils
-from batch_seqr_loader.utils import file_exists
+from find_inputs import find_inputs, pull_inputs_from_sm_server
+from vqsr import make_vqsr_jobs
+import utils
+from utils import file_exists
 
 
 logger = logging.getLogger(__file__)
