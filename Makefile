@@ -1,4 +1,4 @@
-TEST_VERSION := v1-7
+ddTEST_VERSION := v1-7
 TEST_DATASET := na12878-trio
 
 ACUTE_CARE_DATASET := acute-care
@@ -129,11 +129,14 @@ run_acute_care:
 	--dataset seqr \
 	--access-level test \
 	--output-dir   "datasets/$(ACUTE_CARE_DATASET)/$(ACUTE_CARE_VERSION)" \
-	--description  "seqr loader - $(ACUTE_CARE_DATASET) from KCCG GVCFs" \
+	--description  "seqr loader - $(ACUTE_CARE_DATASET) from KCCG GVCFs and Simons fastqs (1 sample)" \
 	batch_seqr_loader/batch_workflow.py \
 	--namespace    test \
 	--version      $(ACUTE_CARE_VERSION) \
 	--seqr-dataset $(ACUTE_CARE_DATASET) \
 	--gvcf         'gs://cpg-seqr-upload-zornitza-stark/*.g.vcf.gz' \
+	--data-to-realign 'gs://cpg-seqr-upload-zornitza-stark/cpg_acute_20210727_185421/200721_A00692_0122_ML206418_20W001106-FAM000553_MAN-20200721_NEXTERAFLEXWGS_*.fastq.gz' \
 	--ped-file     "gs://cpg-seqr-upload-zornitza-stark/cpg_acute-fixed.ped" \
 	--reuse
+
+

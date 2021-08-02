@@ -18,6 +18,20 @@ logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
 logger.setLevel(logging.INFO)
 
 
+def pull_inputs_from_sm_server(
+    sm_server_db_name: str, 
+    ped_fpath: str
+) -> Tuple[pd.DataFrame, str]:
+    """
+    Query the SM server for input files
+    :param sm_server_db_name: the SM database name (usually defaults to `seqr` 
+    for production runs)
+    :param ped_fpath: path to PED file
+    :return: a tuple of a DataFrame with the pedigree information and paths to
+        input files (columns: s, file, index, type), and a path to a PED file
+    """
+
+
 def find_inputs(
     gvcfs: List[str],
     crams: List[str],
@@ -140,10 +154,10 @@ def _find_files_by_type(
 
     for input_type, glob_paths in input_globs_by_type.items():
         for glob_path in glob_paths:
+            glob_path = glob_path.strip("'").strip('"')
             assert any(
                 glob_path.endswith(ext) for ext in expected_ext_by_type[input_type]
             ), (input_type, glob_path)
-            glob_path = glob_path.lstrip("'").rstrip("'")
             cmd = f"gsutil ls '{glob_path}'"
             found_files = [
                 line.strip()
@@ -295,10 +309,10 @@ def _find_fastq_pairs(fpaths: List[str]) -> Dict[str, Tuple[str, str]]:
         # Example: SampleName_S1_L001_R1_001.fastq.gz
 
         # Stripping the segment number
-        m = re.match(r'(.*)_\d+', fn)
+        m = re.match(r'(.*)_\d\d\d$', fn)
         if m:
             fn = m.group(1)
-            
+
         # Parsing the number in pair
         if fn.endswith('_1'):
             sname = fn[:-2]
@@ -314,8 +328,8 @@ def _find_fastq_pairs(fpaths: List[str]) -> Dict[str, Tuple[str, str]]:
             r_fpath = fpath
         else:
             logger.critical(
-                f'Fastq file name is expected to have a _1/_2/_R1/_R2 '
-                f'suffix. Found: {fpath}'
+                f'Fastq base file name is expected to have a _1/_2/_R1/_R2 '
+                f'suffix. Found: {fn}'
             )
 
         if sname:

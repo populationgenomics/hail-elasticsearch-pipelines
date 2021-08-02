@@ -11,6 +11,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import hashlib
 from collections import defaultdict
@@ -21,7 +22,7 @@ import click
 import hailtop.batch as hb
 from analysis_runner import dataproc
 from hailtop.batch.job import Job
-from find_inputs import find_inputs
+from find_inputs import find_inputs, pull_inputs_from_sm_server
 from utils import file_exists
 
 GATK_VERSION = '4.2.0.0'
@@ -59,6 +60,19 @@ logger.setLevel(logging.INFO)
 
 
 @click.command()
+@click.option(
+    '--use-sm-server',
+    'use_sm_server',
+    is_flag=True,
+    help='Query the sample metadata server for samples that need reprocessing, and'
+         'update back statuses on progress',
+)
+@click.option(
+    '--sm-server-db-name',
+    'sm_server_db_name',
+    default='seqr',
+    help='Override the server metadata project/DB name',
+)
 @click.option(
     '--gvcf',
     'gvcfs',
@@ -139,6 +153,8 @@ logger.setLevel(logging.INFO)
 )
 @click.option('--vep-block-size', 'vep_block_size')
 def main(
+    use_sm_server: bool,
+    sm_server_db_name: str,
     gvcfs: List[str],
     crams: List[str],
     data_to_realign: List[str],
@@ -201,14 +217,24 @@ def main(
 
     local_tmp_dir = tempfile.mkdtemp()
 
-    samples_df, ped_fpath = find_inputs(
-        gvcfs,
-        crams,
-        data_to_realign,
-        local_tmp_dir=local_tmp_dir,
-        work_bucket=work_bucket,
-        ped_fpath=ped_fpath,
-    )
+    if use_sm_server:
+        if any([gvcfs, crams, data_to_realign]):
+            logger.critical(
+                'Can\'t mix direct inputs (--cram, --gvcf, etc) and --use-sm-server'
+            )
+            sys.exit(1)
+        samples_df, ped_fpath = pull_inputs_from_sm_server(
+            sm_server_db_name, ped_fpath
+        )
+    else:
+        samples_df, ped_fpath = find_inputs(
+            gvcfs,
+            crams,
+            data_to_realign,
+            local_tmp_dir=local_tmp_dir,
+            work_bucket=work_bucket,
+            ped_fpath=ped_fpath,
+        )
 
     reference = b.read_input_group(
         base=REF_FASTA,
@@ -520,7 +546,7 @@ def _make_realign_jobs(
             jobs.append(b.new_job(f'{job_name} [reuse]'))
         else:
             assert (
-                (file1.endswith('.cram') or file1.endswith('.bam')) and index or file2
+                file2 or (file1.endswith('.cram') or file1.endswith('.bam')) and index
             )
             j = b.new_job(job_name)
             jobs.append(j)
