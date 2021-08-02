@@ -761,7 +761,7 @@ def _make_joint_genotype_jobs(
     if overwrite or not utils.file_exists(vqsred_vcf_path):
         vqsr_job = make_vqsr_jobs(
             b,
-            input_vcf_path=final_gathered_vcf_job,
+            input_vcf_path=gathered_vcf_path,
             gvcf_count=len(samples_df),
             work_bucket=vqsr_bucket,
             web_bucket=vqsr_bucket,
