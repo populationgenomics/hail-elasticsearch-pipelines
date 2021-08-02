@@ -618,19 +618,12 @@ def add_indels_variant_recalibrator_step(
       --rscript-file {j.indel_rscript_file}
       
       ls $(dirname {j.indel_rscript_file})
-
-      ln {j.indel_rscript_file}.pdf {j.indel_features_pdf}
       """
     )
     if work_bucket:
         b.write_output(
             j.indel_rscript_file,
             os.path.join(work_bucket, 'recalibration-indels-features.Rscript'),
-        )
-    if web_bucket:
-        b.write_output(
-            j.indel_features_pdf,
-            os.path.join(web_bucket, 'recalibration-indels-features.pdf'),
         )
     return j
 
