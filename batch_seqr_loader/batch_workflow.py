@@ -772,6 +772,7 @@ def _make_joint_genotype_jobs(
                 'indel_filter_level': 99.0,
             },
             intervals=intervals_j.intervals,
+            scatter_count=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
             output_vcf_path=vqsred_vcf_path,
         )
     else:

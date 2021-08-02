@@ -71,6 +71,7 @@ def make_vqsr_jobs(
     depends_on: Optional[List[Job]],
     vqsr_params_d: Dict,
     intervals: Dict,
+    scatter_count: int,
     output_vcf_path: str,
 ) -> Job:
     """
@@ -84,7 +85,8 @@ def make_vqsr_jobs(
     :param web_bucket: bucket for plots and evaluation results (exposed via http)
     :param depends_on: job that the created jobs should only run after
     :param vqsr_params_d: parameters for VQSR
-    :param intervals: intervals to scatter
+    :param intervals: ResourceGroup object with intervals to scatter
+    :param scatter_count: number of interavals
     :param output_vcf_path: path to write final recalibrated VCF to
     :return: a final Job, and a path to the VCF with VQSR annotations
     """
@@ -169,7 +171,7 @@ def make_vqsr_jobs(
         tabix_job.depends_on(*depends_on)
 
     gathered_vcf = tabix_job.combined_vcf
-    scattered_vcfs = [gathered_vcf for _ in range(len(intervals))]
+    scattered_vcfs = [gathered_vcf for _ in range(scatter_count)]
 
     if not is_small_callset:
         # ExcessHet filtering applies only to callsets with a large number of samples,
@@ -185,7 +187,7 @@ def make_vqsr_jobs(
                 excess_het_threshold=vqsr_params_d['min_excess_het'],
                 disk_size=medium_disk,
             ).output_vcf
-            for idx in range(len(intervals))
+            for idx in range(scatter_count)
         ]
         scattered_vcfs = hard_filtered_vcfs
 
@@ -245,7 +247,7 @@ def make_vqsr_jobs(
                 disk_size=small_disk,
                 max_gaussians=snp_max_gaussians,
             )
-            for idx in range(len(intervals))
+            for idx in range(scatter_count)
         ]
         snps_recalibrations = [j.recalibration for j in snps_recalibrator_jobs]
         snps_tranches = [j.tranches for j in snps_recalibrator_jobs]
@@ -268,7 +270,7 @@ def make_vqsr_jobs(
                 indel_filter_level=vqsr_params_d['indel_filter_level'],
                 snp_filter_level=vqsr_params_d['snp_filter_level'],
             ).recalibrated_vcf
-            for idx in range(len(intervals))
+            for idx in range(scatter_count)
         ]
         recalibrated_gathered_vcf_job = _add_final_gather_vcf_step(
             b,
@@ -364,7 +366,7 @@ def add_split_intervals_step(
     Returns: a Job object with a single output j.intervals of type ResourceGroup
     """
     j = b.new_job('VQSR: SplitIntervals')
-    j.image(utils.GATK_DOCKER)
+    j.image(utils.GATK_CONTAINER)
     mem_gb = 8
     j.memory(f'{mem_gb}G')
     j.storage(f'{disk_size}G')
@@ -463,7 +465,7 @@ def add_hard_filter_step(
     Returns: a Job object with a single output j.output_vcf of type ResourceGroup
     """
     j = b.new_job('VQSR: HardFilter')
-    j.image(utils.GATK_DOCKER)
+    j.image(utils.GATK_CONTAINER)
     j.memory('8G')
     j.storage(f'{disk_size}G')
     j.declare_resource_group(
@@ -502,7 +504,7 @@ def add_make_sites_only_vcf_step(
     Returns: a Job object with a single output j.sites_only_vcf of type ResourceGroup
     """
     j = b.new_job('VQSR: MakeSitesOnlyVcf')
-    j.image(utils.GATK_DOCKER)
+    j.image(utils.GATK_CONTAINER)
     j.memory('8G')
     j.storage(f'{disk_size}G')
     j.declare_resource_group(
@@ -532,7 +534,7 @@ def add_sites_only_gather_vcf_step(
     Returns: a Job object with a single output j.output_vcf of type ResourceGroup
     """
     j = b.new_job('VQSR: SitesOnlyGatherVcf')
-    j.image(utils.GATK_DOCKER)
+    j.image(utils.GATK_CONTAINER)
     j.memory('8G')
     j.storage(f'{disk_size}G')
 
@@ -584,7 +586,7 @@ def add_indels_variant_recalibrator_step(
     and j.indel_rscript_file. The latter is usedful to produce the optional tranche plot.
     """
     j = b.new_job('VQSR: IndelsVariantRecalibrator')
-    j.image(utils.GATK_DOCKER)
+    j.image(utils.GATK_CONTAINER)
     mem_gb = 32
     j.memory(f'{mem_gb}G')
     j.cpu(2)
@@ -669,7 +671,7 @@ def add_snps_variant_recalibrator_create_model_step(
     The latter is useful to produce the optional tranche plot.
     """
     j = b.new_job('VQSR: SNPsVariantRecalibratorCreateModel')
-    j.image(utils.GATK_DOCKER)
+    j.image(utils.GATK_CONTAINER)
     mem_gb = 64 if not is_small_callset else 128
     j.memory(f'{mem_gb}G')
     j.cpu(2)
@@ -758,7 +760,7 @@ def add_snps_variant_recalibrator_scattered_step(
     """
     j = b.new_job('VQSR: SNPsVariantRecalibratorScattered')
 
-    j.image(utils.GATK_DOCKER)
+    j.image(utils.GATK_CONTAINER)
     mem_gb = 64  # ~ twice the sum of all input resources and input VCF sizes
     j.memory(f'{mem_gb}G')
     j.cpu(2)
@@ -811,7 +813,7 @@ def add_snps_variant_recalibrator_step(
     """
     j = b.new_job('VQSR: SNPsVariantRecalibrator')
 
-    j.image(utils.GATK_DOCKER)
+    j.image(utils.GATK_CONTAINER)
     mem_gb = 64  # ~ twice the sum of all input resources and input VCF sizes
     j.memory(f'{mem_gb}G')
     j.cpu(2)
@@ -884,7 +886,7 @@ def add_snps_gather_tranches_step(
     Returns: a Job object with one output j.out_tranches
     """
     j = b.new_job('VQSR: SNPGatherTranches')
-    j.image(utils.GATK_DOCKER)
+    j.image(utils.GATK_CONTAINER)
     j.memory('8G')
     j.cpu(2)
     j.storage(f'{disk_size}G')
@@ -935,7 +937,7 @@ def add_apply_recalibration_step(
     to a VCF with tranche annotated in the FILTER field
     """
     j = b.new_job('VQSR: ApplyRecalibration')
-    j.image(utils.GATK_DOCKER)
+    j.image(utils.GATK_CONTAINER)
     j.memory('8G')
     j.storage(f'{disk_size}G')
     j.declare_resource_group(
@@ -998,7 +1000,7 @@ def add_collect_metrics_sharded_step(
     j.metrics.detail_metrics and j.metrics.summary_metrics ResourceFiles
     """
     j = b.new_job('VQSR: CollectMetricsSharded')
-    j.image(utils.GATK_DOCKER)
+    j.image(utils.GATK_CONTAINER)
     j.memory('8G')
     j.cpu(2)
     j.storage(f'{disk_size}G')
@@ -1035,7 +1037,7 @@ def _add_final_gather_vcf_step(
     Saves the output VCF to a bucket `output_vcf_path`
     """
     j = b.new_job('VQSR: FinalGatherVcf')
-    j.image(utils.GATK_DOCKER)
+    j.image(utils.GATK_CONTAINER)
     j.memory(f'8G')
     j.storage(f'{disk_size}G')
     j.declare_resource_group(
@@ -1113,7 +1115,7 @@ def _add_variant_eval_step(
     Saves the QC to `output_path` bucket
     """
     j = b.new_job('VQSR: VariantEval')
-    j.image(utils.GATK_DOCKER)
+    j.image(utils.GATK_CONTAINER)
     j.memory(f'8G')
     j.storage(f'{disk_size}G')
 
@@ -1148,7 +1150,7 @@ def add_gather_variant_calling_metrics_step(
     Saves the QC results to a bucket with the `output_path_prefix` prefix
     """
     j = b.new_job('VQSR: GatherVariantCallingMetrics')
-    j.image(utils.GATK_DOCKER)
+    j.image(utils.GATK_CONTAINER)
     j.memory(f'8G')
     j.storage(f'{disk_size}G')
     j.declare_resource_group(
