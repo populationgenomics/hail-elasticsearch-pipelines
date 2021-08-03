@@ -367,13 +367,15 @@ def _pedigree_checks(
         else:
             j = b.new_job(f'Somalier extract, {sn}')
             j.image(utils.SOMALIER_CONTAINER)
-            j.cpu(2)
-            j.memory('highmem')  # ~ 4G/core ~ 8G
+            j.memory('standard')
             if input_path.endswith('.bam'):
+                j.cpu(4)
                 j.storage(f'200G')
             elif input_path.endswith('.cram'):
+                j.cpu(4)
                 j.storage(f'50G')
             else:
+                j.cpu(2)
                 j.storage(f'10G')
             if depends_on:
                 j.depends_on(*depends_on)
@@ -536,7 +538,7 @@ def _make_realign_jobs(
                 bamsormadup_cpu = 4
             else:
                 bazam_cpu = 0
-                bwa_cpu = 24
+                bwa_cpu = 32
                 bamsormadup_cpu = 8
             j.cpu(total_cpu)
             j.memory('standard')
