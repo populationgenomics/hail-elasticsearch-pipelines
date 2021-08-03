@@ -4,12 +4,15 @@ import random
 import sys
 from collections import defaultdict
 
+os.environ['SM_USE_SERVICE_ACCOUNT'] = 'false'
+os.environ['SM_DEV_DB_PROJECT'] = 'vladdev'
+os.environ['SM_ENVIRONMENT'] = 'PRODUCTION'
+
 from models.models.sample import sample_id_format
 from sample_metadata import AnalysisUpdateModel
 from sample_metadata.api import SampleApi, AnalysisApi
 from sample_metadata.models.new_sample import NewSample
 from sample_metadata.models.analysis_model import AnalysisModel
-
 
 PROJ = os.environ.get('SM_DEV_DB_PROJECT', 'sm_dev')
 

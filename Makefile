@@ -84,6 +84,23 @@ run_test_from_cram:
 	--namespace    test \
 	--version      $(TEST_VERSION) \
 	--seqr-dataset $(TEST_DATASET)-from-cram \
+	--cram         'gs://cpg-seqr-test/batches/NA12878-trio/NA1289*.cram' \
+	--cram         'gs://cpg-seqr-test/batches/NA12878-trio/SS6004470.cram' \
+	--ped-file     "gs://cpg-seqr-test/batches/NA12878-trio/NA12878-trio.ped" \
+	--keep-scratch \
+	--reuse
+
+.PHONY: run_test_from_cram_with_realignment
+run_test_from_cram_with_realignment:
+	analysis-runner \
+	--dataset seqr \
+	--access-level test \
+	--output-dir   "datasets/$(TEST_DATASET)/$(TEST_VERSION)" \
+	--description  "seqr loader - $(TEST_DATASET) test - from CRAM with realignment" \
+	batch_seqr_loader/batch_workflow.py \
+	--namespace    test \
+	--version      $(TEST_VERSION) \
+	--seqr-dataset $(TEST_DATASET)-from-cram \
 	--data-to-realign 'gs://cpg-seqr-test/batches/NA12878-trio/NA12878.cram' \
 	--cram         'gs://cpg-seqr-test/batches/NA12878-trio/NA1289*.cram' \
 	--cram         'gs://cpg-seqr-test/batches/NA12878-trio/SS6004470.cram' \
@@ -138,3 +155,12 @@ run_acute_care:
 	--data-to-realign 'gs://cpg-seqr-upload-zornitza-stark/cpg_acute_20210727_185421/200721_A00692_0122_ML206418_20W001106-FAM000553_MAN-20200721_NEXTERAFLEXWGS_*.fastq.gz' \
 	--ped-file     "gs://cpg-seqr-upload-zornitza-stark/cpg_acute-fixed.ped" \
 	--reuse
+
+.PHONY: run_test_sm_workflow
+run_test_sm_workflow:
+	analysis-runner \
+	--dataset seqr \
+	--access-level test \
+	--output-dir   "datasets/run_test_sm_workflow" \
+	--description  "test SM workflow" \
+	batch_seqr_loader/test/test_communicate_with_sm.py
