@@ -163,4 +163,4 @@ run_test_sm_workflow:
 	--access-level test \
 	--output-dir   "datasets/run_test_sm_workflow" \
 	--description  "test SM workflow" \
-	batch_seqr_loader/test/test_communicate_with_sm.py
+	batch_seqr_loader/test/batch_test_simulate_sm_workfow.py

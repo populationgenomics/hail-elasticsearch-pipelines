@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 
+"""
+Simulate communication with the SM server during the workflow
+"""
+
 import os
 import string
 import random
 import sys
 from collections import defaultdict
+from typing import Union, List
 
-os.environ['SM_USE_SERVICE_ACCOUNT'] = 'false'
-os.environ['SM_DEV_DB_PROJECT'] = 'vladdev'
-os.environ['SM_ENVIRONMENT'] = 'PRODUCTION'
-
-from models.models.sample import sample_id_format
 from sample_metadata import AnalysisUpdateModel
 from sample_metadata.api import SampleApi, AnalysisApi
 from sample_metadata.models.new_sample import NewSample
 from sample_metadata.models.analysis_model import AnalysisModel
+
 
 PROJ = os.environ.get('SM_DEV_DB_PROJECT', 'sm_dev')
 
@@ -257,6 +258,50 @@ def test_simulate_joint_calling_pipeline():
         (a['type'], set(sample_id_format(a['sample_ids'])), set(sample_ids))
         for a in analyses
     ]
+
+
+def sample_id_format(sample_id: Union[int, List[int]]):
+    """
+    Transform raw (int) sample identifier to format (CPGXXXH) where:
+        - CPG is the prefix
+        - H is the Luhn checksum
+        - XXX is the original identifier
+
+    >>> sample_id_format(10)
+    'CPG109'
+
+    >>> sample_id_format(12345)
+    'CPG123455'
+    """
+
+    if isinstance(sample_id, list):
+        return [sample_id_format(s) for s in sample_id]
+
+    if isinstance(sample_id, str) and not sample_id.isdigit():
+        if sample_id.startswith('CPG'):
+            return sample_id
+        raise ValueError(f'Unexpected format for sample identifier "{sample_id}"')
+    sample_id = int(sample_id)
+
+    return f'CPG{sample_id}{luhn_compute(sample_id)}'
+
+
+def luhn_compute(n):
+    """
+    Compute Luhn check digit of number given as string
+
+    >>> luhn_compute(453201511283036)
+    6
+
+    >>> luhn_compute(601151443354620)
+    1
+
+    >>> luhn_compute(677154949558680)
+    2
+    """
+    m = [int(d) for d in reversed(str(n))]
+    result = sum(m) + sum(d + (d >= 5) for d in m[::2])
+    return -result % 10
 
 
 if __name__ == '__main__':

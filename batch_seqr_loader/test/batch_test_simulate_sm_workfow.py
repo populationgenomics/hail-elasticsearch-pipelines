@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 
-import hailtop.batch as hb
-from os.path import join, dirname, abspath
+"""
+Submit test_simulate_sm_worklfow.py
+"""
+
 import os
+from os.path import join, dirname, abspath
+import hailtop.batch as hb
 
 
-BAZAM_CONTAINER = f'australia-southeast1-docker.pkg.dev/cpg-common/images/bazam:v2'
-SM_CONTAINER = 'cpg/sample-metadata-server:dev'
+SM_CONTAINER = (
+    'australia-southeast1-docker.pkg.dev/sample-metadata/images/sm-api:latest'
+)
+BAZAM_CONTAINER = 'australia-southeast1-docker.pkg.dev/cpg-common/images/bazam:v2'
 REF_BUCKET = 'gs://cpg-reference/hg38/v1'
 TARGET_BUCKET = 'gs://cpg-seqr-test-tmp/hg38/v1'
 REF_FASTA = join(REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
@@ -14,9 +20,9 @@ TARGET_FASTA = join(TARGET_BUCKET, 'Homo_sapiens_assembly38.fasta')
 
 
 def _make_test_simulate_sm_workflow_job(
-    b: hb.Batch,
+    _b: hb.Batch,
 ):
-    j = b.new_job('Test simulate SM workflow')
+    j = _b.new_job('Test simulate SM workflow')
     j.image(SM_CONTAINER)
 
     with open(join(dirname(abspath(__file__)), 'test_simulate_sm_worklfow.py')) as f:
@@ -35,7 +41,7 @@ python test_simulate_sm_worklfow.py
 
 
 billing_project = os.getenv('HAIL_BILLING_PROJECT') or 'seqr'
-hail_bucket = os.environ.get('HAIL_BUCKET')
+hail_bucket = os.environ['HAIL_BUCKET']
 print(
     f'Starting hail Batch with the project {billing_project}, ' f'bucket {hail_bucket}'
 )
