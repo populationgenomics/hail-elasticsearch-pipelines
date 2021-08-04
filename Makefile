@@ -154,7 +154,8 @@ run_acute_care:
 	--gvcf         'gs://cpg-seqr-upload-zornitza-stark/*.g.vcf.gz' \
 	--data-to-realign 'gs://cpg-seqr-upload-zornitza-stark/cpg_acute_20210727_185421/200721_A00692_0122_ML206418_20W001106-FAM000553_MAN-20200721_NEXTERAFLEXWGS_*.fastq.gz' \
 	--ped-file     "gs://cpg-seqr-upload-zornitza-stark/cpg_acute-fixed.ped" \
-	--reuse
+	--reuse \
+        --keep-scratch
 
 .PHONY: run_test_sm_workflow
 run_test_sm_workflow:

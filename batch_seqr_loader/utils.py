@@ -9,15 +9,15 @@ from google.cloud import storage
 
 
 GATK_VERSION = '4.2.0.0'
-GATK_CONTAINER = (
+GATK_IMAGE = (
     f'australia-southeast1-docker.pkg.dev/cpg-common/images/gatk:{GATK_VERSION}'
 )
-PICARD_CONTAINER = f'us.gcr.io/broad-gotc-prod/picard-cloud:2.23.8'
-BAZAM_CONTAINER = f'australia-southeast1-docker.pkg.dev/cpg-common/images/bazam:v2'
-SOMALIER_CONTAINER = 'brentp/somalier:latest'
-PEDDY_CONTAINER = 'quay.io/biocontainers/peddy:0.4.8--pyh5e36f6f_0'
-GNARLY_DOCKER = 'australia-southeast1-docker.pkg.dev/cpg-common/images/gnarly_genotyper:hail_ukbb_300K'
-BCFTOOLS_DOCKER = (
+PICARD_IMAGE = f'us.gcr.io/broad-gotc-prod/picard-cloud:2.23.8'
+BAZAM_IMAGE = f'australia-southeast1-docker.pkg.dev/cpg-common/images/bazam:v2'
+SOMALIER_IMAGE = 'brentp/somalier:latest'
+PEDDY_IMAGE = 'quay.io/biocontainers/peddy:0.4.8--pyh5e36f6f_0'
+GNARLY_IMAGE = 'australia-southeast1-docker.pkg.dev/cpg-common/images/gnarly_genotyper:hail_ukbb_300K'
+BCFTOOLS_IMAGE = (
     'australia-southeast1-docker.pkg.dev/cpg-common/images/bcftools:1.10.2--h4f4756c_2'
 )
 

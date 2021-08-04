@@ -230,6 +230,7 @@ def main(
         ann=utils.REF_FASTA + '.ann',
         pac=utils.REF_FASTA + '.pac',
     )
+    noalt_regions = b.read_input(join(utils.REF_BUCKET + 'noalt.bed'))
 
     # Aligning available FASTQs
     align_fastq_jobs, samples_df = _make_realign_jobs(
@@ -270,12 +271,13 @@ def main(
             depends_on=align_fastq_jobs + realign_cram_jobs,
         )
 
-    genotype_jobs, samples_df = _make_haplotypecaller_jobs(
+    haplotypecaller_jobs, samples_df = _make_haplotypecaller_jobs(
         b=b,
         samples_df=samples_df,
         reference=reference,
         work_bucket=work_bucket,
         overwrite=overwrite,
+        noalt_regions=noalt_regions,
         depends_on=align_fastq_jobs
         + realign_cram_jobs
         + ([ped_check_j] if ped_check_j else []),
@@ -290,7 +292,7 @@ def main(
         work_bucket=work_bucket,
         local_tmp_dir=local_tmp_dir,
         overwrite=overwrite,
-        depends_on=genotype_jobs,
+        depends_on=haplotypecaller_jobs,
     )
 
     annotated_mt_path = join(dirname(gathered_vcf_path), 'annotated.mt')
@@ -366,7 +368,7 @@ def _pedigree_checks(
             extract_jobs.append(b.new_job(f'Somalier extract, {sn} [reuse]'))
         else:
             j = b.new_job(f'Somalier extract, {sn}')
-            j.image(utils.SOMALIER_CONTAINER)
+            j.image(utils.SOMALIER_IMAGE)
             j.memory('standard')
             if input_path.endswith('.bam'):
                 j.cpu(4)
@@ -398,7 +400,7 @@ def _pedigree_checks(
             extract_jobs.append(j)
 
     relate_j = b.new_job(f'Somalier relate')
-    relate_j.image(utils.SOMALIER_CONTAINER)
+    relate_j.image(utils.SOMALIER_IMAGE)
     relate_j.cpu(1)
     relate_j.memory('standard')  # ~ 4G/core ~ 4G
     # Size of one somalier file is 212K, so we add another G only if the number of
@@ -438,7 +440,7 @@ def _pedigree_checks(
     b.write_output(relate_j.output_html, somalier_html_path)
 
     check_j = b.new_job(f'Check relatedness and sex')
-    check_j.image(utils.PEDDY_CONTAINER)
+    check_j.image(utils.PEDDY_IMAGE)
     check_j.cpu(1)
     check_j.memory('standard')  # ~ 4G/core ~ 4G
     with open(join(dirname(abspath(__file__)), 'check_pedigree.py')) as f:
@@ -471,7 +473,7 @@ def _make_index_jobs(
             file = b.read_input(fpath)
             j = b.new_job(job_name)
             jobs.append(j)
-            j.image(utils.BAZAM_CONTAINER)
+            j.image(utils.BAZAM_IMAGE)
             j.storage(('50G' if fpath.endswith('.cram') else '150G'))
             j.command(f'samtools index {file} {j.output_crai}')
             index_fpath = splitext(fpath)[0] + (
@@ -529,7 +531,7 @@ def _make_realign_jobs(
             )
             j = b.new_job(job_name)
             jobs.append(j)
-            j.image(utils.BAZAM_CONTAINER)
+            j.image(utils.BAZAM_IMAGE)
             total_cpu = 32
             use_bazam = file1.endswith('.cram') or file1.endswith('.bam')
             if use_bazam:
@@ -609,6 +611,7 @@ def _make_haplotypecaller_jobs(
     b: hb.Batch,
     samples_df: pd.DataFrame,
     reference: hb.ResourceGroup,
+    noalt_regions: hb.ResourceFile,
     work_bucket: str,  # pylint: disable=unused-argument
     overwrite: bool,  # pylint: disable=unused-argument
     depends_on: Optional[List[Job]] = None,
@@ -629,7 +632,7 @@ def _make_haplotypecaller_jobs(
         if can_reuse(output_gvcf_path, overwrite):
             merge_gvcf_jobs.append(b.new_job(f'HaplotypeCaller, {sn} [reuse]'))
         else:
-            haplotype_caller_jobs = []
+            per_sample_jobs = []
             if intervals_j is None:
                 intervals_j = _add_split_intervals_job(
                     b,
@@ -640,22 +643,32 @@ def _make_haplotypecaller_jobs(
                 if depends_on:
                     intervals_j.depends_on(*depends_on)
             for idx in range(utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS):
-                haplotype_caller_jobs.append(
-                    _add_haplotype_caller_job(
-                        b,
-                        bam_fpath,
-                        interval=intervals_j.intervals[f'interval_{idx}'],
-                        reference=reference,
-                        sample_name=sn,
-                        interval_idx=idx,
-                        number_of_intervals=utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS,
-                        depends_on=depends_on,
-                    )
+                haplotype_caller_job = _add_haplotype_caller_job(
+                    b,
+                    bam_fpath,
+                    interval=intervals_j.intervals[f'interval_{idx}'],
+                    reference=reference,
+                    sample_name=sn,
+                    interval_idx=idx,
+                    number_of_intervals=utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS,
+                    depends_on=depends_on,
                 )
+                reblock_gvcf_job = _add_reblock_gvcf_job(
+                    b,
+                    haplotype_caller_job.output_gvcf,
+                    overwrite,
+                )
+                subset_to_noalt_job = _add_subset_noalt_step(
+                    b,
+                    reblock_gvcf_job.output_gvcf,
+                    noalt_regions,
+                    overwrite,
+                )
+                per_sample_jobs.append(subset_to_noalt_job)
             merge_gvcf_jobs.append(
                 _add_merge_gvcfs_job(
                     b,
-                    gvcfs=[j.output_gvcf for j in haplotype_caller_jobs],
+                    gvcfs=[j.output_gvcf for j in per_sample_jobs],
                     output_gvcf_path=output_gvcf_path,
                     sample_name=sn,
                 )
@@ -665,6 +678,91 @@ def _make_haplotypecaller_jobs(
         samples_df.loc[sn, 'type'] = 'gvcf'
 
     return merge_gvcf_jobs, samples_df
+
+
+def _add_reblock_gvcf_job(
+    b: hb.Batch,
+    input_gvcf: hb.ResourceGroup,
+    overwrite: bool,
+    output_gvcf_path: Optional[str] = None,
+) -> Job:
+    """
+    Runs ReblockGVCF to annotate with allele-specific VCF INFO fields
+    required for recalibration
+    """
+    job_name = 'ReblockGVCF'
+    if output_gvcf_path and file_exists(output_gvcf_path) and not overwrite:
+        return b.new_job(job_name + ' [reuse]')
+
+    j = b.new_job(job_name)
+    j.image(utils.GATK_IMAGE)
+    mem_gb = 8
+    j.memory(f'{mem_gb}G')
+    j.storage(f'30G')
+    j.declare_resource_group(
+        output_gvcf={
+            'g.vcf.gz': '{root}.g.vcf.gz',
+            'g.vcf.gz.tbi': '{root}.g.vcf.gz.tbi',
+        }
+    )
+
+    j.command(
+        f"""
+    gatk --java-options "-Xms{mem_gb - 1}g" \\
+        ReblockGVCF \\
+        -V {input_gvcf['g.vcf.gz']} \\
+        -do-qual-approx \\
+        -O {j.output_gvcf['g.vcf.gz']} \\
+        --create-output-variant-index true"""
+    )
+    if output_gvcf_path:
+        b.write_output(j.output_gvcf, output_gvcf_path.replace('.g.vcf.gz', ''))
+    return j
+
+
+def _add_subset_noalt_step(
+    b: hb.Batch,
+    input_gvcf: hb.ResourceGroup,
+    noalt_regions: str,
+    overwrite: bool,
+    output_gvcf_path: Optional[str] = None,
+) -> Job:
+    """
+    1. Subset GVCF to main chromosomes to avoid downstream errors
+    2. Removes the DS INFO field that is added to some HGDP GVCFs to avoid errors
+       from Hail about mismatched INFO annotations
+    """
+    job_name = 'SubsetToNoalt'
+    if output_gvcf_path and file_exists(output_gvcf_path) and not overwrite:
+        return b.new_job(job_name + ' [reuse]')
+
+    j = b.new_job(job_name)
+    j.image(utils.BCFTOOLS_IMAGE)
+    mem_gb = 8
+    j.memory(f'{mem_gb}G')
+    j.storage(f'30G')
+    j.declare_resource_group(
+        output_gvcf={
+            'g.vcf.gz': '{root}.g.vcf.gz',
+            'g.vcf.gz.tbi': '{root}.g.vcf.gz.tbi',
+        }
+    )
+    j.command(
+        f"""set -e
+
+    bcftools view \\
+        {input_gvcf['g.vcf.gz']} \\
+        -T {noalt_regions} \\
+        | bcftools annotate -x INFO/DS \\
+        -o {j.output_gvcf['g.vcf.gz']} \\
+        -Oz
+
+    bcftools index --tbi {j.output_gvcf['g.vcf.gz']}
+        """
+    )
+    if output_gvcf_path:
+        b.write_output(j.output_gvcf, output_gvcf_path.replace('.g.vcf.gz', ''))
+    return j
 
 
 def _make_joint_genotype_jobs(
@@ -683,6 +781,14 @@ def _make_joint_genotype_jobs(
     Adds samples to the GenomicsDB and runs joint genotyping on them.
     Outputs a multi-sample VCF under `output_vcf_path`.
     """
+    is_small_callset = len(samples_df) < 1000
+    # 1. For small callsets, we don't apply the ExcessHet filtering.
+    # 2. For small callsets, we gather the VCF shards and collect QC metrics directly.
+    # For anything larger, we need to keep the VCF sharded and gather metrics
+    # collected from them.
+    is_huge_callset = len(samples_df) >= 100000
+    # For huge callsets, we allocate more memory for the SNPs Create Model step
+
     intervals_j = _add_split_intervals_job(
         b,
         utils.UNPADDED_INTERVALS,
@@ -692,19 +798,18 @@ def _make_joint_genotype_jobs(
     if depends_on:
         intervals_j.depends_on(*depends_on)
 
-    genotype_vcf_jobs = []
-    genotyped_vcfs = []
-
     samples_to_be_in_db_per_interval = dict()
+    genomics_gcs_path_per_interval = dict()
+    import_gvcfs_job_per_interval = dict()
     for idx in range(utils.NUMBER_OF_GENOMICS_DB_INTERVALS):
-        genomicsdb_gcs_path = join(
+        genomics_gcs_path_per_interval[idx] = join(
             genomicsdb_bucket,
             f'interval_{idx}_outof_{utils.NUMBER_OF_GENOMICS_DB_INTERVALS}.tar',
         )
 
         import_gvcfs_job, samples_to_be_in_db = _add_import_gvcfs_job(
             b=b,
-            genomicsdb_gcs_path=genomicsdb_gcs_path,
+            genomicsdb_gcs_path=genomics_gcs_path_per_interval[idx],
             samples_df=samples_df,
             work_bucket=work_bucket,
             local_tmp_dir=local_tmp_dir,
@@ -712,31 +817,11 @@ def _make_joint_genotype_jobs(
             interval_idx=idx,
             number_of_intervals=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
         )
-
+        import_gvcfs_job_per_interval[idx] = import_gvcfs_job
         samples_to_be_in_db_per_interval[idx] = samples_to_be_in_db
-        samples_hash = hash_sample_names(samples_to_be_in_db)
-        output_vcf_path = join(
-            work_bucket, 'jointly-called', samples_hash, f'interval_{idx}.vcf.gz'
-        )
-        genotype_vcf_job = _add_gatk_genotype_gvcf_job(
-            b,
-            genomicsdb=b.read_input(genomicsdb_gcs_path),
-            interval=intervals_j.intervals[f'interval_{idx}'],
-            reference=reference,
-            dbsnp=dbsnp,
-            overwrite=overwrite,
-            interval_idx=idx,
-            number_of_samples=len(samples_to_be_in_db),
-            number_of_intervals=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
-            output_vcf_path=output_vcf_path,
-        )
-        if import_gvcfs_job:
-            genotype_vcf_job.depends_on(import_gvcfs_job)
 
-        genotype_vcf_jobs.append(genotype_vcf_job)
-        genotyped_vcfs.append(genotype_vcf_job.output_vcf)
-
-    # We expect each DB to contain the same set of samples
+    # Post-import-genomicsdb check:
+    # we expect each DB to contain the same set of samples
     intervals_per_sample_sets = defaultdict(set)
     for interval_idx, samples_to_be_in_db in samples_to_be_in_db_per_interval.items():
         intervals_per_sample_sets[frozenset(samples_to_be_in_db)].add(interval_idx)
@@ -746,14 +831,63 @@ def _make_joint_genotype_jobs(
             f'set of samples. Got: {intervals_per_sample_sets}'
         )
 
+    make_site_only_jobs = []
+    scattered_vcfs: List[hb.ResourceGroup] = []
+
+    for idx in range(utils.NUMBER_OF_GENOMICS_DB_INTERVALS):
+        samples_hash = hash_sample_names(samples_to_be_in_db_per_interval[idx])
+        site_only_vcf_path = join(
+            work_bucket, 'jointly-called', samples_hash, f'interval_{idx}.vcf.gz'
+        )
+        if site_only_vcf_path and file_exists(site_only_vcf_path) and not overwrite:
+            make_site_only_jobs.append(b.new_job('Joint genotyping [reuse]'))
+            scattered_vcfs[idx] = b.read_input_group(
+                **{
+                    'vcf.gz': site_only_vcf_path,
+                    'vcf.gz.tbi': site_only_vcf_path + '.tbi',
+                }
+            )
+        else:
+            genotype_vcf_job = _add_genotype_gvcfs_job(
+                b,
+                genomicsdb=b.read_input(genomics_gcs_path_per_interval[idx]),
+                interval=intervals_j.intervals[f'interval_{idx}'],
+                reference=reference,
+                dbsnp=dbsnp,
+                overwrite=overwrite,
+                interval_idx=idx,
+                number_of_samples=len(samples_to_be_in_db_per_interval[idx]),
+                number_of_intervals=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
+            )
+            if import_gvcfs_job_per_interval.get(idx):
+                genotype_vcf_job.depends_on(import_gvcfs_job_per_interval.get(idx))
+
+            if not is_small_callset:
+                exccess_filter_job = _add_exccess_het_filter(
+                    b,
+                    input_vcf=genotype_vcf_job.output_vcf,
+                    overwrite=overwrite,
+                    interval=intervals_j.intervals[f'interval_{idx}'],
+                )
+            else:
+                exccess_filter_job = None
+            make_site_only_job = _add_make_sites_only_job(
+                b,
+                input_vcf=(exccess_filter_job or genotype_vcf_job).output_vcf,
+                overwrite=overwrite,
+                interval=intervals_j.intervals[f'interval_{idx}'],
+            )
+            make_site_only_jobs.append(make_site_only_job)
+            scattered_vcfs[idx] = make_site_only_job.output_vcf
+
     samples_to_be_in_db = list(samples_to_be_in_db_per_interval.values())[0]
     samples_hash = hash_sample_names(samples_to_be_in_db)
     gathered_vcf_path = join(
         work_bucket, 'jointly-called', samples_hash, f'gathered.vcf.gz'
     )
-    final_gathered_vcf_job = _add_final_gather_vcf_step(
+    final_gathered_vcf_job = _add_final_gather_vcf_job(
         b,
-        input_vcfs=genotyped_vcfs,
+        input_vcfs=scattered_vcfs,
         overwrite=overwrite,
         output_vcf_path=gathered_vcf_path,
     )
@@ -763,13 +897,14 @@ def _make_joint_genotype_jobs(
     if overwrite or not utils.file_exists(vqsred_vcf_path):
         vqsr_job = make_vqsr_jobs(
             b,
-            input_vcf_path=gathered_vcf_path,
-            gvcf_count=len(samples_df),
+            input_vcf_gathered=gathered_vcf_path,
+            input_vcfs_scattered=scattered_vcfs,
+            is_small_callset=is_small_callset,
+            is_huge_callset=is_huge_callset,
             work_bucket=vqsr_bucket,
             web_bucket=vqsr_bucket,
             depends_on=[final_gathered_vcf_job],
             vqsr_params_d={
-                'min_excess_het': 54.69,
                 'snp_filter_level': 99.7,
                 'indel_filter_level': 99.0,
             },
@@ -795,7 +930,7 @@ def _add_split_intervals_job(
     Returns: a Job object with a single output j.intervals of type ResourceGroup
     """
     j = b.new_job(f'Make {scatter_count} intervals')
-    j.image(utils.GATK_CONTAINER)
+    j.image(utils.GATK_IMAGE)
     java_mem = 3
     j.memory('standard')  # ~ 4G/core ~ 4G
     j.storage('16G')
@@ -842,7 +977,7 @@ def _add_haplotype_caller_job(
         job_name += f', {sample_name} {interval_idx}/{number_of_intervals}'
 
     j = b.new_job(job_name)
-    j.image(utils.GATK_CONTAINER)
+    j.image(utils.GATK_IMAGE)
     j.cpu(2)
     java_mem = 7
     j.memory('standard')  # ~ 4G/core ~ 7.5G
@@ -888,7 +1023,7 @@ def _add_merge_gvcfs_job(
 
     job_name = f'Merge {len(gvcfs)} GVCFs, {sample_name}'
     j = b.new_job(job_name)
-    j.image(utils.PICARD_CONTAINER)
+    j.image(utils.PICARD_IMAGE)
     j.cpu(2)
     java_mem = 7
     j.memory('standard')  # ~ 4G/core ~ 7.5G
@@ -999,7 +1134,7 @@ def _add_import_gvcfs_job(
         job_name += f' {interval_idx}/{number_of_intervals}'
 
     j = b.new_job(job_name)
-    j.image(utils.GATK_CONTAINER)
+    j.image(utils.GATK_IMAGE)
     j.cpu(16)
     java_mem = 14
     j.memory('lowmem')  # ~ 1G/core ~ 14.4G
@@ -1057,7 +1192,7 @@ def _add_import_gvcfs_job(
     return j, samples_will_be_in_db
 
 
-def _add_gatk_genotype_gvcf_job(
+def _add_genotype_gvcfs_job(
     b: hb.Batch,
     genomicsdb: hb.ResourceFile,
     interval: hb.ResourceFile,
@@ -1072,15 +1207,15 @@ def _add_gatk_genotype_gvcf_job(
     """
     Run joint-calling on all samples in a genomics database
     """
-    job_name = 'Joint-genotype'
+    job_name = 'Joint genotyping: GenotypeGVCFs'
     if interval_idx is not None:
         job_name += f' {interval_idx}/{number_of_intervals}'
 
-    if output_vcf_path and file_exists(output_vcf_path) and not overwrite:
+    if output_vcf_path and utils.file_exists(output_vcf_path) and not overwrite:
         return b.new_job(job_name + ' [reuse]')
 
     j = b.new_job(job_name)
-    j.image(utils.GATK_CONTAINER)
+    j.image(utils.GATK_IMAGE)
     j.cpu(2)
     java_mem = 7
     j.memory('standard')  # ~ 4G/core ~ 8G
@@ -1121,7 +1256,174 @@ def _add_gatk_genotype_gvcf_job(
     return j
 
 
-def _add_final_gather_vcf_step(
+def _add_gnarly_genotyper_job(
+    b: hb.Batch,
+    genomicsdb: hb.ResourceFile,
+    reference: hb.ResourceGroup,
+    dbsnp: hb.ResourceGroup,
+    overwrite: bool,
+    number_of_samples: int,
+    interval_idx: Optional[int] = None,
+    number_of_intervals: int = 1,
+    interval: Optional[hb.ResourceGroup] = None,
+    output_vcf_path: Optional[str] = None,
+) -> Job:
+    """
+    Runs GATK GnarlyGenotyper on a combined_gvcf VCF bgzipped file.
+
+    GnarlyGenotyper performs "quick and dirty" joint genotyping on large cohorts,
+    pre-called with HaplotypeCaller, and post-processed with ReblockGVCF.
+
+    HaplotypeCaller must be used with `-ERC GVCF` or `-ERC BP_RESOLUTION` to add
+    genotype likelihoods.
+
+    ReblockGVCF must be run to add all the annotations necessary for VQSR:
+    QUALapprox, VarDP, RAW_MQandDP.
+
+    Returns: a Job object with a single output j.output_vcf of type ResourceGroup
+    """
+    job_name = 'Joint genotyping: GnarlyGenotyper'
+    if interval_idx is not None:
+        job_name += f' {interval_idx}/{number_of_intervals}'
+
+    if output_vcf_path and utils.file_exists(output_vcf_path) and not overwrite:
+        return b.new_job(job_name + ' [reuse]')
+
+    j = b.new_job(job_name)
+    # GnarlyGenotyper crashes with NullPointerException when using standard GATK docker
+    j.image(utils.GNARLY_IMAGE)
+    j.cpu(2)
+    j.memory(f'32G')
+    # 4G (fasta+fai+dict) + 1G per sample divided by the number of intervals
+    j.storage(f'{4 + number_of_samples * 1 // number_of_intervals}G')
+    j.declare_resource_group(
+        output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
+    )
+
+    j.command(
+        f"""set -e
+
+    (while true; do df -h; pwd; free -m; sleep 300; done) &
+
+    tar -xf {genomicsdb}
+
+    df -h; pwd; free -m
+
+    gatk --java-options -Xms8g \\
+      GnarlyGenotyper \\
+      -R {reference.base} \\
+      -O {j.output_vcf['vcf.gz']} \\
+      -D {dbsnp.base} \\
+      --only-output-calls-starting-in-intervals \\
+      --keep-all-sites \\
+      -V gendb://workspace \\
+      {f'-L {interval} ' if interval else ''} \\
+      --create-output-variant-index"""
+    )
+    if output_vcf_path:
+        b.write_output(j.output_vcf, output_vcf_path.replace('.vcf.gz', ''))
+
+    return j
+
+
+def _add_exccess_het_filter(
+    b: hb.Batch,
+    input_vcf: hb.ResourceGroup,
+    overwrite: bool,
+    excess_het_threshold: float = 54.69,
+    interval: Optional[hb.ResourceGroup] = None,
+    output_vcf_path: Optional[str] = None,
+) -> Job:
+    """
+    Filter a large cohort callset on Excess Heterozygosity.
+
+    The filter applies only to large callsets (`not is_small_callset`)
+
+    Requires all samples to be unrelated.
+
+    ExcessHet estimates the probability of the called samples exhibiting excess
+    heterozygosity with respect to the null hypothesis that the samples are unrelated.
+    The higher the score, the higher the chance that the variant is a technical artifact
+    or that there is consanguinuity among the samples. In contrast to Inbreeding
+    Coefficient, there is no minimal number of samples for this annotation.
+
+    Returns: a Job object with a single output j.output_vcf of type ResourceGroup
+    """
+    job_name = 'Joint genotyping: ExcessHet filter'
+    if output_vcf_path and utils.file_exists(output_vcf_path) and not overwrite:
+        return b.new_job(job_name + ' [reuse]')
+
+    j = b.new_job(job_name)
+    j.image(utils.GATK_IMAGE)
+    j.memory('8G')
+    j.storage(f'32G')
+    j.declare_resource_group(
+        output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
+    )
+
+    j.command(
+        f"""set -euo pipefail
+
+    # Captring stderr to avoid Batch pod from crashing with OOM from millions of
+    # warning messages from VariantFiltration, e.g.:
+    # > JexlEngine - ![0,9]: 'ExcessHet > 54.69;' undefined variable ExcessHet
+    gatk --java-options -Xms3g \\
+      VariantFiltration \\
+      --filter-expression 'ExcessHet > {excess_het_threshold}' \\
+      --filter-name ExcessHet \\
+      {f'-L {interval} ' if interval else ''} \\
+      -O {j.output_vcf['vcf.gz']} \\
+      -V {input_vcf['vcf.gz']} \\
+      2> {j.stderr}
+    """
+    )
+    if output_vcf_path:
+        b.write_output(j.output_vcf, output_vcf_path.replace('.vcf.gz', ''))
+
+    return j
+
+
+def _add_make_sites_only_job(
+    b: hb.Batch,
+    input_vcf: hb.ResourceGroup,
+    overwrite: bool,
+    interval: Optional[hb.ResourceGroup] = None,
+    output_vcf_path: Optional[str] = None,
+) -> Job:
+    """
+    Create sites-only VCF with only site-level annotations.
+    Speeds up the analysis in the AS-VQSR modeling step.
+
+    Returns: a Job object with a single output j.sites_only_vcf of type ResourceGroup
+    """
+    job_name = 'Joint genotyping: make sites-only VCF'
+    if output_vcf_path and utils.file_exists(output_vcf_path) and not overwrite:
+        return b.new_job(job_name + ' [reuse]')
+
+    j = b.new_job(job_name)
+    j.image(utils.GATK_IMAGE)
+    j.memory('8G')
+    j.storage(f'32G')
+    j.declare_resource_group(
+        output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
+    )
+
+    j.command(
+        f"""set -euo pipefail
+
+    gatk --java-options -Xms6g \\
+      MakeSitesOnlyVcf \\
+      -I {input_vcf['vcf.gz']} \\
+      -O {j.sites_only_vcf['vcf.gz']} \\
+      {f'-L {interval} ' if interval else ''}"""
+    )
+    if output_vcf_path:
+        b.write_output(j.output_vcf, output_vcf_path.replace('.vcf.gz', ''))
+
+    return j
+
+
+def _add_final_gather_vcf_job(
     b: hb.Batch,
     input_vcfs: List[hb.ResourceGroup],
     overwrite: bool,
@@ -1137,7 +1439,7 @@ def _add_final_gather_vcf_step(
         return b.new_job(job_name + ' [reuse]')
 
     j = b.new_job(job_name)
-    j.image(utils.GATK_CONTAINER)
+    j.image(utils.GATK_IMAGE)
     j.cpu(2)
     java_mem = 7
     j.memory('standard')  # ~ 4G/core ~ 7.5G

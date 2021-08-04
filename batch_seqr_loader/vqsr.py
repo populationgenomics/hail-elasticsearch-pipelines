@@ -64,8 +64,10 @@ INDEL_RECALIBRATION_ANNOTATION_VALUES = [
 
 def make_vqsr_jobs(
     b: hb.Batch,
-    input_vcf_path: str,
-    gvcf_count: int,
+    input_vcf_gathered: str,
+    input_vcfs_scattered: List[hb.ResourceGroup],
+    is_small_callset: bool,
+    is_huge_callset: bool,
     work_bucket: str,
     web_bucket: str,
     depends_on: Optional[List[Job]],
@@ -78,9 +80,11 @@ def make_vqsr_jobs(
     Add jobs that perform the allele-specific VQSR variant QC
 
     :param b: Batch object to add jobs to
-    :param input_vcf_path: path to an input combined VCF
-    :param gvcf_count: number of input samples. Can't read from combined_mt_path as it
-           might not be yet genereated the point of Batch job submission
+    :param input_vcf_gathered: path to an input gathered VCF
+    :param input_vcfs_scattered: list of input VCF scattered and indexed by the
+    interval ID
+    :param is_small_callset: usually < 1k samples
+    :param is_huge_callset: usually > 100k samples
     :param work_bucket: bucket for intermediate files
     :param web_bucket: bucket for plots and evaluation results (exposed via http)
     :param depends_on: job that the created jobs should only run after
@@ -154,57 +158,22 @@ def make_vqsr_jobs(
     )
     dbsnp_resource_vcf = dbsnp_vcf
 
-    is_small_callset = gvcf_count < 1000
-    # 1. For small callsets, we don't apply the ExcessHet filtering.
-    # 2. For small callsets, we gather the VCF shards and collect QC metrics directly.
-    # For anything larger, we need to keep the VCF sharded and gather metrics
-    # collected from them.
-    is_huge_callset = gvcf_count >= 100000
-    # For huge callsets, we allocate more memory for the SNPs Create Model step
-
     small_disk = 30 if is_small_callset else (50 if not is_huge_callset else 100)
     medium_disk = 50 if is_small_callset else (100 if not is_huge_callset else 200)
     huge_disk = 100 if is_small_callset else (500 if not is_huge_callset else 2000)
 
-    tabix_job = add_tabix_step(b, input_vcf_path, medium_disk)
+    tabix_job = add_tabix_step(b, input_vcf_gathered, medium_disk)
     if depends_on:
         tabix_job.depends_on(*depends_on)
-
     gathered_vcf = tabix_job.combined_vcf
-    scattered_vcfs = [gathered_vcf for _ in range(scatter_count)]
 
-    if not is_small_callset:
-        # ExcessHet filtering applies only to callsets with a large number of samples,
-        # e.g. hundreds of unrelated samples. Small cohorts should not trigger ExcessHet
-        # filtering as values should remain small. Note cohorts of consanguinous samples
-        # will inflate ExcessHet, and it is possible to limit the annotation to founders
-        # for such cohorts by providing a pedigree file during variant calling.
-        hard_filtered_vcfs = [
-            add_hard_filter_step(
-                b,
-                input_vcf=gathered_vcf,
-                interval=intervals[f'interval_{idx}'],
-                excess_het_threshold=vqsr_params_d['min_excess_het'],
-                disk_size=medium_disk,
-            ).output_vcf
-            for idx in range(scatter_count)
-        ]
-        scattered_vcfs = hard_filtered_vcfs
-
-        gathered_vcf = add_sites_only_gather_vcf_step(
-            b,
-            input_vcfs=scattered_vcfs,
-            disk_size=medium_disk,
-        ).output_vcf
-
-    indels_variant_recalibrator_job = add_indels_variant_recalibrator_step(
+    indels_variant_recalibrator_job = add_indels_variant_recalibrator_job(
         b,
         sites_only_variant_filtered_vcf=gathered_vcf,
         mills_resource_vcf=mills_resource_vcf,
         axiom_poly_resource_vcf=axiom_poly_resource_vcf,
         dbsnp_resource_vcf=dbsnp_resource_vcf,
         disk_size=small_disk,
-        web_bucket=web_bucket,
         work_bucket=web_bucket,
     )
     indels_recalibration = indels_variant_recalibrator_job.recalibration
@@ -232,12 +201,11 @@ def make_vqsr_jobs(
             is_huge_callset=is_huge_callset,
             max_gaussians=snp_max_gaussians,
         ).model_file
-        # model_file = b.read_input('gs://playground-au/batch/859e9a/18/model_report')
 
         snps_recalibrator_jobs = [
             add_snps_variant_recalibrator_scattered_step(
                 b,
-                sites_only_vcf=scattered_vcfs[idx],
+                sites_only_vcf=input_vcfs_scattered[idx],
                 interval=intervals[f'interval_{idx}'],
                 model_file=model_file,
                 hapmap_resource_vcf=hapmap_resource_vcf,
@@ -260,7 +228,7 @@ def make_vqsr_jobs(
         scattered_vcfs = [
             add_apply_recalibration_step(
                 b,
-                input_vcf=scattered_vcfs[idx],
+                input_vcf=input_vcfs_scattered[idx],
                 interval=intervals[f'interval_{idx}'],
                 indels_recalibration=indels_recalibration,
                 indels_tranches=indels_tranches,
@@ -337,7 +305,7 @@ def add_tabix_step(
     is not block-gzipped)
     """
     j = b.new_job('VQSR: Tabix')
-    j.image(utils.BCFTOOLS_DOCKER)
+    j.image(utils.BCFTOOLS_IMAGE)
     j.memory(f'8G')
     j.storage(f'{disk_size}G')
     j.declare_resource_group(
@@ -366,7 +334,7 @@ def add_split_intervals_step(
     Returns: a Job object with a single output j.intervals of type ResourceGroup
     """
     j = b.new_job('VQSR: SplitIntervals')
-    j.image(utils.GATK_CONTAINER)
+    j.image(utils.GATK_IMAGE)
     mem_gb = 8
     j.memory(f'{mem_gb}G')
     j.storage(f'{disk_size}G')
@@ -394,135 +362,6 @@ def add_split_intervals_step(
     return j
 
 
-def add_gnarly_genotyper_on_vcf_step(
-    b: hb.Batch,
-    combined_gvcf: hb.ResourceGroup,
-    ref_fasta: hb.ResourceGroup,
-    dbsnp_vcf: hb.ResourceGroup,
-    disk_size: int,
-    interval: Optional[hb.ResourceGroup] = None,
-) -> Job:
-    """
-    Runs GATK GnarlyGenotyper on a combined_gvcf VCF bgzipped file.
-
-    GnarlyGenotyper performs "quick and dirty" joint genotyping on large cohorts,
-    pre-called with HaplotypeCaller, and post-processed with ReblockGVCF.
-
-    HaplotypeCaller must be used with `-ERC GVCF` or `-ERC BP_RESOLUTION` to add
-    genotype likelihoods.
-
-    ReblockGVCF must be run to remove low quality variants, as well as to add all the
-    annotations necessary for VQSR: QUALapprox, VarDP, RAW_MQandDP.
-
-    Returns: a Job object with a single output j.output_vcf of type ResourceGroup
-    """
-    j = b.new_job('VQSR: GnarlyGenotyperOnVcf')
-    # GnarlyGenotyper crashes with NullPointerException when using standard GATK docker
-    j.image(utils.GNARLY_DOCKER)
-    j.memory(f'32G')
-    j.storage(f'{disk_size}G')
-    j.declare_resource_group(
-        output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
-    )
-
-    j.command(
-        f"""set -e
-
-    gatk --java-options -Xms8g \\
-      GnarlyGenotyper \\
-      -R {ref_fasta.base} \\
-      -O {j.output_vcf['vcf.gz']} \\
-      -D {dbsnp_vcf.base} \\
-      --only-output-calls-starting-in-intervals \\
-      --keep-all-sites \\
-      -V {combined_gvcf['vcf.gz']} \\
-      {f'-L {interval} ' if interval else ''} \\
-      --create-output-variant-index"""
-    )
-    return j
-
-
-def add_hard_filter_step(
-    b: hb.Batch,
-    input_vcf: hb.ResourceGroup,
-    excess_het_threshold: float,
-    disk_size: int,
-    interval: Optional[hb.ResourceGroup] = None,
-) -> Job:
-    """
-    Hard-filter a large cohort callset on Excess Heterozygosity.
-
-    Applies only to large callsets (`not is_small_callset`)
-
-    Requires all samples to be unrelated.
-
-    ExcessHet estimates the probability of the called samples exhibiting excess
-    heterozygosity with respect to the null hypothesis that the samples are unrelated.
-    The higher the score, the higher the chance that the variant is a technical artifact
-    or that there is consanguinuity among the samples. In contrast to Inbreeding
-    Coefficient, there is no minimal number of samples for this annotation.
-
-    Returns: a Job object with a single output j.output_vcf of type ResourceGroup
-    """
-    j = b.new_job('VQSR: HardFilter')
-    j.image(utils.GATK_CONTAINER)
-    j.memory('8G')
-    j.storage(f'{disk_size}G')
-    j.declare_resource_group(
-        output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
-    )
-
-    j.command(
-        f"""set -euo pipefail
-
-    # Captring stderr to avoid Batch pod from crashing with OOM from millions of
-    # warning messages from VariantFiltration, e.g.:
-    # > JexlEngine - ![0,9]: 'ExcessHet > 54.69;' undefined variable ExcessHet
-    gatk --java-options -Xms3g \\
-      VariantFiltration \\
-      --filter-expression 'ExcessHet > {excess_het_threshold}' \\
-      --filter-name ExcessHet \\
-      {f'-L {interval} ' if interval else ''} \\
-      -O {j.output_vcf['vcf.gz']} \\
-      -V {input_vcf['vcf.gz']} \\
-      2> {j.stderr}
-    """
-    )
-    return j
-
-
-def add_make_sites_only_vcf_step(
-    b: hb.Batch,
-    input_vcf: hb.ResourceGroup,
-    disk_size: int,
-    interval: Optional[hb.ResourceGroup] = None,
-) -> Job:
-    """
-    Create sites-only VCF with only site-level annotations.
-    Speeds up the analysis in the modeling step.
-
-    Returns: a Job object with a single output j.sites_only_vcf of type ResourceGroup
-    """
-    j = b.new_job('VQSR: MakeSitesOnlyVcf')
-    j.image(utils.GATK_CONTAINER)
-    j.memory('8G')
-    j.storage(f'{disk_size}G')
-    j.declare_resource_group(
-        sites_only_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
-    )
-
-    j.command(
-        f"""set -euo pipefail
-
-    gatk --java-options -Xms6g \\
-      MakeSitesOnlyVcf \\
-      -I {input_vcf['vcf.gz']} \\
-      -O {j.sites_only_vcf['vcf.gz']} \\
-      {f'-L {interval} ' if interval else ''}"""
-    )
-    return j
-
-
 def add_sites_only_gather_vcf_step(
     b: hb.Batch,
     input_vcfs: List[hb.ResourceFile],
@@ -534,7 +373,7 @@ def add_sites_only_gather_vcf_step(
     Returns: a Job object with a single output j.output_vcf of type ResourceGroup
     """
     j = b.new_job('VQSR: SitesOnlyGatherVcf')
-    j.image(utils.GATK_CONTAINER)
+    j.image(utils.GATK_IMAGE)
     j.memory('8G')
     j.storage(f'{disk_size}G')
 
@@ -562,14 +401,13 @@ def add_sites_only_gather_vcf_step(
     return j
 
 
-def add_indels_variant_recalibrator_step(
+def add_indels_variant_recalibrator_job(
     b: hb.Batch,
     sites_only_variant_filtered_vcf: hb.ResourceGroup,
     mills_resource_vcf: hb.ResourceGroup,
     axiom_poly_resource_vcf: hb.ResourceGroup,
     dbsnp_resource_vcf: hb.ResourceGroup,
     disk_size: int,
-    web_bucket: str = None,
     work_bucket: str = None,
     max_gaussians: int = 4,
 ) -> Job:
@@ -586,7 +424,7 @@ def add_indels_variant_recalibrator_step(
     and j.indel_rscript_file. The latter is usedful to produce the optional tranche plot.
     """
     j = b.new_job('VQSR: IndelsVariantRecalibrator')
-    j.image(utils.GATK_CONTAINER)
+    j.image(utils.GATK_IMAGE)
     mem_gb = 32
     j.memory(f'{mem_gb}G')
     j.cpu(2)
@@ -664,7 +502,7 @@ def add_snps_variant_recalibrator_create_model_step(
     The latter is useful to produce the optional tranche plot.
     """
     j = b.new_job('VQSR: SNPsVariantRecalibratorCreateModel')
-    j.image(utils.GATK_CONTAINER)
+    j.image(utils.GATK_IMAGE)
     mem_gb = 64 if not is_small_callset else 128
     j.memory(f'{mem_gb}G')
     j.cpu(2)
@@ -753,7 +591,7 @@ def add_snps_variant_recalibrator_scattered_step(
     """
     j = b.new_job('VQSR: SNPsVariantRecalibratorScattered')
 
-    j.image(utils.GATK_CONTAINER)
+    j.image(utils.GATK_IMAGE)
     mem_gb = 64  # ~ twice the sum of all input resources and input VCF sizes
     j.memory(f'{mem_gb}G')
     j.cpu(2)
@@ -806,7 +644,7 @@ def add_snps_variant_recalibrator_step(
     """
     j = b.new_job('VQSR: SNPsVariantRecalibrator')
 
-    j.image(utils.GATK_CONTAINER)
+    j.image(utils.GATK_IMAGE)
     mem_gb = 64  # ~ twice the sum of all input resources and input VCF sizes
     j.memory(f'{mem_gb}G')
     j.cpu(2)
@@ -879,7 +717,7 @@ def add_snps_gather_tranches_step(
     Returns: a Job object with one output j.out_tranches
     """
     j = b.new_job('VQSR: SNPGatherTranches')
-    j.image(utils.GATK_CONTAINER)
+    j.image(utils.GATK_IMAGE)
     j.memory('8G')
     j.cpu(2)
     j.storage(f'{disk_size}G')
@@ -930,7 +768,7 @@ def add_apply_recalibration_step(
     to a VCF with tranche annotated in the FILTER field
     """
     j = b.new_job('VQSR: ApplyRecalibration')
-    j.image(utils.GATK_CONTAINER)
+    j.image(utils.GATK_IMAGE)
     j.memory('8G')
     j.storage(f'{disk_size}G')
     j.declare_resource_group(
@@ -993,7 +831,7 @@ def add_collect_metrics_sharded_step(
     j.metrics.detail_metrics and j.metrics.summary_metrics ResourceFiles
     """
     j = b.new_job('VQSR: CollectMetricsSharded')
-    j.image(utils.GATK_CONTAINER)
+    j.image(utils.GATK_IMAGE)
     j.memory('8G')
     j.cpu(2)
     j.storage(f'{disk_size}G')
@@ -1030,7 +868,7 @@ def _add_final_gather_vcf_step(
     Saves the output VCF to a bucket `output_vcf_path`
     """
     j = b.new_job('VQSR: FinalGatherVcf')
-    j.image(utils.GATK_CONTAINER)
+    j.image(utils.GATK_IMAGE)
     j.memory(f'8G')
     j.storage(f'{disk_size}G')
     j.declare_resource_group(
@@ -1078,7 +916,7 @@ def _add_filter_sb_step(
     It breaks parsing the VCF into Hail.
     """
     j = b.new_job('VQSR: Remove SB')
-    j.image(utils.BCFTOOLS_DOCKER)
+    j.image(utils.BCFTOOLS_IMAGE)
     j.memory(f'8G')
     j.storage(f'{disk_size}G')
     j.declare_resource_group(
@@ -1108,7 +946,7 @@ def _add_variant_eval_step(
     Saves the QC to `output_path` bucket
     """
     j = b.new_job('VQSR: VariantEval')
-    j.image(utils.GATK_CONTAINER)
+    j.image(utils.GATK_IMAGE)
     j.memory(f'8G')
     j.storage(f'{disk_size}G')
 
@@ -1143,7 +981,7 @@ def add_gather_variant_calling_metrics_step(
     Saves the QC results to a bucket with the `output_path_prefix` prefix
     """
     j = b.new_job('VQSR: GatherVariantCallingMetrics')
-    j.image(utils.GATK_CONTAINER)
+    j.image(utils.GATK_IMAGE)
     j.memory(f'8G')
     j.storage(f'{disk_size}G')
     j.declare_resource_group(
