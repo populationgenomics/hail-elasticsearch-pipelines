@@ -271,7 +271,7 @@ def main(
             depends_on=align_fastq_jobs + realign_cram_jobs,
         )
 
-    haplotypecaller_jobs, samples_df = _make_haplotypecaller_jobs(
+    produce_gvcf_jobs, samples_df = _make_produce_gvcfs_jobs(
         b=b,
         samples_df=samples_df,
         reference=reference,
@@ -292,7 +292,7 @@ def main(
         work_bucket=work_bucket,
         local_tmp_dir=local_tmp_dir,
         overwrite=overwrite,
-        depends_on=haplotypecaller_jobs,
+        depends_on=produce_gvcf_jobs,
     )
 
     annotated_mt_path = join(dirname(gathered_vcf_path), 'annotated.mt')
@@ -607,7 +607,7 @@ df -h; pwd; du -sh $(dirname {j.output_cram.cram})
     return jobs, samples_df
 
 
-def _make_haplotypecaller_jobs(
+def _make_produce_gvcfs_jobs(
     b: hb.Batch,
     samples_df: pd.DataFrame,
     reference: hb.ResourceGroup,
@@ -624,15 +624,13 @@ def _make_haplotypecaller_jobs(
     HaplotypeCaller jobs defined in a nested loop.
     """
     intervals_j = None
-
-    merge_gvcf_jobs = []
-    bams_df = samples_df[samples_df['type'] == 'cram']
-    for sn, bam_fpath in zip(bams_df['s'], bams_df['file']):
-        output_gvcf_path = join(work_bucket, f'{sn}.g.vcf.gz')
-        if can_reuse(output_gvcf_path, overwrite):
-            merge_gvcf_jobs.append(b.new_job(f'HaplotypeCaller, {sn} [reuse]'))
+    merge_gvcf_job_by_sn = dict()
+    cram_df = samples_df[samples_df['type'] == 'cram']
+    for sn, bam_fpath in zip(cram_df['s'], cram_df['file']):
+        called_gvcf_path = join(work_bucket, 'raw', f'{sn}.g.vcf.gz')
+        if can_reuse(called_gvcf_path, overwrite):
+            j = b.new_job(f'HaplotypeCaller, {sn} [reuse]')
         else:
-            per_sample_jobs = []
             if intervals_j is None:
                 intervals_j = _add_split_intervals_job(
                     b,
@@ -642,42 +640,54 @@ def _make_haplotypecaller_jobs(
                 )
                 if depends_on:
                     intervals_j.depends_on(*depends_on)
+            haplotype_caller_jobs = []
             for idx in range(utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS):
-                haplotype_caller_job = _add_haplotype_caller_job(
-                    b,
-                    bam_fpath,
-                    interval=intervals_j.intervals[f'interval_{idx}'],
-                    reference=reference,
-                    sample_name=sn,
-                    interval_idx=idx,
-                    number_of_intervals=utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS,
-                    depends_on=depends_on,
+                haplotype_caller_jobs.append(
+                    _add_haplotype_caller_job(
+                        b,
+                        bam_fpath,
+                        interval=intervals_j.intervals[f'interval_{idx}'],
+                        reference=reference,
+                        sample_name=sn,
+                        interval_idx=idx,
+                        number_of_intervals=utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS,
+                        depends_on=depends_on,
+                    )
                 )
-                reblock_gvcf_job = _add_reblock_gvcf_job(
-                    b,
-                    haplotype_caller_job.output_gvcf,
-                    overwrite,
-                )
-                subset_to_noalt_job = _add_subset_noalt_step(
-                    b,
-                    reblock_gvcf_job.output_gvcf,
-                    noalt_regions,
-                    overwrite,
-                )
-                per_sample_jobs.append(subset_to_noalt_job)
-            merge_gvcf_jobs.append(
-                _add_merge_gvcfs_job(
-                    b,
-                    gvcfs=[j.output_gvcf for j in per_sample_jobs],
-                    output_gvcf_path=output_gvcf_path,
-                    sample_name=sn,
-                )
+            j = _add_merge_gvcfs_job(
+                b,
+                gvcfs=[j.output_gvcf for j in haplotype_caller_jobs],
+                output_gvcf_path=called_gvcf_path,
+                sample_name=sn,
             )
-        samples_df.loc[sn, 'file'] = output_gvcf_path
-        samples_df.loc[sn, 'index'] = output_gvcf_path + '.tbi'
+        merge_gvcf_job_by_sn[sn] = j
+        samples_df.loc[sn, 'file'] = called_gvcf_path
+        samples_df.loc[sn, 'index'] = called_gvcf_path + '.tbi'
         samples_df.loc[sn, 'type'] = 'gvcf'
 
-    return merge_gvcf_jobs, samples_df
+    gvcf_df = samples_df[samples_df['type'] == 'gvcf']
+    jobs = []
+    for sn, gvcf_fpath in zip(gvcf_df['s'], gvcf_df['file']):
+        called_gvcf_path = join(work_bucket, f'{sn}.g.vcf.gz')
+        reblock_gvcf_job = _add_reblock_gvcf_job(
+            b,
+            gvcf_fpath,
+            overwrite,
+        )
+        if merge_gvcf_job_by_sn.get(sn):
+            reblock_gvcf_job.depends_on(merge_gvcf_job_by_sn[sn])
+        subset_to_noalt_job = _add_subset_noalt_step(
+            b,
+            reblock_gvcf_job.output_gvcf,
+            noalt_regions,
+            overwrite,
+        )
+        jobs.append(subset_to_noalt_job)
+        samples_df.loc[sn, 'file'] = called_gvcf_path
+        samples_df.loc[sn, 'index'] = called_gvcf_path + '.tbi'
+        samples_df.loc[sn, 'type'] = 'gvcf'
+
+    return jobs, samples_df
 
 
 def _add_reblock_gvcf_job(
@@ -967,6 +977,8 @@ def _add_haplotype_caller_job(
     interval_idx: Optional[int] = None,
     number_of_intervals: int = 1,
     depends_on: Optional[List[Job]] = None,
+    output_gvcf_path: Optional[str] = None,
+    overwrite: bool = False,
 ) -> Job:
     """
     Run HaplotypeCaller on an input BAM or CRAM, and output GVCF
@@ -974,6 +986,8 @@ def _add_haplotype_caller_job(
     job_name = 'HaplotypeCaller'
     if interval_idx is not None:
         job_name += f', {sample_name} {interval_idx}/{number_of_intervals}'
+    if output_gvcf_path and not overwrite and utils.file_exists(output_gvcf_path):
+        return b.new_job(f'{job_name} [reuse]')
 
     j = b.new_job(job_name)
     j.image(utils.GATK_IMAGE)
@@ -1007,6 +1021,8 @@ def _add_haplotype_caller_job(
     df -h; pwd; du -sh $(dirname {j.output_gvcf['g.vcf.gz']}); free -m
     """
     )
+    if output_gvcf_path:
+        b.write_output(j.output_gvcf, j.output_gvcf)
     return j
 
 
