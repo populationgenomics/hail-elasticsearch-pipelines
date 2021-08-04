@@ -35,6 +35,27 @@ def test_simulate_joint_calling_pipeline():
         ),
     )
     print(f'Test run ID: {test_run_id}')
+    sapi = SampleApi()
+    print('sapi = SampleApi()')
+    s1 = NewSample(
+        external_id=f'NA12878-from-fq-{test_run_id}',
+        type='blood',
+        meta={
+            'reads': [
+                [
+                    'gs://cpg-seqr-test/batches/NA12878-trio-tiny/NA12878_L001_R1.fq',
+                    'gs://cpg-seqr-test/batches/NA12878-trio-tiny/NA12878_L002_R1.fq',
+                ],
+                [
+                    'gs://cpg-seqr-test/batches/NA12878-trio-tiny/NA12878_L001_R2.fq',
+                    'gs://cpg-seqr-test/batches/NA12878-trio-tiny/NA12878_L002_R2.fq',
+                ],
+            ]
+        },
+    )
+    print('s1 = NewSample(')
+    sample_id = sapi.create_new_sample(PROJ, s1)
+    print(f'Created {sample_id}')
 
 
 if __name__ == '__main__':
