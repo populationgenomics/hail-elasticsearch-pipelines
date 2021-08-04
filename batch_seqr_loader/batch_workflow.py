@@ -626,7 +626,9 @@ def _make_produce_gvcfs_jobs(
     intervals_j = None
     merge_gvcf_job_by_sn = dict()
     cram_df = samples_df[samples_df['type'] == 'cram']
-    for sn, bam_fpath, index_fpath in zip(cram_df['s'], cram_df['file'], cram_df['index']):
+    for sn, bam_fpath, index_fpath in zip(
+        cram_df['s'], cram_df['file'], cram_df['index']
+    ):
         called_gvcf_path = join(work_bucket, 'raw', f'{sn}.g.vcf.gz')
         if can_reuse(called_gvcf_path, overwrite):
             j = b.new_job(f'HaplotypeCaller, {sn} [reuse]')
@@ -645,7 +647,9 @@ def _make_produce_gvcfs_jobs(
                 haplotype_caller_jobs.append(
                     _add_haplotype_caller_job(
                         b,
-                        cram=b.read_input_group(**{'cram': bam_fpath, 'cram.crai': index_fpath}),
+                        cram=b.read_input_group(
+                            **{'cram': bam_fpath, 'cram.crai': index_fpath}
+                        ),
                         interval=intervals_j.intervals[f'interval_{idx}'],
                         reference=reference,
                         sample_name=sn,
@@ -667,11 +671,15 @@ def _make_produce_gvcfs_jobs(
 
     gvcf_df = samples_df[samples_df['type'] == 'gvcf']
     jobs = []
-    for sn, gvcf_fpath, tbi_path in zip(gvcf_df['s'], gvcf_df['file'], gvcf_df['index']):
+    for sn, gvcf_fpath, tbi_path in zip(
+        gvcf_df['s'], gvcf_df['file'], gvcf_df['index']
+    ):
         called_gvcf_path = join(work_bucket, f'{sn}.g.vcf.gz')
         reblock_gvcf_job = _add_reblock_gvcf_job(
             b,
-            input_gvcf=b.read_input_group(**{'g.vcf.gz': gvcf_fpath, 'g.vcf.gz.tbi': tbi_path}),
+            input_gvcf=b.read_input_group(
+                **{'g.vcf.gz': gvcf_fpath, 'g.vcf.gz.tbi': tbi_path}
+            ),
             overwrite=overwrite,
         )
         if merge_gvcf_job_by_sn.get(sn):
@@ -995,7 +1003,7 @@ def _add_haplotype_caller_job(
     j.cpu(2)
     java_mem = 7
     j.memory('standard')  # ~ 4G/core ~ 7.5G
-    j.storage('8G')
+    j.storage('60G')
     j.declare_resource_group(
         output_gvcf={
             'g.vcf.gz': '{root}-' + sample_name + '.g.vcf.gz',
