@@ -16,7 +16,7 @@ import tempfile
 import hashlib
 from collections import defaultdict
 from os.path import join, dirname, abspath, splitext
-from typing import Optional, List, Tuple, Set, Iterable
+from typing import Optional, List, Tuple, Set, Iterable, Dict
 import pandas as pd
 import click
 import hailtop.batch as hb
@@ -832,7 +832,7 @@ def _make_joint_genotype_jobs(
         )
 
     make_site_only_jobs = []
-    scattered_vcfs: List[hb.ResourceGroup] = []
+    scattered_vcf_by_interval: Dict[int, hb.ResourceGroup] = dict()
 
     for idx in range(utils.NUMBER_OF_GENOMICS_DB_INTERVALS):
         samples_hash = hash_sample_names(samples_to_be_in_db_per_interval[idx])
@@ -841,7 +841,7 @@ def _make_joint_genotype_jobs(
         )
         if site_only_vcf_path and file_exists(site_only_vcf_path) and not overwrite:
             make_site_only_jobs.append(b.new_job('Joint genotyping [reuse]'))
-            scattered_vcfs[idx] = b.read_input_group(
+            scattered_vcf_by_interval[idx] = b.read_input_group(
                 **{
                     'vcf.gz': site_only_vcf_path,
                     'vcf.gz.tbi': site_only_vcf_path + '.tbi',
@@ -878,7 +878,7 @@ def _make_joint_genotype_jobs(
                 interval=intervals_j.intervals[f'interval_{idx}'],
             )
             make_site_only_jobs.append(make_site_only_job)
-            scattered_vcfs[idx] = make_site_only_job.output_vcf
+            scattered_vcf_by_interval[idx] = make_site_only_job.output_vcf
 
     samples_to_be_in_db = list(samples_to_be_in_db_per_interval.values())[0]
     samples_hash = hash_sample_names(samples_to_be_in_db)
@@ -887,7 +887,7 @@ def _make_joint_genotype_jobs(
     )
     final_gathered_vcf_job = _add_final_gather_vcf_job(
         b,
-        input_vcfs=scattered_vcfs,
+        input_vcfs=list(scattered_vcf_by_interval.values()),
         overwrite=overwrite,
         output_vcf_path=gathered_vcf_path,
     )
@@ -898,7 +898,7 @@ def _make_joint_genotype_jobs(
         vqsr_job = make_vqsr_jobs(
             b,
             input_vcf_gathered=gathered_vcf_path,
-            input_vcfs_scattered=scattered_vcfs,
+            input_vcfs_scattered=list(scattered_vcf_by_interval.values()),
             is_small_callset=is_small_callset,
             is_huge_callset=is_huge_callset,
             work_bucket=vqsr_bucket,
