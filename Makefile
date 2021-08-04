@@ -1,4 +1,4 @@
-TEST_VERSION := v1-9
+TEST_VERSION := v1-11
 TEST_DATASET := na12878-trio
 
 ACUTE_CARE_DATASET := acute-care

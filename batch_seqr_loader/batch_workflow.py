@@ -671,16 +671,17 @@ def _make_produce_gvcfs_jobs(
         called_gvcf_path = join(work_bucket, f'{sn}.g.vcf.gz')
         reblock_gvcf_job = _add_reblock_gvcf_job(
             b,
-            b.read_input_group(**{'g.vcf.gz': gvcf_fpath, 'g.vcf.gz.tbi': tbi_path}),
-            overwrite,
+            input_gvcf=b.read_input_group(**{'g.vcf.gz': gvcf_fpath, 'g.vcf.gz.tbi': tbi_path}),
+            overwrite=overwrite,
         )
         if merge_gvcf_job_by_sn.get(sn):
             reblock_gvcf_job.depends_on(merge_gvcf_job_by_sn[sn])
         subset_to_noalt_job = _add_subset_noalt_step(
             b,
-            reblock_gvcf_job.output_gvcf,
-            noalt_regions,
-            overwrite,
+            input_gvcf=reblock_gvcf_job.output_gvcf,
+            noalt_regions=noalt_regions,
+            overwrite=overwrite,
+            output_gvcf_path=called_gvcf_path,
         )
         jobs.append(subset_to_noalt_job)
         samples_df.loc[sn, 'file'] = called_gvcf_path
