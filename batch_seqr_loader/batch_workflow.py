@@ -875,7 +875,6 @@ def _make_joint_genotype_jobs(
                 b,
                 input_vcf=vcf,
                 overwrite=overwrite,
-                interval=intervals_j.intervals[f'interval_{idx}'],
             )
             make_site_only_jobs.append(make_site_only_job)
             scattered_vcf_by_interval[idx] = make_site_only_job.output_vcf
@@ -1387,7 +1386,6 @@ def _add_make_sites_only_job(
     b: hb.Batch,
     input_vcf: hb.ResourceGroup,
     overwrite: bool,
-    interval: Optional[hb.ResourceGroup] = None,
     output_vcf_path: Optional[str] = None,
 ) -> Job:
     """
@@ -1408,15 +1406,13 @@ def _add_make_sites_only_job(
         output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
     )
 
-    print(input_vcf)
     j.command(
         f"""set -euo pipefail
 
     gatk --java-options -Xms6g \\
       MakeSitesOnlyVcf \\
       -I {input_vcf['vcf.gz']} \\
-      -O {j.output_vcf['vcf.gz']} \\
-      {f'-L {interval} ' if interval else ''}
+      -O {j.output_vcf['vcf.gz']}
       """
     )
     if output_vcf_path:
