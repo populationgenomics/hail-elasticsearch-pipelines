@@ -862,18 +862,18 @@ def _make_joint_genotype_jobs(
             if import_gvcfs_job_per_interval.get(idx):
                 genotype_vcf_job.depends_on(import_gvcfs_job_per_interval.get(idx))
 
+            vcf = genotype_vcf_job.output_vcf
             if not is_small_callset:
                 exccess_filter_job = _add_exccess_het_filter(
                     b,
-                    input_vcf=genotype_vcf_job.output_vcf,
+                    input_vcf=vcf,
                     overwrite=overwrite,
                     interval=intervals_j.intervals[f'interval_{idx}'],
                 )
-            else:
-                exccess_filter_job = None
+                vcf = exccess_filter_job.output_vcf
             make_site_only_job = _add_make_sites_only_job(
                 b,
-                input_vcf=(exccess_filter_job or genotype_vcf_job).output_vcf,
+                input_vcf=vcf,
                 overwrite=overwrite,
                 interval=intervals_j.intervals[f'interval_{idx}'],
             )
@@ -1408,14 +1408,16 @@ def _add_make_sites_only_job(
         output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
     )
 
+    print(input_vcf)
     j.command(
         f"""set -euo pipefail
 
     gatk --java-options -Xms6g \\
       MakeSitesOnlyVcf \\
       -I {input_vcf['vcf.gz']} \\
-      -O {j.sites_only_vcf['vcf.gz']} \\
-      {f'-L {interval} ' if interval else ''}"""
+      -O {j.output_vcf['vcf.gz']} \\
+      {f'-L {interval} ' if interval else ''}
+      """
     )
     if output_vcf_path:
         b.write_output(j.output_vcf, output_vcf_path.replace('.vcf.gz', ''))
