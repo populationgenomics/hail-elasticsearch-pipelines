@@ -23,7 +23,7 @@ def _make_test_simulate_sm_workflow_job(
     j = _b.new_job('Test simulate SM workflow')
     j.image(SM_CONTAINER)
 
-    with open(join(dirname(abspath(__file__)), 'test_simulate_sm_worklfow.py')) as f:
+    with open(join(dirname(abspath(__file__)), 'test_sm.py')) as f:
         script = f.read()
     j.command(
         f"""set -e
