@@ -27,7 +27,7 @@ def _make_test_simulate_sm_workflow_job(
         script = f.read()
     j.command(
         f"""set -e
-gcloud -q auth activate-service-account --key-file=/gsa-key/key.json
+gcloud -q auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
         
 cat <<EOT >> test_simulate_sm_worklfow.py
 {script}
@@ -38,6 +38,7 @@ export SM_ENVIRONMENT=PRODUCTION
 python test_simulate_sm_worklfow.py
     """
     )
+    j.env('GOOGLE_APPLICATION_CREDENTIALS', '/gsa-key/key.json')
 
 
 billing_project = os.getenv('HAIL_BILLING_PROJECT') or 'seqr'
