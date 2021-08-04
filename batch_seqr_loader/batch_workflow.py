@@ -1020,7 +1020,7 @@ def _add_haplotype_caller_job(
     gatk --java-options "-Xms{java_mem}g -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10" \\
       HaplotypeCaller \\
       -R {reference.base} \\
-      -I {cram} \\
+      -I {cram['cram']} \\
       -L {interval} \\
       -O {j.output_gvcf['g.vcf.gz']} \\
       -G StandardAnnotation -G StandardHCAnnotation -G AS_StandardAnnotation \\
