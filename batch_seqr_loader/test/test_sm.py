@@ -222,9 +222,9 @@ def test_simulate_joint_calling_pipeline():
     # print('Add/update analyses, reads -> cram')
     # _jc_pipeline_submit_analyses()
     # print()
-    _jc_pipeline_set_in_progress()
+    # _jc_pipeline_set_in_progress()
     # print()
-    # _jc_pipeline_set_completed()
+    _jc_pipeline_set_completed()
     # print()
     #
     # print('Add/update analyses, cram -> gvcf')
