@@ -230,7 +230,7 @@ def main(
         ann=utils.REF_FASTA + '.ann',
         pac=utils.REF_FASTA + '.pac',
     )
-    noalt_regions = b.read_input(join(utils.REF_BUCKET + 'noalt.bed'))
+    noalt_regions = b.read_input(join(utils.REF_BUCKET, 'noalt.bed'))
 
     # Aligning available FASTQs
     align_fastq_jobs, samples_df = _make_realign_jobs(
