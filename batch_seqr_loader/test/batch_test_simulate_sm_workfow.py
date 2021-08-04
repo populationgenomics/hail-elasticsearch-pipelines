@@ -30,7 +30,7 @@ def _make_test_simulate_sm_workflow_job(
 cat <<EOT >> test_simulate_sm_worklfow.py
 {script}
 EOT
-export SM_USE_SERVICE_ACCOUNT=false
+export SM_USE_SERVICE_ACCOUNT=true
 export SM_DEV_DB_PROJECT=vladdev
 export SM_ENVIRONMENT=PRODUCTION
 python test_simulate_sm_worklfow.py

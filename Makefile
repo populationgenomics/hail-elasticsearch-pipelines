@@ -2,7 +2,7 @@ TEST_VERSION := v1-7
 TEST_DATASET := na12878-trio
 
 ACUTE_CARE_DATASET := acute-care
-ACUTE_CARE_VERSION := v1-0
+ACUTE_CARE_VERSION := v1-1
 
 .PHONY: package
 package:
