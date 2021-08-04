@@ -7,7 +7,6 @@ Simulate communication with the SM server during the workflow
 import os
 import string
 import random
-import sys
 from collections import defaultdict
 from typing import Union, List
 
@@ -65,13 +64,10 @@ def _jc_pipeline_submit_analyses():
 
     # If there are incomplete analyses, throw an error
     aapi = AnalysisApi()
-    analyses = aapi.get_incomplete_analyses(project=PROJ)
-    if analyses:
-        print(f'ERROR: found incomplete or queued analysis: {analyses}')
-        sys.exit()
-
-    # TODO: for samples with finished joint-calling, latest-completed will return joint-calling.
-    # so on reruns, pipelien will redo haploytype calling. We want to avoid that.
+    # analyses = aapi.get_incomplete_analyses(project=PROJ)
+    # if analyses:
+    #     print(f'ERROR: found incomplete or queued analysis: {analyses}')
+    #     sys.exit()
 
     # Get the list of latest complete analyses
     latest_complete_analyses = aapi.get_latest_complete_analyses(project=PROJ)
