@@ -8,6 +8,7 @@ import os
 import string
 import random
 from collections import defaultdict
+from datetime import datetime
 from typing import Union, List
 
 from sample_metadata import AnalysisUpdateModel
@@ -212,33 +213,39 @@ def test_simulate_joint_calling_pipeline():
             random.choice(string.ascii_uppercase + string.digits) for _ in range(6)
         ),
     )
-    print(f'Test run ID: {test_run_id}')
+    print(f'{datetime.now()} Test run ID: {test_run_id}')
 
-    print(f'Populate samples for test run {test_run_id}')
+    print(f'{datetime.now()} Populate samples for test run {test_run_id}')
     sample_ids = _jc_pipeline_add_samples(test_run_id)
     print()
 
-    print('Add/update analyses, reads -> cram')
+    print(f'{datetime.now()} Add/update analyses, reads -> cram')
     _jc_pipeline_submit_analyses()
     print()
+    print(f'{datetime.now()} Set to in progress')
     _jc_pipeline_set_in_progress()
     print()
+    print(f'{datetime.now()} Set to completed')
     _jc_pipeline_set_completed()
     print()
 
-    print('Add/update analyses, cram -> gvcf')
+    print(f'{datetime.now()} Add/update analyses, cram -> gvcf')
     _jc_pipeline_submit_analyses()
     print()
+    print(f'{datetime.now()} Set to in progress')
     _jc_pipeline_set_in_progress()
     print()
+    print(f'{datetime.now()} Set to completed')
     _jc_pipeline_set_completed()
     print()
 
     print('Add/update analyses, gvcf -> joint-calling')
     _jc_pipeline_submit_analyses()
     print()
+    print(f'{datetime.now()} Set to in progress')
     _jc_pipeline_set_in_progress()
     print()
+    print(f'{datetime.now()} Set to completed')
     _jc_pipeline_set_completed()
     print()
 
@@ -246,6 +253,7 @@ def test_simulate_joint_calling_pipeline():
     # for the initally added samples
     aapi = AnalysisApi()
     analyses = aapi.get_latest_complete_analyses(project=PROJ)
+    print(f'Final analyses: {analyses}')
     assert any(
         a['type'] == 'joint-calling'
         and set(sample_ids) & set(sample_id_format(a['sample_ids'])) == set(sample_ids)
