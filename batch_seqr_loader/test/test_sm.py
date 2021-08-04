@@ -219,10 +219,10 @@ def test_simulate_joint_calling_pipeline():
     # sample_ids = _jc_pipeline_add_samples(test_run_id)
     # print()
 
-    print('Add/update analyses, reads -> cram')
-    _jc_pipeline_submit_analyses()
+    # print('Add/update analyses, reads -> cram')
+    # _jc_pipeline_submit_analyses()
     # print()
-    # _jc_pipeline_set_in_progress()
+    _jc_pipeline_set_in_progress()
     # print()
     # _jc_pipeline_set_completed()
     # print()
