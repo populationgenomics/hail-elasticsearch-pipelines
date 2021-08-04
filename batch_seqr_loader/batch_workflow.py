@@ -1394,7 +1394,7 @@ def _add_make_sites_only_job(
 
     Returns: a Job object with a single output j.sites_only_vcf of type ResourceGroup
     """
-    job_name = 'Joint genotyping: make sites-only VCF'
+    job_name = 'Joint genotyping: MakeSitesOnlyVcf'
     if output_vcf_path and utils.file_exists(output_vcf_path) and not overwrite:
         return b.new_job(job_name + ' [reuse]')
 

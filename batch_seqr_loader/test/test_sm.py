@@ -195,7 +195,8 @@ def _jc_pipeline_set_completed():
                 project=PROJ,
                 analysis_update_model=aum,
             )
-            
+
+
 def test_simulate_joint_calling_pipeline():
     """
     Simulates events of the joint-calling workflow
@@ -212,7 +213,7 @@ def test_simulate_joint_calling_pipeline():
     #     ),
     # )
     # print(f'Test run ID: {test_run_id}')
-    # 
+    #
     # print(f'Populate samples for test run {test_run_id}')
     # sample_ids = _jc_pipeline_add_samples(test_run_id)
     # print()
