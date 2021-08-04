@@ -626,7 +626,7 @@ def _make_produce_gvcfs_jobs(
     intervals_j = None
     merge_gvcf_job_by_sn = dict()
     cram_df = samples_df[samples_df['type'] == 'cram']
-    for sn, bam_fpath in zip(cram_df['s'], cram_df['file']):
+    for sn, bam_fpath, index_fpath in zip(cram_df['s'], cram_df['file'], cram_df['index']):
         called_gvcf_path = join(work_bucket, 'raw', f'{sn}.g.vcf.gz')
         if can_reuse(called_gvcf_path, overwrite):
             j = b.new_job(f'HaplotypeCaller, {sn} [reuse]')
@@ -645,7 +645,7 @@ def _make_produce_gvcfs_jobs(
                 haplotype_caller_jobs.append(
                     _add_haplotype_caller_job(
                         b,
-                        bam_fpath,
+                        cram=b.read_input_group(**{'cram': bam_fpath, 'cram.crai': index_fpath}),
                         interval=intervals_j.intervals[f'interval_{idx}'],
                         reference=reference,
                         sample_name=sn,
@@ -971,7 +971,7 @@ def _add_split_intervals_job(
 
 def _add_haplotype_caller_job(
     b: hb.Batch,
-    bam_fpath: str,
+    cram: hb.ResourceGroup,
     interval: hb.ResourceFile,
     reference: hb.ResourceGroup,
     sample_name: str,
@@ -1012,7 +1012,7 @@ def _add_haplotype_caller_job(
     gatk --java-options "-Xms{java_mem}g -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10" \\
       HaplotypeCaller \\
       -R {reference.base} \\
-      -I {bam_fpath} \\
+      -I {cram} \\
       -L {interval} \\
       -O {j.output_gvcf['g.vcf.gz']} \\
       -G StandardAnnotation -G StandardHCAnnotation -G AS_StandardAnnotation \\
