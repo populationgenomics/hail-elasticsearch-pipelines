@@ -667,11 +667,11 @@ def _make_produce_gvcfs_jobs(
 
     gvcf_df = samples_df[samples_df['type'] == 'gvcf']
     jobs = []
-    for sn, gvcf_fpath in zip(gvcf_df['s'], gvcf_df['file']):
+    for sn, gvcf_fpath, tbi_path in zip(gvcf_df['s'], gvcf_df['file'], gvcf_df['index']):
         called_gvcf_path = join(work_bucket, f'{sn}.g.vcf.gz')
         reblock_gvcf_job = _add_reblock_gvcf_job(
             b,
-            gvcf_fpath,
+            b.read_input_group(**{'g.vcf.gz': gvcf_fpath, 'g.vcf.gz.tbi': tbi_path}),
             overwrite,
         )
         if merge_gvcf_job_by_sn.get(sn):
