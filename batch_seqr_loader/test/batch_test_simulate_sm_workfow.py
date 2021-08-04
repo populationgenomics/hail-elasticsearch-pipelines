@@ -27,10 +27,12 @@ def _make_test_simulate_sm_workflow_job(
         script = f.read()
     j.command(
         f"""set -e
+gcloud -q auth activate-service-account --key-file=/gsa-key/key.json
+        
 cat <<EOT >> test_simulate_sm_worklfow.py
 {script}
 EOT
-export SM_USE_SERVICE_ACCOUNT=true
+export SM_USE_SERVICE_ACCOUNT=false
 export SM_DEV_DB_PROJECT=vladdev
 export SM_ENVIRONMENT=PRODUCTION
 python test_simulate_sm_worklfow.py
