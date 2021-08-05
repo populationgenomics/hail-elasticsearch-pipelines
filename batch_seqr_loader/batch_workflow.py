@@ -867,7 +867,7 @@ def _make_joint_genotype_jobs(
                 }
             )
         else:
-            genotype_vcf_job = _add_genotype_gvcfs_job(
+            genotype_vcf_job = _add_gnarly_genotyper_job(
                 b,
                 genomicsdb=b.read_input(genomics_gcs_path_per_interval[idx]),
                 interval=intervals_j.intervals[f'interval_{idx}'],
@@ -1023,7 +1023,10 @@ def _add_haplotype_caller_job(
       -I {cram['cram']} \\
       -L {interval} \\
       -O {j.output_gvcf['g.vcf.gz']} \\
-      -G StandardAnnotation -G StandardHCAnnotation -G AS_StandardAnnotation \\
+      -G StandardAnnotation \\
+      -G StandardHCAnnotation \\
+      -G AS_StandardAnnotation \\
+      -G AS_FisherStrand \\
       -GQB 20 \
       -ERC GVCF \\
 
@@ -1195,14 +1198,14 @@ def _add_import_gvcfs_job(
     {f'echo "Skipping adding samples that are already in the DB: '
      f'{", ".join(samples_to_skip)}"' if samples_to_skip else ''}
 
-    gatk --java-options -Xms{java_mem}g \
-      GenomicsDBImport \
-      {genomicsdb_param} \
-      --batch-size 50 \
-      -L {interval} \
-      --sample-name-map {sample_name_map} \
-      --reader-threads 14 \
-      --merge-input-intervals \
+    gatk --java-options -Xms{java_mem}g \\
+      GenomicsDBImport \\
+      {genomicsdb_param} \\
+      --batch-size 50 \\
+      -L {interval} \\
+      --sample-name-map {sample_name_map} \\
+      --reader-threads 14 \\
+      --merge-input-intervals \\
       --consolidate
 
     df -h; pwd; du -sh $(dirname {j.output['tar']}); free -m
