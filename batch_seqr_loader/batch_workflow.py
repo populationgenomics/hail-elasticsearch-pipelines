@@ -1023,10 +1023,7 @@ def _add_haplotype_caller_job(
       -I {cram['cram']} \\
       -L {interval} \\
       -O {j.output_gvcf['g.vcf.gz']} \\
-      -G StandardAnnotation \\
-      -G StandardHCAnnotation \\
       -G AS_StandardAnnotation \\
-      -G AS_FisherStrand \\
       -GQB 20 \
       -ERC GVCF \\
 
