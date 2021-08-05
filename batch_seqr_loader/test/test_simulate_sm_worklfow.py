@@ -52,8 +52,11 @@ def _jc_pipeline_add_samples(test_run_id: str):
         type='blood',
         meta={'reads': 'gs://cpg-seqr-test/batches/NA12878-trio/NA12878.g.vcf.gz'},
     )
-    sample_ids = [sapi.create_new_sample(PROJ, s) for s in (s1, s2, s3)]
-    print(f'Added samples {", ".join(sample_ids)}')
+    sample_ids = []
+    for s in (s1, s2, s3):
+        print(f'{datetime.now()}: sapi.create_new_sample() for {s.external_id}')
+        sample_ids.append(sapi.create_new_sample(PROJ, s, async_req=True))
+    print(f'{datetime.now()}: added samples {", ".join(sample_ids)}')
     return sample_ids
 
 
@@ -65,72 +68,94 @@ def _jc_pipeline_submit_analyses():
 
     # If there are incomplete analyses, throw an error
     aapi = AnalysisApi()
+    print(f'{datetime.now()}: starting _jc_pipeline_submit_analyses()')
+
     # analyses = aapi.get_incomplete_analyses(project=PROJ)
     # if analyses:
     #     print(f'ERROR: found incomplete or queued analysis: {analyses}')
     #     sys.exit()
 
     # Get the list of latest complete analyses
-    latest_complete_analyses = aapi.get_latest_complete_analyses(project=PROJ)
-    print(f'Latest complete analyses: {latest_complete_analyses}')
+    print(f'{datetime.now()}: call aapi.get_latest_complete_analyses()')
+    latest_complete_analyses = aapi.get_latest_complete_analyses(
+        project=PROJ, async_req=True
+    )
+    print(f'{datetime.now()}: Latest complete analyses: {latest_complete_analyses}')
     latest_by_type_and_sids = defaultdict(list)
     for a in latest_complete_analyses:
         a_s_ids = sample_id_format(a['sample_ids'])
         latest_by_type_and_sids[(a['type'], tuple(set(a_s_ids)))].append(a)
 
     # Iterate over samples, check latest complete analyses, and add next-step analyses
+    print(f'{datetime.now()}: sapi = SampleApi()')
     sapi = SampleApi()
-    samples = sapi.get_all_samples(project=PROJ)
+    print(f'{datetime.now()}: sapi.get_all_samples(project=PROJ)')
+    samples = sapi.get_all_samples(project=PROJ, async_req=True)
 
     if latest_by_type_and_sids.get(
         ('joint-calling', tuple(set(s.id for s in samples)))
     ):
-        print(f'All samples went through joint-calling, nothing to submit')
+        print(
+            f'{datetime.now()}: All samples went through joint-calling, nothing to submit'
+        )
         return
 
+    print(f'{datetime.now()}: call aapi.get_latest_complete_analyses_by_type')
     latest_complete_gvcf_analyses = aapi.get_latest_complete_analyses_by_type(
-        project=PROJ, analysis_type='gvcf'
+        project=PROJ, analysis_type='gvcf', async_req=True
     )
+    print(f'{datetime.now()}: done aapi.get_latest_complete_analyses_by_type')
     sids_with_gvcf = set(
         sample_id_format(a['sample_ids'])[0] for a in latest_complete_gvcf_analyses
     )
     new_sids_with_gvcf = set(s.id for s in samples) - sids_with_gvcf
     if not new_sids_with_gvcf:
-        print('All samples went through variant calling, so can submit joint-calling')
+        print(
+            f'{datetime.now()}: All samples went through variant calling, so can submit joint-calling'
+        )
         analysis = AnalysisModel(
             sample_ids=[s.id for s in samples],
             type='joint-calling',
             output='gs://my-bucket/joint-calling/joint-called.g.vcf.gz',
             status='queued',
         )
-        print(f'Queueing {analysis.type}')
-        aapi.create_new_analysis(project=PROJ, analysis_model=analysis)
+        print(
+            f'{datetime.now()}: Queueing {analysis.type} (call aapi.create_new_analysis)'
+        )
+        aapi.create_new_analysis(project=PROJ, analysis_model=analysis, async_req=True)
+        print(f'{datetime.now()}: done aapi.create_new_analysis')
         return
 
     for s in [s for s in samples if s.id in new_sids_with_gvcf]:
-        print(f'Sample {s.id}')
+        print(f'{datetime.now()}: Sample {s.id}')
 
         if latest_by_type_and_sids.get(('gvcf', (s.id,))):
-            print('  Sample has a complete gvcf analysis')
+            print('{datetime.now()}:   Sample has a complete gvcf analysis')
 
         elif latest_by_type_and_sids.get(('cram', (s.id,))):
-            print(f'  Sample has a complete CRAM analysis, queueing variant calling')
+            print(
+                f'{datetime.now()}:   Sample has a complete CRAM analysis, queueing variant calling'
+            )
             analysis = AnalysisModel(
                 sample_ids=[s.id],
                 type='gvcf',
                 output=f'gs://my-bucket/variant-calling/{s.id}.g.vcf.gz',
                 status='queued',
             )
-            aapi.create_new_analysis(project=PROJ, analysis_model=analysis)
+            print(f'{datetime.now()}:   call aapi.create_new_analysis')
+            aapi.create_new_analysis(
+                project=PROJ, analysis_model=analysis, async_req=True
+            )
+            print(f'{datetime.now()}:   done aapi.create_new_analysis')
 
         else:
             print(
-                f'  Sample doesn not have any analysis yet, trying to get "reads" '
+                f'{datetime.now()}:     Sample doesn not have any analysis yet, trying to get "reads" '
                 'metadata to submit alignment'
             )
             reads_data = s.meta.get('reads')
             if not reads_data:
-                print(f'  ERROR: no "reads" data')
+                print(f'{datetime.now()}:     ERROR: no "reads" data')
             elif isinstance(reads_data, str):
                 if reads_data.endswith('.g.vcf.gz'):
                     analysis = AnalysisModel(
@@ -139,29 +164,45 @@ def _jc_pipeline_submit_analyses():
                         output=reads_data,
                         status='completed',
                     )
-                    aapi.create_new_analysis(project=PROJ, analysis_model=analysis)
+                    print(f'{datetime.now()}:   call aapi.create_new_analysis')
+                    aapi.create_new_analysis(
+                        project=PROJ, analysis_model=analysis, async_req=True
+                    )
+                    print(f'{datetime.now()}:   done aapi.create_new_analysis')
                 elif reads_data.endswith('.cram') or reads_data.endswith('.bam'):
-                    print(f'  Queueing cram re-alignment analysis')
+                    print(f'{datetime.now()}:     Queueing cram re-alignment analysis')
                     analysis = AnalysisModel(
                         sample_ids=[s.id],
                         type='cram',
                         output=f'gs://my-bucket/realignment/{s.id}.cram',
                         status='queued',
                     )
-                    aapi.create_new_analysis(project=PROJ, analysis_model=analysis)
+                    print(f'{datetime.now()}:   call aapi.create_new_analysis')
+                    aapi.create_new_analysis(
+                        project=PROJ, analysis_model=analysis, async_req=True
+                    )
+                    print(f'{datetime.now()}:   done aapi.create_new_analysis')
                 else:
-                    print(f'  ERROR: unrecognised "reads" meta data: {reads_data}')
+                    print(
+                        f'{datetime.now()}:     ERROR: unrecognised "reads" meta data: {reads_data}'
+                    )
             elif isinstance(reads_data, list) and len(reads_data) == 2:
-                print(f'  Queueing cram alignment analyses')
+                print(f'{datetime.now()}:     Queueing cram alignment analyses')
                 analysis = AnalysisModel(
                     sample_ids=[s.id],
                     type='cram',
                     output=f'gs://my-bucket/alignment/{s.id}.cram',
                     status='queued',
                 )
-                aapi.create_new_analysis(project=PROJ, analysis_model=analysis)
+                print(f'{datetime.now()}:   call aapi.create_new_analysis')
+                aapi.create_new_analysis(
+                    project=PROJ, analysis_model=analysis, async_req=True
+                )
+                print(f'{datetime.now()}:   done aapi.create_new_analysis')
             else:
-                print(f'  ERROR: can\'t recognise "reads" data: {reads_data}')
+                print(
+                    f'{datetime.now()}:     ERROR: can\'t recognise "reads" data: {reads_data}'
+                )
 
 
 def _jc_pipeline_set_in_progress():
@@ -169,16 +210,21 @@ def _jc_pipeline_set_in_progress():
     Update existing queued analyses and set their status to in-progress
     """
     aapi = AnalysisApi()
-    analyses = aapi.get_incomplete_analyses(project=PROJ)
+    print(f'{datetime.now()}: call aapi.get_incomplete_analyses')
+    analyses = aapi.get_incomplete_analyses(project=PROJ, async_req=True)
+    print(f'{datetime.now()}: done aapi.get_incomplete_analyses')
     if analyses:
         for a in analyses:
-            print(f'Setting analysis {a} to in-progress')
+            print(f'{datetime.now()}: Setting analysis {a} to in-progress')
             aum = AnalysisUpdateModel(status='in-progress')
+            print(f'{datetime.now()}: call aapi.update_analysis_status')
             aapi.update_analysis_status(
                 analysis_id=a['id'],
                 project=PROJ,
                 analysis_update_model=aum,
+                async_req=True,
             )
+            print(f'{datetime.now()}: done aapi.update_analysis_status')
 
 
 def _jc_pipeline_set_completed():
@@ -186,16 +232,21 @@ def _jc_pipeline_set_completed():
     Update existing in-progress analyses and set their status to completed
     """
     aapi = AnalysisApi()
-    analyses = aapi.get_incomplete_analyses(project=PROJ)
+    print(f'{datetime.now()}: call aapi.get_incomplete_analyses')
+    analyses = aapi.get_incomplete_analyses(project=PROJ, async_req=True)
+    print(f'{datetime.now()}: done aapi.get_incomplete_analyses')
     if analyses:
         for a in analyses:
-            print(f'Setting analysis {a} to completed')
+            print(f'{datetime.now()}: Setting analysis {a} to completed')
             aum = AnalysisUpdateModel(status='completed')
+            print(f'{datetime.now()}: call aapi.update_analysis_status')
             aapi.update_analysis_status(
                 analysis_id=a['id'],
                 project=PROJ,
                 analysis_update_model=aum,
+                async_req=True,
             )
+            print(f'{datetime.now()}: done aapi.update_analysis_status')
 
 
 def test_simulate_joint_calling_pipeline():
