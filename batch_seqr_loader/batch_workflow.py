@@ -1287,7 +1287,7 @@ def _add_gnarly_genotyper_job(
     b: hb.Batch,
     genomicsdb: hb.ResourceFile,
     reference: hb.ResourceGroup,
-    dbsnp: hb.ResourceGroup,
+    dbsnp: str,
     overwrite: bool,
     number_of_samples: int,
     interval_idx: Optional[int] = None,
@@ -1340,7 +1340,7 @@ def _add_gnarly_genotyper_job(
       GnarlyGenotyper \\
       -R {reference.base} \\
       -O {j.output_vcf['vcf.gz']} \\
-      -D {dbsnp.base} \\
+      -D {dbsnp} \\
       --only-output-calls-starting-in-intervals \\
       --keep-all-sites \\
       -V gendb://workspace \\
