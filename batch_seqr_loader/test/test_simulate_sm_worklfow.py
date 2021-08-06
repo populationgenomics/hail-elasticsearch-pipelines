@@ -55,7 +55,7 @@ def _jc_pipeline_add_samples(test_run_id: str):
     sample_ids = []
     for s in (s1, s2, s3):
         print(f'{datetime.now()}: sapi.create_new_sample() for {s.external_id}')
-        sample_ids.append(sapi.create_new_sample(PROJ, s, async_req=True))
+        sample_ids.append(sapi.create_new_sample(PROJ, s))
     print(f'{datetime.now()}: added samples {", ".join(sample_ids)}')
     return sample_ids
 
@@ -78,7 +78,7 @@ def _jc_pipeline_submit_analyses():
     # Get the list of latest complete analyses
     print(f'{datetime.now()}: call aapi.get_latest_complete_analyses()')
     latest_complete_analyses = aapi.get_latest_complete_analyses(
-        project=PROJ, async_req=True
+        project=PROJ
     )
     print(f'{datetime.now()}: Latest complete analyses: {latest_complete_analyses}')
     latest_by_type_and_sids = defaultdict(list)
@@ -90,7 +90,7 @@ def _jc_pipeline_submit_analyses():
     print(f'{datetime.now()}: sapi = SampleApi()')
     sapi = SampleApi()
     print(f'{datetime.now()}: sapi.get_all_samples(project=PROJ)')
-    samples = sapi.get_all_samples(project=PROJ, async_req=True)
+    samples = sapi.get_all_samples(project=PROJ)
 
     if latest_by_type_and_sids.get(
         ('joint-calling', tuple(set(s.id for s in samples)))
@@ -102,7 +102,7 @@ def _jc_pipeline_submit_analyses():
 
     print(f'{datetime.now()}: call aapi.get_latest_complete_analyses_by_type')
     latest_complete_gvcf_analyses = aapi.get_latest_complete_analyses_by_type(
-        project=PROJ, analysis_type='gvcf', async_req=True
+        project=PROJ, analysis_type='gvcf'
     )
     print(f'{datetime.now()}: done aapi.get_latest_complete_analyses_by_type')
     sids_with_gvcf = set(
@@ -122,7 +122,7 @@ def _jc_pipeline_submit_analyses():
         print(
             f'{datetime.now()}: Queueing {analysis.type} (call aapi.create_new_analysis)'
         )
-        aapi.create_new_analysis(project=PROJ, analysis_model=analysis, async_req=True)
+        aapi.create_new_analysis(project=PROJ, analysis_model=analysis)
         print(f'{datetime.now()}: done aapi.create_new_analysis')
         return
 
@@ -144,7 +144,7 @@ def _jc_pipeline_submit_analyses():
             )
             print(f'{datetime.now()}:   call aapi.create_new_analysis')
             aapi.create_new_analysis(
-                project=PROJ, analysis_model=analysis, async_req=True
+                project=PROJ, analysis_model=analysis
             )
             print(f'{datetime.now()}:   done aapi.create_new_analysis')
 
@@ -166,7 +166,7 @@ def _jc_pipeline_submit_analyses():
                     )
                     print(f'{datetime.now()}:   call aapi.create_new_analysis')
                     aapi.create_new_analysis(
-                        project=PROJ, analysis_model=analysis, async_req=True
+                        project=PROJ, analysis_model=analysis
                     )
                     print(f'{datetime.now()}:   done aapi.create_new_analysis')
                 elif reads_data.endswith('.cram') or reads_data.endswith('.bam'):
@@ -179,7 +179,7 @@ def _jc_pipeline_submit_analyses():
                     )
                     print(f'{datetime.now()}:   call aapi.create_new_analysis')
                     aapi.create_new_analysis(
-                        project=PROJ, analysis_model=analysis, async_req=True
+                        project=PROJ, analysis_model=analysis
                     )
                     print(f'{datetime.now()}:   done aapi.create_new_analysis')
                 else:
@@ -196,7 +196,7 @@ def _jc_pipeline_submit_analyses():
                 )
                 print(f'{datetime.now()}:   call aapi.create_new_analysis')
                 aapi.create_new_analysis(
-                    project=PROJ, analysis_model=analysis, async_req=True
+                    project=PROJ, analysis_model=analysis
                 )
                 print(f'{datetime.now()}:   done aapi.create_new_analysis')
             else:
@@ -211,7 +211,7 @@ def _jc_pipeline_set_in_progress():
     """
     aapi = AnalysisApi()
     print(f'{datetime.now()}: call aapi.get_incomplete_analyses')
-    analyses = aapi.get_incomplete_analyses(project=PROJ, async_req=True)
+    analyses = aapi.get_incomplete_analyses(project=PROJ)
     print(f'{datetime.now()}: done aapi.get_incomplete_analyses')
     if analyses:
         for a in analyses:
@@ -222,7 +222,6 @@ def _jc_pipeline_set_in_progress():
                 analysis_id=a['id'],
                 project=PROJ,
                 analysis_update_model=aum,
-                async_req=True,
             )
             print(f'{datetime.now()}: done aapi.update_analysis_status')
 
@@ -233,7 +232,7 @@ def _jc_pipeline_set_completed():
     """
     aapi = AnalysisApi()
     print(f'{datetime.now()}: call aapi.get_incomplete_analyses')
-    analyses = aapi.get_incomplete_analyses(project=PROJ, async_req=True)
+    analyses = aapi.get_incomplete_analyses(project=PROJ)
     print(f'{datetime.now()}: done aapi.get_incomplete_analyses')
     if analyses:
         for a in analyses:
@@ -244,7 +243,6 @@ def _jc_pipeline_set_completed():
                 analysis_id=a['id'],
                 project=PROJ,
                 analysis_update_model=aum,
-                async_req=True,
             )
             print(f'{datetime.now()}: done aapi.update_analysis_status')
 
