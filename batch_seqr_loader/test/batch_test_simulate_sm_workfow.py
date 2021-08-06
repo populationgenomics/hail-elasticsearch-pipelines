@@ -31,13 +31,12 @@ def _make_test_simulate_sm_workflow_job(
         f"""set -e
 export GOOGLE_APPLICATION_CREDENTIALS=/gsa-key/key.json
 gcloud -q auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
+export SM_DEV_DB_PROJECT=vladdev
+export SM_ENVIRONMENT=PRODUCTION
 
 cat <<EOT >> test_simulate_sm_worklfow.py
 {script}
 EOT
-export SM_USE_SERVICE_ACCOUNT=true
-export SM_DEV_DB_PROJECT=vladdev
-export SM_ENVIRONMENT=PRODUCTION
 python test_simulate_sm_worklfow.py
     """
     )
