@@ -1,11 +1,18 @@
 """
 Utility functions for the seqr loader
 """
-
+import hashlib
 import os
 from os.path import join
-
+from typing import Iterable, Tuple
+import logging
 from google.cloud import storage
+import hailtop.batch as hb
+
+
+logger = logging.getLogger(__file__)
+logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
+logger.setLevel(logging.INFO)
 
 
 GATK_VERSION = '4.2.0.0'
@@ -63,3 +70,55 @@ def file_exists(path: str) -> bool:
         gs = storage.Client()
         return gs.get_bucket(bucket).get_blob(path)
     return os.path.exists(path)
+
+
+def can_reuse(fpath: str, overwrite: bool) -> bool:
+    """
+    Checks if the file `fpath` exists and we are not overwriting
+    """
+    if not file_exists(fpath):
+        return False
+    elif overwrite:
+        logger.info(f'File {fpath} exists and will be overwritten')
+        return False
+    else:
+        logger.info(f'Reusing existing {fpath}. Use --overwrite to overwrite')
+        return True
+
+
+def hash_sample_names(sample_names: Iterable[str]) -> str:
+    """
+    Return a unique hash string from a from a set of strings
+    :param sample_names: set of strings
+    :return: a string hash
+    """
+    for sn in sample_names:
+        assert ' ' not in sn, sn
+    return hashlib.sha224(' '.join(sorted(sample_names)).encode()).hexdigest()
+
+
+def get_refs(b: hb.Batch) -> Tuple:
+    """
+    Register reference files
+    :param b: batch object
+    :return: a tuple of reference objects
+    """
+    reference = b.read_input_group(
+        base=REF_FASTA,
+        fai=REF_FASTA + '.fai',
+        dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
+        + '.dict',
+    )
+    bwa_reference = b.read_input_group(
+        base=REF_FASTA,
+        fai=REF_FASTA + '.fai',
+        dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
+        + '.dict',
+        sa=REF_FASTA + '.sa',
+        amb=REF_FASTA + '.amb',
+        bwt=REF_FASTA + '.bwt',
+        ann=REF_FASTA + '.ann',
+        pac=REF_FASTA + '.pac',
+    )
+    noalt_regions = b.read_input(join(REF_BUCKET, 'noalt.bed'))
+    return reference, bwa_reference, noalt_regions

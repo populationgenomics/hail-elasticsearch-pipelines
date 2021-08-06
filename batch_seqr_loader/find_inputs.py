@@ -9,28 +9,13 @@ import os
 import re
 import subprocess
 from os.path import join, basename, splitext
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Dict, Tuple, Union
 import pandas as pd
 from utils import file_exists
 
 logger = logging.getLogger(__file__)
 logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
 logger.setLevel(logging.INFO)
-
-
-def pull_inputs_from_sm_server(
-    sm_server_db_name: str,  # pylint: disable=unused-argument
-    ped_fpath: str,  # pylint: disable=unused-argument
-) -> Tuple[pd.DataFrame, str]:
-    """
-    Query the SM server for input files
-    :param sm_server_db_name: the SM database name (usually defaults to `seqr`
-    for production runs)
-    :param ped_fpath: path to PED file
-    :return: a tuple of a DataFrame with the pedigree information and paths to
-        input files (columns: s, file, index, type), and a path to a PED file
-    """
-    return None, None
 
 
 def find_inputs(
@@ -61,10 +46,10 @@ def find_inputs(
     gvcfs, crams, fastq_to_align, cram_to_realign = _find_files_by_type(
         gvcfs, crams, data_to_realign
     )
-    gvcf_with_index_by_by_sn = _find_file_indices(gvcfs)
-    cram_with_index_by_by_sn = _find_file_indices(crams)
+    gvcf_with_index_by_by_sn = find_file_indices(gvcfs)
+    cram_with_index_by_by_sn = find_file_indices(crams)
     fastq_pairs_by_by_sn = _find_fastq_pairs(fastq_to_align)
-    cram_with_index_to_realign_by_sn = _find_file_indices(cram_to_realign)
+    cram_with_index_to_realign_by_sn = find_file_indices(cram_to_realign)
 
     data: Dict[str, List] = {
         'Family.ID': [],
@@ -177,7 +162,7 @@ def _find_files_by_type(
     return gvcfs, crams, fastq_to_align, cram_to_realign
 
 
-def _find_file_indices(fpaths: List[str]) -> Dict[str, Tuple[str, Optional[str]]]:
+def find_file_indices(fpaths: List[str]) -> Dict[str, Tuple[str, Optional[str]]]:
     """
     Find corresponding index files. Will look for:
     '<sample>.g.vcf.gz.tbi' for '<sample>.g.vcf.gz',
@@ -380,3 +365,47 @@ def _find_fastq_pairs(fpaths: List[str]) -> Dict[str, Tuple[str, str]]:
         sn: (','.join(rs), ','.join(ls))
         for sn, (rs, ls) in fastqs_by_sample_name.items()
     }
+
+
+def sample_id_format(sample_id: Union[int, List[int]]):
+    """
+    Transform raw (int) sample identifier to format (CPGXXXH) where:
+        - CPG is the prefix
+        - H is the Luhn checksum
+        - XXX is the original identifier
+
+    >>> sample_id_format(10)
+    'CPG109'
+
+    >>> sample_id_format(12345)
+    'CPG123455'
+    """
+
+    if isinstance(sample_id, list):
+        return [sample_id_format(s) for s in sample_id]
+
+    if isinstance(sample_id, str) and not sample_id.isdigit():
+        if sample_id.startswith('CPG'):
+            return sample_id
+        raise ValueError(f'Unexpected format for sample identifier "{sample_id}"')
+    sample_id = int(sample_id)
+
+    return f'CPG{sample_id}{luhn_compute(sample_id)}'
+
+
+def luhn_compute(n):
+    """
+    Compute Luhn check digit of number given as string
+
+    >>> luhn_compute(453201511283036)
+    6
+
+    >>> luhn_compute(601151443354620)
+    1
+
+    >>> luhn_compute(677154949558680)
+    2
+    """
+    m = [int(d) for d in reversed(str(n))]
+    result = sum(m) + sum(d + (d >= 5) for d in m[::2])
+    return -result % 10
