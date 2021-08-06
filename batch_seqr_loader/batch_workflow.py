@@ -11,7 +11,6 @@ import logging
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
 import hashlib
 from collections import defaultdict
@@ -23,7 +22,7 @@ import hailtop.batch as hb
 from analysis_runner import dataproc
 from hailtop.batch.job import Job
 
-from find_inputs import find_inputs, pull_inputs_from_sm_server
+from find_inputs import find_inputs
 from vqsr import make_vqsr_jobs
 import utils
 from utils import file_exists
@@ -35,19 +34,6 @@ logger.setLevel(logging.INFO)
 
 
 @click.command()
-@click.option(
-    '--use-sm-server',
-    'use_sm_server',
-    is_flag=True,
-    help='Query the sample metadata server for samples that need reprocessing, and'
-    'update back statuses on progress',
-)
-@click.option(
-    '--sm-server-db-name',
-    'sm_server_db_name',
-    default='seqr',
-    help='Override the server metadata project/DB name',
-)
 @click.option(
     '--gvcf',
     'gvcfs',
@@ -128,8 +114,6 @@ logger.setLevel(logging.INFO)
 )
 @click.option('--vep-block-size', 'vep_block_size')
 def main(
-    use_sm_server: bool,
-    sm_server_db_name: str,
     gvcfs: List[str],
     crams: List[str],
     data_to_realign: List[str],
@@ -192,22 +176,14 @@ def main(
 
     local_tmp_dir = tempfile.mkdtemp()
 
-    if use_sm_server:
-        if any([gvcfs, crams, data_to_realign]):
-            logger.critical(
-                'Can\'t mix direct inputs (--cram, --gvcf, etc) and --use-sm-server'
-            )
-            sys.exit(1)
-        samples_df, ped_fpath = pull_inputs_from_sm_server(sm_server_db_name, ped_fpath)
-    else:
-        samples_df, ped_fpath = find_inputs(
-            gvcfs,
-            crams,
-            data_to_realign,
-            local_tmp_dir=local_tmp_dir,
-            work_bucket=work_bucket,
-            ped_fpath=ped_fpath,
-        )
+    samples_df, ped_fpath = find_inputs(
+        gvcfs,
+        crams,
+        data_to_realign,
+        local_tmp_dir=local_tmp_dir,
+        work_bucket=work_bucket,
+        ped_fpath=ped_fpath,
+    )
 
     reference = b.read_input_group(
         base=utils.REF_FASTA,
@@ -1315,7 +1291,7 @@ def _add_gnarly_genotyper_job(
 
     j = b.new_job(job_name)
     # GnarlyGenotyper crashes with NullPointerException when using standard GATK docker
-    j.image(utils.GNARLY_IMAGE)
+    j.image(utils.GATK_IMAGE)
     j.cpu(2)
     j.memory(f'32G')
     # 4G (fasta+fai+dict) + 1G per sample divided by the number of intervals
