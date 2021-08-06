@@ -9,9 +9,9 @@ from os.path import join, dirname, abspath
 import hailtop.batch as hb
 
 
-# SM_CONTAINER = 'australia-southeast1-docker.pkg.dev/cpg-common/images/sm-api:latest'
-SM_CONTAINER_TAG = 'c2e5c3dda188fc1ff964a5bef603fe46385222c5'
-SM_CONTAINER = f'australia-southeast1-docker.pkg.dev/sample-metadata/images/sm-api:{SM_CONTAINER_TAG}'
+SM_CONTAINER = (
+    f'australia-southeast1-docker.pkg.dev/sample-metadata/images/sm-api:1.0.9'
+)
 BAZAM_CONTAINER = 'australia-southeast1-docker.pkg.dev/cpg-common/images/bazam:v2'
 REF_BUCKET = 'gs://cpg-reference/hg38/v1'
 TARGET_BUCKET = 'gs://cpg-seqr-test-tmp/hg38/v1'
