@@ -161,6 +161,7 @@ def _add_jobs(
     sapi = SampleApi()
     aapi = AnalysisApi()
     samples = sapi.get_all_samples(project=sm_server_db_name)
+    samples = [s for s in samples if not s.external_id.startswith('NA12878-from')]
 
     latest_by_type_and_sids = dict()
     for a_type in ['cram', 'gvcf', 'joint-calling']:
@@ -189,18 +190,8 @@ def _add_jobs(
                 f'     Sample does not have CRAM analysis yet, '
                 f'attempting to get "reads" metadata to submit alignment'
             )
-            reads_data = s.meta.get('reads')
+            reads_data = _verify_reads_data(s.meta.get('reads'))
             if not reads_data:
-                logger.error(f'     ERROR: no "reads" data')
-                continue
-            if not (
-                isinstance(reads_data, str)
-                and (reads_data.endswith('.cram') or reads_data.endswith('.bam'))
-                or (isinstance(reads_data, list) and len(reads_data) == 2)
-            ):
-                logger.error(
-                    f'     ERROR: unrecognised "reads" meta data: {reads_data}'
-                )
                 continue
 
             logger.info(f'     Queueing CRAM re-alignment analysis')
@@ -453,16 +444,14 @@ python check_pedigree.py \
 def _make_realign_jobs(
     b: hb.Batch,
     sample_name: str,
-    reads_data: Union[List[str], str],
+    reads_data: Union[str, Tuple[List[str], List[str]]],
     reference: hb.ResourceGroup,
     work_bucket: str,
     overwrite: bool,
     depends_on: Optional[List[Job]] = None,
 ) -> Tuple[Job, str]:
     """
-    Takes all samples with a 'file' of 'type'='fastq_to_realign'|'cram_to_realign'
-    in `samples_df`, runs BWA to realign reads again, and sets a new 'file'
-    of 'type'='cram'.
+    Runs BWA to realign reads back again to hg38.
 
     When the input is CRAM/BAM, uses Bazam to stream reads to BWA.
     """
@@ -474,6 +463,9 @@ def _make_realign_jobs(
     j = b.new_job(job_name)
     j.image(utils.BAZAM_IMAGE)
     total_cpu = 32
+
+    file1: Union[str, List[str]]
+    file2: Union[str, List[str]]
     if isinstance(reads_data, str):
         use_bazam = True
         file1 = reads_data
@@ -484,10 +476,8 @@ def _make_realign_jobs(
                 logger.error(f'Not found CRAI index for file {file1}')
                 sys.exit(1)
     else:
-        assert len(reads_data) == 2
         use_bazam = False
-        file1 = reads_data[0]
-        file2 = reads_data[1]
+        file1, file2 = reads_data
     if use_bazam:
         bazam_cpu = 4
         bwa_cpu = 24
@@ -520,8 +510,8 @@ def _make_realign_jobs(
         )
         r2_param = '-'
     else:
-        files1 = [b.read_input(f1) for f1 in file1.split(',')]
-        files2 = [b.read_input(f1) for f1 in file2.split(',')]
+        files1 = [b.read_input(f1) for f1 in file1]
+        files2 = [b.read_input(f1) for f1 in file2]
         r1_param = f'<(cat {" ".join(files1)})'
         r2_param = f'<(cat {" ".join(files2)})'
 
@@ -1443,6 +1433,50 @@ def _add_final_gather_vcf_job(
     if output_vcf_path:
         b.write_output(j.output_vcf, output_vcf_path.replace('.vcf.gz', ''))
     return j
+
+
+def _verify_reads_data(
+    reads_data: Union[None, str, List[Union[str, List[str]]]]
+) -> Union[
+    str, Tuple[List[str], List[str]], None
+]:  # pylint: disable=too-many-return-statements
+
+    if not reads_data:
+        logger.error(f'     ERROR: no "reads" data')
+        return None
+
+    error_msg = (
+        f'     ERROR: the "reads" meta data must be a list of '
+        f'str/list (for FASTQ), or a BAM or CRAM path. Got: {reads_data}'
+    )
+    if isinstance(reads_data, str):
+        if not reads_data.endswith('.cram') or reads_data.endswith('.bam'):
+            logger.error(error_msg)
+            return None
+        return reads_data
+
+    elif isinstance(reads_data, list):
+        if not len(reads_data) == 2:
+            logger.error(error_msg)
+            return None
+        reads1 = reads_data[0]
+        reads2 = reads_data[1]
+
+        if isinstance(reads1, str):
+            if not isinstance(reads2, str):
+                logger.error(error_msg)
+                return None
+            reads1 = [reads1]
+            reads2 = [reads2]
+
+        if isinstance(reads1, list):
+            if not isinstance(reads2, list) or not len(reads1) == len(reads2):
+                logger.error(error_msg)
+                return None
+            return reads1, reads2
+
+    logger.error(error_msg)
+    return None
 
 
 if __name__ == '__main__':
