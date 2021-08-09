@@ -1,4 +1,4 @@
-# pylint: disable-all
+# pylint: skip-file
 """
 Reads input from the sample_metadata server using the generated API
 """
