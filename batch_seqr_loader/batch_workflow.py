@@ -853,22 +853,23 @@ def _make_joint_genotype_jobs(
         analysis_id = None
 
     import_gvcfs_job_per_interval = dict()
-    for idx in range(utils.NUMBER_OF_GENOMICS_DB_INTERVALS):
-        import_gvcfs_job, _ = _add_import_gvcfs_job(
-            b=b,
-            genomicsdb_gcs_path=genomics_gcs_path_per_interval[idx],
-            samples_to_add=samples_to_add,
-            sample_names_to_skip=sample_names_to_skip,
-            sample_names_will_be_in_db=sample_names_will_be_in_db,
-            updating_existing_db=updating_existing_db,
-            sample_map_bucket_path=sample_map_bucket_path,
-            interval=intervals_j.intervals[f'interval_{idx}'],
-            interval_idx=idx,
-            number_of_intervals=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
-            sm_db_name=sm_db_name,
-            analysis_id=analysis_id,
-        )
-        import_gvcfs_job_per_interval[idx] = import_gvcfs_job
+    if samples_to_add:
+        for idx in range(utils.NUMBER_OF_GENOMICS_DB_INTERVALS):
+            import_gvcfs_job, _ = _add_import_gvcfs_job(
+                b=b,
+                genomicsdb_gcs_path=genomics_gcs_path_per_interval[idx],
+                samples_to_add=samples_to_add,
+                sample_names_to_skip=sample_names_to_skip,
+                sample_names_will_be_in_db=sample_names_will_be_in_db,
+                updating_existing_db=updating_existing_db,
+                sample_map_bucket_path=sample_map_bucket_path,
+                interval=intervals_j.intervals[f'interval_{idx}'],
+                interval_idx=idx,
+                number_of_intervals=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
+                sm_db_name=sm_db_name,
+                analysis_id=analysis_id,
+            )
+            import_gvcfs_job_per_interval[idx] = import_gvcfs_job
 
     make_site_only_jobs = []
     scattered_vcf_by_interval: Dict[int, hb.ResourceGroup] = dict()
@@ -897,6 +898,8 @@ def _make_joint_genotype_jobs(
                 interval_idx=idx,
                 number_of_samples=len(sample_names_will_be_in_db),
                 number_of_intervals=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
+                sm_db_name=sm_db_name if not samples_to_add else None,
+                analysis_id=analysis_id if not samples_to_add else None,
             )
             if import_gvcfs_job_per_interval.get(idx):
                 genotype_vcf_job.depends_on(import_gvcfs_job_per_interval.get(idx))
@@ -1339,6 +1342,8 @@ def _add_gnarly_genotyper_job(
     number_of_intervals: int = 1,
     interval: Optional[hb.ResourceGroup] = None,
     output_vcf_path: Optional[str] = None,
+    sm_db_name: str = None,
+    analysis_id: int = None,
 ) -> Job:
     """
     Runs GATK GnarlyGenotyper on a combined_gvcf VCF bgzipped file.
@@ -1374,6 +1379,9 @@ def _add_gnarly_genotyper_job(
 
     j.command(
         f"""set -e
+
+    {utils.make_update_status_curl('in-progress', sm_db_name, analysis_id) 
+        if interval_idx == 0 or interval_idx is None else ''}
 
     (while true; do df -h; pwd; free -m; sleep 300; done) &
 
