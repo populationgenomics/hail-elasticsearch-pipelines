@@ -204,7 +204,7 @@ def _add_jobs(
     for s in samples:
         logger.info(f'Processing sample {s.id}')
         cram_analysis = latest_by_type_and_sids.get(('cram', (s.id,)))
-        if not cram_analysis:
+        if overwrite or not cram_analysis:
             logger.info(
                 f'     Sample does not have CRAM analysis yet, attempting to parse '
                 f'"reads" metadata field and submit alignment'
@@ -226,7 +226,7 @@ def _add_jobs(
             cram_job = b.new_job(f'BWA align, {s.id} [reuse]')
 
         gvcf_analysis = latest_by_type_and_sids.get(('gvcf', (s.id,)))
-        if not gvcf_analysis:
+        if overwrite or not gvcf_analysis:
             intervals_j = _add_split_intervals_job(
                 b,
                 utils.UNPADDED_INTERVALS,
@@ -255,10 +255,7 @@ def _add_jobs(
     jc_analysis = latest_by_type_and_sids.get(
         ('joint-calling', tuple(set(s.id for s in samples)))
     )
-    if jc_analysis:
-        logger.info('All samples went through the joint-calling')
-        jc_job = b.new_job('Joint calling [reuse]')
-    else:
+    if overwrite or not jc_analysis:
         jc_job, jc_analysis = _make_joint_genotype_jobs(
             b=b,
             genomicsdb_bucket=genomicsdb_bucket,
@@ -272,6 +269,9 @@ def _add_jobs(
             overwrite=overwrite,
             sm_db_name=sm_db_name,
         )
+    else:
+        logger.info('All samples went through the joint-calling')
+        jc_job = b.new_job('Joint calling [reuse]')
 
     annotated_mt_path = join(dirname(jc_analysis.output), 'annotated.mt')
     if utils.can_reuse(annotated_mt_path, overwrite):
