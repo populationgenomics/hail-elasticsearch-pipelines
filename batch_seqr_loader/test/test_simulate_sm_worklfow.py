@@ -20,6 +20,71 @@ from sample_metadata.models.analysis_model import AnalysisModel
 PROJ = os.environ.get('SM_DEV_DB_PROJECT', 'sm_dev')
 
 
+def test_simulate_joint_calling_pipeline():
+    """
+    Simulates events of the joint-calling workflow
+    """
+    # test_run_id = 'AFYPXR'
+    # sample_ids = 'CPG620, CPG638, CPG646'.split(', ')
+
+    # Unique test run ID to avoid clashing with previous test run samples
+    test_run_id = os.environ.get(
+        'SM_DV_TEST_RUN_ID',
+        ''.join(
+            random.choice(string.ascii_uppercase + string.digits) for _ in range(6)
+        ),
+    )
+    print(f'{datetime.now()} Test run ID: {test_run_id}')
+
+    print(f'{datetime.now()} Populate samples for test run {test_run_id}')
+    sample_ids = _jc_pipeline_add_samples(test_run_id)
+    print()
+
+    print(f'{datetime.now()} Add/update analyses, reads -> cram')
+    _jc_pipeline_submit_analyses()
+    print()
+    print(f'{datetime.now()} Set to in progress')
+    _jc_pipeline_set_in_progress()
+    print()
+    print(f'{datetime.now()} Set to completed')
+    _jc_pipeline_set_completed()
+    print()
+
+    print(f'{datetime.now()} Add/update analyses, cram -> gvcf')
+    _jc_pipeline_submit_analyses()
+    print()
+    print(f'{datetime.now()} Set to in progress')
+    _jc_pipeline_set_in_progress()
+    print()
+    print(f'{datetime.now()} Set to completed')
+    _jc_pipeline_set_completed()
+    print()
+
+    print('Add/update analyses, gvcf -> joint-calling')
+    _jc_pipeline_submit_analyses()
+    print()
+    print(f'{datetime.now()} Set to in progress')
+    _jc_pipeline_set_in_progress()
+    print()
+    print(f'{datetime.now()} Set to completed')
+    _jc_pipeline_set_completed()
+    print()
+
+    # Checking that after all calls, a 'completed' 'joint-calling' analysis must exist
+    # for the initally added samples
+    aapi = AnalysisApi()
+    analyses = aapi.get_latest_complete_analyses(project=PROJ)
+    print(f'Final analyses: {analyses}')
+    assert any(
+        a['type'] == 'joint-calling'
+        and set(sample_ids) & set(sample_id_format(a['sample_ids'])) == set(sample_ids)
+        for a in analyses
+    ), [
+        (a['type'], set(sample_id_format(a['sample_ids'])), set(sample_ids))
+        for a in analyses
+    ]
+
+
 def _jc_pipeline_add_samples(test_run_id: str):
     """
     Add 3 samples: one with fastq input, one with CRAM input, one with GVCF input.
@@ -77,9 +142,7 @@ def _jc_pipeline_submit_analyses():
 
     # Get the list of latest complete analyses
     print(f'{datetime.now()}: call aapi.get_latest_complete_analyses()')
-    latest_complete_analyses = aapi.get_latest_complete_analyses(
-        project=PROJ
-    )
+    latest_complete_analyses = aapi.get_latest_complete_analyses(project=PROJ)
     print(f'{datetime.now()}: Latest complete analyses: {latest_complete_analyses}')
     latest_by_type_and_sids = defaultdict(list)
     for a in latest_complete_analyses:
@@ -143,9 +206,7 @@ def _jc_pipeline_submit_analyses():
                 status='queued',
             )
             print(f'{datetime.now()}:   call aapi.create_new_analysis')
-            aapi.create_new_analysis(
-                project=PROJ, analysis_model=analysis
-            )
+            aapi.create_new_analysis(project=PROJ, analysis_model=analysis)
             print(f'{datetime.now()}:   done aapi.create_new_analysis')
 
         else:
@@ -165,9 +226,7 @@ def _jc_pipeline_submit_analyses():
                         status='completed',
                     )
                     print(f'{datetime.now()}:   call aapi.create_new_analysis')
-                    aapi.create_new_analysis(
-                        project=PROJ, analysis_model=analysis
-                    )
+                    aapi.create_new_analysis(project=PROJ, analysis_model=analysis)
                     print(f'{datetime.now()}:   done aapi.create_new_analysis')
                 elif reads_data.endswith('.cram') or reads_data.endswith('.bam'):
                     print(f'{datetime.now()}:     Queueing cram re-alignment analysis')
@@ -178,9 +237,7 @@ def _jc_pipeline_submit_analyses():
                         status='queued',
                     )
                     print(f'{datetime.now()}:   call aapi.create_new_analysis')
-                    aapi.create_new_analysis(
-                        project=PROJ, analysis_model=analysis
-                    )
+                    aapi.create_new_analysis(project=PROJ, analysis_model=analysis)
                     print(f'{datetime.now()}:   done aapi.create_new_analysis')
                 else:
                     print(
@@ -195,9 +252,7 @@ def _jc_pipeline_submit_analyses():
                     status='queued',
                 )
                 print(f'{datetime.now()}:   call aapi.create_new_analysis')
-                aapi.create_new_analysis(
-                    project=PROJ, analysis_model=analysis
-                )
+                aapi.create_new_analysis(project=PROJ, analysis_model=analysis)
                 print(f'{datetime.now()}:   done aapi.create_new_analysis')
             else:
                 print(
@@ -245,72 +300,6 @@ def _jc_pipeline_set_completed():
                 analysis_update_model=aum,
             )
             print(f'{datetime.now()}: done aapi.update_analysis_status')
-
-
-def test_simulate_joint_calling_pipeline():
-    """
-    Simulates events of the joint-calling workflow
-    """
-
-    # test_run_id = 'AFYPXR'
-    # sample_ids = 'CPG620, CPG638, CPG646'.split(', ')
-
-    # Unique test run ID to avoid clashing with previous test run samples
-    test_run_id = os.environ.get(
-        'SM_DV_TEST_RUN_ID',
-        ''.join(
-            random.choice(string.ascii_uppercase + string.digits) for _ in range(6)
-        ),
-    )
-    print(f'{datetime.now()} Test run ID: {test_run_id}')
-
-    print(f'{datetime.now()} Populate samples for test run {test_run_id}')
-    sample_ids = _jc_pipeline_add_samples(test_run_id)
-    print()
-
-    print(f'{datetime.now()} Add/update analyses, reads -> cram')
-    _jc_pipeline_submit_analyses()
-    print()
-    print(f'{datetime.now()} Set to in progress')
-    _jc_pipeline_set_in_progress()
-    print()
-    print(f'{datetime.now()} Set to completed')
-    _jc_pipeline_set_completed()
-    print()
-
-    print(f'{datetime.now()} Add/update analyses, cram -> gvcf')
-    _jc_pipeline_submit_analyses()
-    print()
-    print(f'{datetime.now()} Set to in progress')
-    _jc_pipeline_set_in_progress()
-    print()
-    print(f'{datetime.now()} Set to completed')
-    _jc_pipeline_set_completed()
-    print()
-
-    print('Add/update analyses, gvcf -> joint-calling')
-    _jc_pipeline_submit_analyses()
-    print()
-    print(f'{datetime.now()} Set to in progress')
-    _jc_pipeline_set_in_progress()
-    print()
-    print(f'{datetime.now()} Set to completed')
-    _jc_pipeline_set_completed()
-    print()
-
-    # Checking that after all calls, a 'completed' 'joint-calling' analysis must exist
-    # for the initally added samples
-    aapi = AnalysisApi()
-    analyses = aapi.get_latest_complete_analyses(project=PROJ)
-    print(f'Final analyses: {analyses}')
-    assert any(
-        a['type'] == 'joint-calling'
-        and set(sample_ids) & set(sample_id_format(a['sample_ids'])) == set(sample_ids)
-        for a in analyses
-    ), [
-        (a['type'], set(sample_id_format(a['sample_ids'])), set(sample_ids))
-        for a in analyses
-    ]
 
 
 def sample_id_format(sample_id: Union[int, List[int]]):

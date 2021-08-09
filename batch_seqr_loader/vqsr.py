@@ -75,6 +75,8 @@ def make_vqsr_jobs(
     intervals: Dict,
     scatter_count: int,
     output_vcf_path: str,
+    sm_db_name: str = None,
+    analysis_id: int = None,
 ) -> Job:
     """
     Add jobs that perform the allele-specific VQSR variant QC
@@ -92,6 +94,10 @@ def make_vqsr_jobs(
     :param intervals: ResourceGroup object with intervals to scatter
     :param scatter_count: number of interavals
     :param output_vcf_path: path to write final recalibrated VCF to
+    :param sm_db_name: sample-metadata project name. Will update the analysis
+        status if sm_db_name and analysis_id are provided.
+    :param analysis_id: sample-metadata analysis entry name. Will update the analysis
+        status if sm_db_name and analysis_id are provided.
     :return: a final Job, and a path to the VCF with VQSR annotations
     """
 
@@ -281,6 +287,8 @@ def make_vqsr_jobs(
         input_vcf=recalibrated_gathered_vcf,
         disk_size=medium_disk,
         output_vcf_path=output_vcf_path,
+        sm_db_name=sm_db_name,
+        analysis_id=analysis_id,
     )
 
     _add_variant_eval_step(
@@ -902,6 +910,8 @@ def _add_filter_sb_step(
     input_vcf: hb.ResourceGroup,
     disk_size: int,
     output_vcf_path: str = None,
+    sm_db_name: str = None,
+    analysis_id: int = None,
 ) -> Job:
     """
     Removes the INFO/SB field from a VCF.
@@ -925,9 +935,13 @@ def _add_filter_sb_step(
 
     j.command(
         f"""
-    bcftools annotate -x INFO/SB {input_vcf['vcf.gz']} -Oz -o {j.output_vcf['vcf.gz']} && tabix {j.output_vcf['vcf.gz']}
+    bcftools annotate -x INFO/SB {input_vcf['vcf.gz']} -Oz -o 
+    {j.output_vcf['vcf.gz']} && tabix {j.output_vcf['vcf.gz']}
+
+    {utils.make_update_status_curl('completed', sm_db_name, analysis_id)}
     """
     )
+    j.env('TOKEN', utils.GCLOUD_TOKEN)
     if output_vcf_path:
         b.write_output(j.output_vcf, output_vcf_path.replace('.vcf.gz', ''))
     return j

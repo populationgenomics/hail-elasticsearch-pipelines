@@ -1,8 +1,8 @@
-TEST_VERSION := v1-11
+TEST_VERSION := v1-13
 TEST_DATASET := na12878-trio
 
 ACUTE_CARE_DATASET := acute-care
-ACUTE_CARE_VERSION := v1-1
+ACUTE_CARE_VERSION := v1-3
 
 .PHONY: package
 package:
@@ -30,12 +30,12 @@ run_test:
 	--dataset seqr \
 	--access-level test \
 	--output-dir   "datasets/$(TEST_DATASET)/$(TEST_VERSION)" \
-	--description  "seqr loader - $(TEST_DATASET) test - from GVCFs" \
+	--description  "seqr loader - $(TEST_DATASET) test - from CRAMs" \
 	batch_seqr_loader/batch_workflow.py \
 	--namespace    test \
 	--version      $(TEST_VERSION) \
 	--seqr-dataset $(TEST_DATASET) \
-	--gvcf         'gs://cpg-seqr-test/batches/NA12878-trio/*.g.vcf.gz' \
+	--cram         'gs://cpg-seqr-test/batches/NA12878-trio/*.cram' \
 	--ped-file     "gs://cpg-seqr-test/batches/NA12878-trio/NA12878-trio.ped" \
 	--keep-scratch \
 	--reuse
@@ -143,7 +143,7 @@ run_test_from_fq_tiny:
 .PHONY: run_acute_care
 run_acute_care:
 	analysis-runner \
-	--dataset seqr \
+	--dataset acute-care \
 	--access-level test \
 	--output-dir   "datasets/$(ACUTE_CARE_DATASET)/$(ACUTE_CARE_VERSION)" \
 	--description  "seqr loader - $(ACUTE_CARE_DATASET) from KCCG GVCFs and Simons fastqs (1 sample)" \
@@ -151,11 +151,14 @@ run_acute_care:
 	--namespace    test \
 	--version      $(ACUTE_CARE_VERSION) \
 	--seqr-dataset $(ACUTE_CARE_DATASET) \
-	--gvcf         'gs://cpg-seqr-upload-zornitza-stark/*.g.vcf.gz' \
-	--data-to-realign 'gs://cpg-seqr-upload-zornitza-stark/cpg_acute_20210727_185421/200721_A00692_0122_ML206418_20W001106-FAM000553_MAN-20200721_NEXTERAFLEXWGS_*.fastq.gz' \
-	--ped-file     "gs://cpg-seqr-upload-zornitza-stark/cpg_acute-fixed.ped" \
+	--cram 'gs://cpg-acute-care-upload/20W000094-FAM000347.cram' \
+	--cram 'gs://cpg-acute-care-upload/20W000095-FAM000347.cram' \
+	--cram 'gs://cpg-acute-care-upload/20W000114-FAM000354.cram' \
+	--cram 'gs://cpg-acute-care-upload/20W000115-FAM000354.cram' \
+	--cram 'gs://cpg-acute-care-upload/20W000116-FAM000354.cram' \
+	--data-to-realign 'gs://cpg-acute-care-upload/cpg_acute_20210727_185421/200721_A00692_0122_ML206418_20W001106-FAM000553_MAN-20200721_NEXTERAFLEXWGS_*.fastq.gz' \
 	--reuse \
-        --keep-scratch
+	--keep-scratch
 
 .PHONY: run_test_sm_workflow
 run_test_sm_workflow:
@@ -165,3 +168,18 @@ run_test_sm_workflow:
 	--output-dir   "datasets/run_test_sm_workflow" \
 	--description  "test SM workflow" \
 	batch_seqr_loader/test/batch_test_simulate_sm_workfow.py
+
+.PHONY: run_test_sm
+run_test_sm:
+	analysis-runner \
+	--dataset seqr \
+	--access-level test \
+	--output-dir   "datasets/$(ACUTE_CARE_DATASET)/$(TEST_VERSION)" \
+	--description  "seqr loader $(ACUTE_CARE_DATASET) $(TEST_VERSION) test from SM" \
+	batch_seqr_loader/batch_workflow_sm.py \
+	--namespace    test \
+	--version      $(TEST_VERSION) \
+	--seqr-dataset $(ACUTE_CARE_DATASET) \
+	--sm-server-db-name vladdev \
+	--reuse \
+	--keep-scratch

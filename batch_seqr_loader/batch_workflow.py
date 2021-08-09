@@ -9,23 +9,28 @@ Driver for loading data into SEQR for the CPG. See the README for more informati
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
+import sys
 import tempfile
-import hashlib
-from collections import defaultdict
 from os.path import join, dirname, abspath, splitext
-from typing import Optional, List, Tuple, Set, Iterable, Dict
+from typing import Optional, List, Tuple, Set, Dict, Union
 import pandas as pd
 import click
 import hailtop.batch as hb
 from analysis_runner import dataproc
 from hailtop.batch.job import Job
+from sample_metadata import (
+    SampleApi,
+    AnalysisApi,
+    AnalysisModel,
+    Sample,
+)
 
-from find_inputs import find_inputs
+from find_inputs import sample_id_format
 from vqsr import make_vqsr_jobs
 import utils
-from utils import file_exists
 
 
 logger = logging.getLogger(__file__)
@@ -33,52 +38,32 @@ logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
 logger.setLevel(logging.INFO)
 
 
+sapi = SampleApi()
+aapi = AnalysisApi()
+
+
 @click.command()
 @click.option(
-    '--gvcf',
-    'gvcfs',
-    multiple=True,
-    help='Glob path to input GVCF files.C orresponding tbi index files are expected '
-    'exist',
-)
-@click.option(
-    '--bam',
-    '--cram',
-    'crams',
-    multiple=True,
-    help='Glob path to input BAM or CRAM files. Corresponding bai/crai indices are '
-    'expected to existVariants will be called with GATK HaplotypeCaller',
-)
-@click.option(
-    '--bam-to-realign',
-    '--cram-to-realign',
-    '--fastq-to-realign',
-    '--data-to-realign',
-    'data_to_realign',
-    multiple=True,
-    help='Glob path with input BAM/CRAM/FASTQ files that need re-alignment. '
-    'For BAMs and CRAMs, corresponding bai/crai indices are expected to exist. '
-    'Files will be (re-)aligned with BWA, and variants will be called with '
-    'GATK HaplotypeCaller',
+    '--sm-db-name',
+    'sm_db_name',
+    default='seqr',
+    help='Override the server metadata project/DB name',
 )
 @click.option(
     '--seqr-dataset',
-    'dataset_name',
+    'seqr_dataset_name',
     required=True,
     help='Name of the seqr dataset. If a genomics DB already exists for this dataset, '
     'it will be extended with the new samples. When loading into the ES, '
     'the name will be suffixed with the dataset version (set by --version)',
 )
-@click.option('--version', 'dataset_version', type=str, required=True)
+@click.option('--version', 'seqr_dataset_version', type=str, required=True)
 @click.option(
     '-n',
     '--namespace',
     'output_namespace',
     type=click.Choice(['main', 'test', 'tmp']),
     help='The bucket namespace to write the results to',
-)
-@click.option(
-    '--ped-file', 'ped_fpath', help='Pedigree file to verify the relatedness and sex.'
 )
 @click.option('--keep-scratch', 'keep_scratch', is_flag=True)
 @click.option(
@@ -89,17 +74,6 @@ logger.setLevel(logging.INFO)
     'that generates it.',
 )
 @click.option('--dry-run', 'dry_run', is_flag=True)
-@click.option('--disable-validation', 'disable_validation', is_flag=True)
-@click.option(
-    '--remap-tsv',
-    'remap_path',
-    help='Path to a TSV file with two columns: s and seqr_id.',
-)
-@click.option(
-    '--subset-tsv',
-    'subset_path',
-    help='Path to a TSV file with one column of sample IDs: s.',
-)
 @click.option(
     '--make-checkpoints',
     'make_checkpoints',
@@ -114,42 +88,28 @@ logger.setLevel(logging.INFO)
 )
 @click.option('--vep-block-size', 'vep_block_size')
 def main(
-    gvcfs: List[str],
-    crams: List[str],
-    data_to_realign: List[str],
-    dataset_name: str,
-    dataset_version: str,
+    sm_db_name: str,
+    seqr_dataset_name: str,
+    seqr_dataset_version: str,
     output_namespace: str,
-    ped_fpath: str,
     keep_scratch: bool,
     overwrite: bool,
     dry_run: bool,
-    disable_validation: bool,  # pylint: disable=unused-argument
-    remap_path: str,
-    subset_path: str,
-    make_checkpoints: bool,
-    skip_ped_checks: bool,
+    make_checkpoints: bool,  # pylint: disable=unused-argument
+    skip_ped_checks: bool,  # pylint: disable=unused-argument
     vep_block_size: Optional[int] = None,  # pylint: disable=unused-argument
 ):  # pylint: disable=missing-function-docstring
-    if not (gvcfs or crams or data_to_realign):
-        raise click.BadParameter(
-            'Specify at least one of the input parameters '
-            '(can be multiple and/or repeated): '
-            '--gvcf, --cram, --bam, --data-to-realign'
-        )
-
-    project = 'seqr'
     billing_project = os.getenv('HAIL_BILLING_PROJECT') or 'seqr'
 
     if output_namespace in ['test', 'tmp']:
         tmp_bucket_suffix = 'test-tmp'
     else:
         tmp_bucket_suffix = 'main-tmp'
-    work_bucket = f'gs://cpg-{project}-{tmp_bucket_suffix}/seqr-loader-tmp/{dataset_name}/{dataset_version}'
+    tmp_bucket = f'gs://cpg-seqr-{tmp_bucket_suffix}/seqr-loader/{seqr_dataset_name}/{seqr_dataset_version}'
     hail_bucket = os.environ.get('HAIL_BUCKET')
     if not hail_bucket or keep_scratch:
-        # Scratch files are large, so we want to use the temporary bucket for them
-        hail_bucket = f'{work_bucket}/hail'
+        # Scratch files are large, so we want to use the temporary bucket to put them in
+        hail_bucket = f'{tmp_bucket}/hail'
     logger.info(
         f'Starting hail Batch with the project {billing_project}, '
         f'bucket {hail_bucket}'
@@ -159,8 +119,8 @@ def main(
         bucket=hail_bucket.replace('gs://', ''),
     )
     b = hb.Batch(
-        f'Seqr loading pipeline for dataset "{dataset_name}"'
-        f', in the namespace "{output_namespace}"',
+        f'Seqr loading pipeline for the seqr dataset "{seqr_dataset_name}"'
+        f', in the namespace "{output_namespace}", DB "{sm_db_name}"',
         backend=backend,
     )
 
@@ -170,148 +130,185 @@ def main(
     else:
         output_suffix = 'test-tmp'
         web_bucket_suffix = 'test-tmp'
-    genomicsdb_bucket = f'gs://cpg-{project}-{output_suffix}/datasets/{dataset_name}/{dataset_version}/genomicsdbs'
-    fingerprints_bucket = f'gs://cpg-{project}-{output_suffix}/datasets/{dataset_name}/{dataset_version}/fingerprints'
-    web_bucket = f'gs://cpg-{project}-{web_bucket_suffix}/datasets/{dataset_name}/{dataset_version}'
+    out_bucket = f'gs://cpg-seqr-{output_suffix}/datasets/{seqr_dataset_name}/{seqr_dataset_version}'
 
     local_tmp_dir = tempfile.mkdtemp()
-
-    samples_df, ped_fpath = find_inputs(
-        gvcfs,
-        crams,
-        data_to_realign,
+    _add_jobs(
+        b=b,
+        sm_db_name=sm_db_name,
+        tmp_bucket=tmp_bucket,
+        out_bucket=out_bucket,
         local_tmp_dir=local_tmp_dir,
-        work_bucket=work_bucket,
-        ped_fpath=ped_fpath,
-    )
-
-    reference = b.read_input_group(
-        base=utils.REF_FASTA,
-        fai=utils.REF_FASTA + '.fai',
-        dict=utils.REF_FASTA.replace('.fasta', '')
-        .replace('.fna', '')
-        .replace('.fa', '')
-        + '.dict',
-    )
-    bwa_reference = b.read_input_group(
-        base=utils.REF_FASTA,
-        fai=utils.REF_FASTA + '.fai',
-        dict=utils.REF_FASTA.replace('.fasta', '')
-        .replace('.fna', '')
-        .replace('.fa', '')
-        + '.dict',
-        sa=utils.REF_FASTA + '.sa',
-        amb=utils.REF_FASTA + '.amb',
-        bwt=utils.REF_FASTA + '.bwt',
-        ann=utils.REF_FASTA + '.ann',
-        pac=utils.REF_FASTA + '.pac',
-    )
-    noalt_regions = b.read_input(join(utils.REF_BUCKET, 'noalt.bed'))
-
-    # Aligning available FASTQs
-    align_fastq_jobs, samples_df = _make_realign_jobs(
-        b=b,
-        samples_df=samples_df,
-        file_type='fastq_to_realign',
-        reference=bwa_reference,
-        work_bucket=work_bucket,
+        output_suffix=output_suffix,
+        web_bucket_suffix=web_bucket_suffix,
+        seqr_dataset_name=seqr_dataset_name,
+        seqr_dataset_version=seqr_dataset_version,
         overwrite=overwrite,
+        prod=output_namespace == 'main',
+        vep_block_size=vep_block_size,
     )
+    b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch)
+    shutil.rmtree(local_tmp_dir)
 
-    # Indexing input CRAMs, BAMs, GVCFs when index files are missing
-    index_jobs, samples_df = _make_index_jobs(b, samples_df)
 
-    # Realigning CRAMs
-    realign_cram_jobs, samples_df = _make_realign_jobs(
-        b=b,
-        samples_df=samples_df,
-        file_type='cram_to_realign',
-        reference=bwa_reference,
-        work_bucket=work_bucket,
-        overwrite=overwrite,
-        depends_on=index_jobs,
+def _get_latest_complete_analysis(
+    sm_db_name: str,
+) -> Dict[Tuple[str, Tuple], AnalysisModel]:
+    """
+    Returns a dictionary that maps a tuple (analysis type, sample ids) to the
+    lastest complete analysis record (represented by a AnalysisModel object)
+    """
+    latest_by_type_and_sids = dict()
+    for a_type in ['cram', 'gvcf', 'joint-calling']:
+        latest_complete_analyses = [
+            AnalysisModel(
+                type=a['type'],
+                status=a['status'],
+                output=a['output'],
+                sample_ids=sample_id_format(a['sample_ids']),
+            )
+            for a in aapi.get_latest_complete_analyses_by_type(
+                project=sm_db_name, analysis_type=a_type
+            )
+        ]
+        for a in latest_complete_analyses:
+            latest_by_type_and_sids[(a_type, tuple(set(a.sample_ids)))] = a
+    return latest_by_type_and_sids
+
+
+def _add_jobs(
+    b: hb.Batch,
+    sm_db_name: str,
+    out_bucket,
+    tmp_bucket,
+    local_tmp_dir,
+    output_suffix,  # pylint: disable=unused-argument
+    web_bucket_suffix,  # pylint: disable=unused-argument
+    seqr_dataset_name,
+    seqr_dataset_version,  # pylint: disable=unused-argument
+    overwrite: bool,
+    prod: bool,
+    vep_block_size,
+):
+    genomicsdb_bucket = f'{out_bucket}/genomicsdbs'
+    # fingerprints_bucket = f'gs://cpg-seqr-{output_suffix}/datasets/{seqr_dataset_name}/{seqr_dataset_version}/fingerprints'
+    # web_bucket = f'gs://cpg-seqr-{web_bucket_suffix}/datasets/{seqr_dataset_name}/{seqr_dataset_version}'
+
+    samples = sapi.get_all_samples(project=sm_db_name)
+    samples = [s for s in samples if not s.external_id.startswith('NA12878-from')]
+    latest_by_type_and_sids = _get_latest_complete_analysis(sm_db_name)
+    reference, bwa_reference, noalt_regions = utils.get_refs(b)
+
+    gvcf_jobs = []
+    gvcf_by_sid: Dict[str, str] = dict()
+    for s in samples:
+        logger.info(f'Processing sample {s.id}')
+        cram_analysis = latest_by_type_and_sids.get(('cram', (s.id,)))
+        if not cram_analysis:
+            logger.info(
+                f'     Sample does not have CRAM analysis yet, attempting to parse '
+                f'"reads" metadata field and submit alignment'
+            )
+            reads_data = _verify_reads_data(s.meta.get('reads'))
+            if not reads_data:
+                continue
+
+            cram_job, cram_analysis = _make_realign_jobs(
+                b=b,
+                sample_name=s.id,
+                reads_data=reads_data,
+                reference=bwa_reference,
+                out_bucket=out_bucket,
+                overwrite=overwrite,
+                sm_db_name=sm_db_name,
+            )
+        else:
+            cram_job = b.new_job(f'BWA align, {s.id} [reuse]')
+
+        gvcf_analysis = latest_by_type_and_sids.get(('gvcf', (s.id,)))
+        if not gvcf_analysis:
+            intervals_j = _add_split_intervals_job(
+                b,
+                utils.UNPADDED_INTERVALS,
+                utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS,
+                utils.REF_FASTA,
+            )
+            gvcf_job, gvcf_analysis = _make_produce_gvcf_jobs(
+                b=b,
+                sample_name=s.id,
+                cram_path=cram_analysis.output,
+                intervals=intervals_j.intervals,
+                reference=reference,
+                noalt_regions=noalt_regions,
+                out_bucket=out_bucket,
+                tmp_bucket=tmp_bucket,
+                overwrite=overwrite,
+                depends_on=[intervals_j, cram_job],
+                sm_db_name=sm_db_name,
+            )
+        else:
+            gvcf_job = b.new_job(f'Make GVCF, {s.id} [reuse]')
+        gvcf_jobs.append(gvcf_job)
+        gvcf_by_sid[s.id] = gvcf_analysis.output
+
+    # Is there a complete joint-calling analysis for the requested set of samples?
+    jc_analysis = latest_by_type_and_sids.get(
+        ('joint-calling', tuple(set(s.id for s in samples)))
     )
-
-    ped_check_j = None
-    if not skip_ped_checks:
-        ped_check_j, ped_fpath = _pedigree_checks(
+    if jc_analysis:
+        logger.info('All samples went through the joint-calling')
+        jc_job = b.new_job('Joint calling [reuse]')
+    else:
+        jc_job, jc_analysis = _make_joint_genotype_jobs(
             b=b,
-            samples_df=samples_df,
+            genomicsdb_bucket=genomicsdb_bucket,
+            samples=samples,
+            gvcf_by_sid=gvcf_by_sid,
             reference=reference,
-            sites=b.read_input(utils.SOMALIER_SITES),
-            ped_file=b.read_input(ped_fpath),
+            dbsnp=utils.DBSNP_VCF,
+            out_bucket=out_bucket,
+            tmp_bucket=out_bucket,
+            local_tmp_dir=local_tmp_dir,
             overwrite=overwrite,
-            fingerprints_bucket=fingerprints_bucket,
-            web_bucket=web_bucket,
-            web_url=f'https://{output_namespace}-web.populationgenomics.org.au/{project}',
-            depends_on=align_fastq_jobs + realign_cram_jobs,
+            sm_db_name=sm_db_name,
         )
 
-    produce_gvcf_jobs, samples_df = _make_produce_gvcfs_jobs(
-        b=b,
-        samples_df=samples_df,
-        reference=reference,
-        work_bucket=work_bucket,
-        overwrite=overwrite,
-        noalt_regions=noalt_regions,
-        depends_on=align_fastq_jobs
-        + realign_cram_jobs
-        + ([ped_check_j] if ped_check_j else []),
-    )
-
-    joint_genotype_job, gathered_vcf_path = _make_joint_genotype_jobs(
-        b=b,
-        genomicsdb_bucket=genomicsdb_bucket,
-        samples_df=samples_df,
-        reference=reference,
-        dbsnp=utils.DBSNP_VCF,
-        work_bucket=work_bucket,
-        local_tmp_dir=local_tmp_dir,
-        overwrite=overwrite,
-        depends_on=produce_gvcf_jobs,
-    )
-
-    annotated_mt_path = join(dirname(gathered_vcf_path), 'annotated.mt')
-    if overwrite or not file_exists(annotated_mt_path):
+    annotated_mt_path = join(dirname(jc_analysis.output), 'annotated.mt')
+    if utils.can_reuse(annotated_mt_path, overwrite):
+        annotate_job = b.new_job('Annotate [reuse]')
+    else:
         annotate_job = dataproc.hail_dataproc_job(
             b,
             f'batch_seqr_loader/scripts/make_annotated_mt.py '
-            f'--source-path {gathered_vcf_path} '
+            f'--source-path {jc_analysis.output} '
             f'--dest-mt-path {annotated_mt_path} '
-            f'--bucket {join(work_bucket, "seqr_load")} '
-            + (f'--disable-validation ' if disable_validation else '')
-            + (f'--make-checkpoints ' if make_checkpoints else '')
-            + (f'--remap-tsv ' if remap_path else '')
-            + (f'--subset-tsv ' if subset_path else '')
-            + (f'--vep-block-size ' if vep_block_size else ''),
+            f'--bucket {join(out_bucket, "seqr_load")} '
+            '--disable-validation '
+            '--make-checkpoints ' + (f'--vep-block-size ' if vep_block_size else ''),
             max_age='8h',
             packages=utils.DATAPROC_PACKAGES,
             num_secondary_workers=utils.NUMBER_OF_DATAPROC_WORKERS,
-            job_name='make_annotated_mt.py',
+            job_name='Annotate',
             vep='GRCh38',
-            depends_on=[joint_genotype_job],
+            depends_on=[jc_job],
         )
-    else:
-        annotate_job = b.new_job('make_annotated_mt.py [reuse]')
 
     dataproc.hail_dataproc_job(
         b,
         f'batch_seqr_loader/scripts/load_to_es.py '
         f'--mt-path {annotated_mt_path} '
-        f'--es-index {dataset_name}-{dataset_version} '
+        f'--es-index {seqr_dataset_name}-{seqr_dataset_name} '
         f'--es-index-min-num-shards 1 '
         f'--genome-version GRCh38 '
-        f'{"--prod" if output_namespace == "main" else ""}',
+        f'{"--prod" if prod else ""}',
         max_age='8h',
         packages=utils.DATAPROC_PACKAGES,
         num_secondary_workers=10,
-        job_name='load_to_es.py',
+        job_name='Add to ES index',
         depends_on=[annotate_job],
         scopes=['cloud-platform'],
     )
-
-    b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch)
-    shutil.rmtree(local_tmp_dir)
+    return b
 
 
 def _pedigree_checks(
@@ -340,7 +337,7 @@ def _pedigree_checks(
         samples_df['s'], samples_df['file'], samples_df['index']
     ):
         fp_file_by_sample[sn] = join(fingerprints_bucket, f'{sn}.somalier')
-        if can_reuse(fp_file_by_sample[sn], overwrite):
+        if utils.can_reuse(fp_file_by_sample[sn], overwrite):
             extract_jobs.append(b.new_job(f'Somalier extract, {sn} [reuse]'))
         else:
             j = b.new_job(f'Somalier extract, {sn}')
@@ -403,7 +400,7 @@ def _pedigree_checks(
     )
 
     # Copy somalier outputs to buckets
-    sample_hash = hash_sample_names(samples_df['s'])
+    sample_hash = utils.hash_sample_names(samples_df['s'])
     prefix = join(fingerprints_bucket, sample_hash, 'somalier')
     somalier_samples_path = f'{prefix}.samples.tsv'
     somalier_pairs_path = f'{prefix}.pairs.tsv'
@@ -437,161 +434,149 @@ python check_pedigree.py \
     return check_j, somalier_samples_path
 
 
-def _make_index_jobs(
-    b: hb.Batch,
-    samples_df: pd.DataFrame,
-) -> Tuple[List[Job], pd.DataFrame]:
-    jobs = []
-    cram_df = samples_df[samples_df['type'].isin(['cram', 'cram_to_realign'])]
-    for sn, fpath, index_fpath in zip(cram_df['s'], cram_df['file'], cram_df['index']):
-        if index_fpath is None:
-            job_name = f'Index alignment file, {sn}'
-            file = b.read_input(fpath)
-            j = b.new_job(job_name)
-            jobs.append(j)
-            j.image(utils.BAZAM_IMAGE)
-            j.storage(('50G' if fpath.endswith('.cram') else '150G'))
-            j.command(f'samtools index {file} {j.output_crai}')
-            index_fpath = splitext(fpath)[0] + (
-                '.crai' if fpath.endswith('.cram') else '.bai'
-            )
-            b.write_output(j.output_crai, index_fpath)
-            samples_df.loc[sn, 'index'] = index_fpath
-            jobs.append(j)
-    gvcf_df = samples_df[samples_df['type'].isin(['gvcf'])]
-
-    for sn, fpath, index_fpath in zip(cram_df['s'], gvcf_df['file'], gvcf_df['index']):
-        if index_fpath is None:
-            job_name = f'Index GVCF, {sn}'
-            file = b.read_input(fpath)
-            j = b.new_job(job_name)
-            jobs.append(j)
-            j.image('quay.io/biocontainers/tabix')
-            j.storage('10G')
-            j.command(f'tabix -p vcf {file} && ln {file}.tbi {j.output_tbi}')
-            index_fpath = fpath + '.tbi'
-            b.write_output(j.output_tbi, index_fpath)
-            samples_df.loc[sn, 'index'] = index_fpath
-            jobs.append(j)
-    return jobs, samples_df
-
-
 def _make_realign_jobs(
     b: hb.Batch,
-    samples_df: pd.DataFrame,
-    file_type: str,  # 'fastq_to_realign', 'cram_to_realign'
+    sample_name: str,
+    reads_data: Union[str, Tuple[List[str], List[str]]],
     reference: hb.ResourceGroup,
-    work_bucket: str,
+    out_bucket: str,
     overwrite: bool,
     depends_on: Optional[List[Job]] = None,
-) -> Tuple[List[Job], pd.DataFrame]:
+    sm_db_name: str = None,
+) -> Tuple[Job, AnalysisModel]:
     """
-    Takes all samples with a 'file' of 'type'='fastq_to_realign'|'cram_to_realign'
-    in `samples_df`, runs BWA to realign reads again, and sets a new 'file'
-    of 'type'='cram'.
+    Runs BWA to realign reads back again to hg38.
 
     When the input is CRAM/BAM, uses Bazam to stream reads to BWA.
     """
-    jobs = []
-    realign_df = samples_df[samples_df['type'] == file_type]
-    for sn, file1, file2, index in zip(
-        realign_df['s'], realign_df['file'], realign_df['file2'], realign_df['index']
-    ):
-        job_name = f'BWA align, {sn}'
-        output_cram_path = join(work_bucket, f'{sn}.cram')
-        if can_reuse(output_cram_path, overwrite):
-            jobs.append(b.new_job(f'{job_name} [reuse]'))
-        else:
-            assert (
-                file2 or (file1.endswith('.cram') or file1.endswith('.bam')) and index
-            )
-            j = b.new_job(job_name)
-            jobs.append(j)
-            j.image(utils.BAZAM_IMAGE)
-            total_cpu = 32
-            use_bazam = file1.endswith('.cram') or file1.endswith('.bam')
-            if use_bazam:
-                bazam_cpu = 4
-                bwa_cpu = 24
-                bamsormadup_cpu = 4
-            else:
-                bazam_cpu = 0
-                bwa_cpu = 32
-                bamsormadup_cpu = 10
-            j.cpu(total_cpu)
-            j.memory('standard')
-            j.storage('500G')
-            j.declare_resource_group(
-                output_cram={
-                    'cram': '{root}.cram',
-                    'crai': '{root}.crai',
-                }
-            )
-            if depends_on:
-                j.depends_on(*depends_on)
+    job_name = f'BWA align, {sample_name}'
+    output_cram_path = join(out_bucket, f'{sample_name}.cram')
+    analysis = AnalysisModel(
+        type='cram',
+        output=output_cram_path,
+        status='queued',
+        sample_ids=[sample_name],
+    )
+    if utils.can_reuse(output_cram_path, overwrite):
+        analysis.status = 'completed'
+        if sm_db_name:
+            aapi.create_new_analysis(project=sm_db_name, analysis_model=analysis)
+        return b.new_job(f'{job_name} [reuse]'), analysis
+    if sm_db_name:
+        analysis_id = aapi.create_new_analysis(
+            project=sm_db_name, analysis_model=analysis
+        )
+        logger.info(f'     Queueing CRAM re-alignment analysis')
+    else:
+        analysis_id = None
 
-            if use_bazam:
-                file1 = b.read_input_group(base=file1, index=index)
-                r1_param = (
-                    f'<(bazam -Xmx16g -Dsamjdk.reference_fasta={reference.base}'
-                    f' -n{bazam_cpu} -bam {file1.base})'
-                )
-                r2_param = '-'
-            else:
-                files1 = [b.read_input(f1) for f1 in file1.split(',')]
-                files2 = [b.read_input(f1) for f1 in file2.split(',')]
-                r1_param = f'<(cat {" ".join(files1)})'
-                r2_param = f'<(cat {" ".join(files2)})'
+    j = b.new_job(job_name)
+    j.image(utils.BAZAM_IMAGE)
+    total_cpu = 32
 
-            rg_line = f'@RG\\tID:{sn}\\tSM:{sn}'
+    file1: Union[str, List[str]]
+    file2: Union[str, List[str]]
+    if isinstance(reads_data, str):
+        use_bazam = True
+        file1 = reads_data
+        file2 = file1 + '.crai'
+        if not utils.file_exists(file2):
+            file2 = re.sub('.cram$', '.crai', file1)
+            if not utils.file_exists(file2):
+                logger.error(f'Not found CRAI index for file {file1}')
+                sys.exit(1)
+    else:
+        use_bazam = False
+        file1, file2 = reads_data
+    if use_bazam:
+        bazam_cpu = 4
+        bwa_cpu = 24
+        bamsormadup_cpu = 4
+    else:
+        bazam_cpu = 0
+        bwa_cpu = 32
+        bamsormadup_cpu = 10
+    j.cpu(total_cpu)
+    j.memory('standard')
+    j.storage('500G')
+    j.declare_resource_group(
+        output_cram={
+            'cram': '{root}.cram',
+            'crai': '{root}.crai',
+        }
+    )
+    if depends_on:
+        j.depends_on(*depends_on)
 
-            # BWA command options:
-            # -K     process INT input bases in each batch regardless of nThreads (for reproducibility)
-            # -p     smart pairing (ignoring in2.fq)
-            # -t16   threads
-            # -Y     use soft clipping for supplementary alignments
-            # -R     read group header line such as '@RG\tID:foo\tSM:bar'
-            j.command(
-                f"""
+    if use_bazam:
+        # if not file2:
+        #     cram = b.read_input_group(base=file1)
+        #     index_cmd = 'samtools index {cram} {cram}.crai'
+        # else:
+        cram = b.read_input_group(base=file1, index=file2)
+        r1_param = (
+            f'<(bazam -Xmx16g -Dsamjdk.reference_fasta={reference.base}'
+            f' -n{bazam_cpu} -bam {cram.base})'
+        )
+        r2_param = '-'
+    else:
+        files1 = [b.read_input(f1) for f1 in file1]
+        files2 = [b.read_input(f1) for f1 in file2]
+        r1_param = f'<(cat {" ".join(files1)})'
+        r2_param = f'<(cat {" ".join(files2)})'
+
+    rg_line = f'@RG\\tID:{sample_name}\\tSM:{sample_name}'
+    # BWA command options:
+    # -K     process INT input bases in each batch regardless of nThreads (for reproducibility)
+    # -p     smart pairing (ignoring in2.fq)
+    # -t16   threads
+    # -Y     use soft clipping for supplementary alignments
+    # -R     read group header line such as '@RG\tID:foo\tSM:bar'
+    j.command(
+        f"""
 set -o pipefail
 set -ex
+
+{utils.make_update_status_curl('in-progress', sm_db_name, analysis_id)}
 
 (while true; do df -h; pwd; du -sh $(dirname {j.output_cram.cram}); sleep 600; done) &
 
 bwa mem -K 100000000 {'-p' if use_bazam else ''} -t{bwa_cpu} -Y \\
-  -R '{rg_line}' {reference.base} {r1_param} {r2_param} | \\
+-R '{rg_line}' {reference.base} {r1_param} {r2_param} | \\
 bamsormadup inputformat=sam threads={bamsormadup_cpu} SO=coordinate \\
-  M={j.duplicate_metrics} outputformat=sam \\
-  tmpfile=$(dirname {j.output_cram.cram})/bamsormadup-tmp | \\
+M={j.duplicate_metrics} outputformat=sam \\
+tmpfile=$(dirname {j.output_cram.cram})/bamsormadup-tmp | \\
 samtools view -T {reference.base} -O cram -o {j.output_cram.cram}
 
 samtools index -@{total_cpu} {j.output_cram.cram} {j.output_cram.crai}
 
 df -h; pwd; du -sh $(dirname {j.output_cram.cram})
-            """
-            )
-            b.write_output(j.output_cram, splitext(output_cram_path)[0])
-            b.write_output(
-                j.duplicate_metrics,
-                join(work_bucket, 'bwa', f'{sn}-duplicate-metrics.csv'),
-            )
 
-        samples_df.loc[sn, 'file'] = output_cram_path
-        samples_df.loc[sn, 'index'] = splitext(output_cram_path)[0] + '.crai'
-        samples_df.loc[sn, 'type'] = 'cram'
-
-    return jobs, samples_df
+{utils.make_update_status_curl('completed', sm_db_name, analysis_id, )}
+    """
+    )
+    j.env('TOKEN', utils.GCLOUD_TOKEN)
+    b.write_output(j.output_cram, splitext(output_cram_path)[0])
+    b.write_output(
+        j.duplicate_metrics,
+        join(dirname(output_cram_path), f'{sample_name}-duplicate-metrics.csv'),
+    )
+    return j, analysis
 
 
-def _make_produce_gvcfs_jobs(
+def _make_produce_gvcf_jobs(
     b: hb.Batch,
-    samples_df: pd.DataFrame,
+    sample_name: str,
+    cram_path: str,
+    intervals: hb.ResourceGroup,
     reference: hb.ResourceGroup,
     noalt_regions: hb.ResourceFile,
-    work_bucket: str,  # pylint: disable=unused-argument
+    out_bucket: str,
+    tmp_bucket: str,  # pylint: disable=unused-argument
     overwrite: bool,  # pylint: disable=unused-argument
     depends_on: Optional[List[Job]] = None,
-) -> Tuple[List[Job], pd.DataFrame]:
+    sm_db_name: str = None,
+) -> Tuple[Job, AnalysisModel]:
     """
     Takes all samples with a 'file' of 'type'='bam' in `samples_df`,
     and runs HaplotypeCaller on them, and sets a new 'file' of 'type'='gvcf'
@@ -599,80 +584,97 @@ def _make_produce_gvcfs_jobs(
     HaplotypeCaller is run in an interval-based sharded way, with per-interval
     HaplotypeCaller jobs defined in a nested loop.
     """
-    intervals_j = None
-    merge_gvcf_job_by_sn = dict()
-    cram_df = samples_df[samples_df['type'] == 'cram']
-    for sn, bam_fpath, index_fpath in zip(
-        cram_df['s'], cram_df['file'], cram_df['index']
-    ):
-        called_gvcf_path = join(work_bucket, 'raw', f'{sn}.g.vcf.gz')
-        if can_reuse(called_gvcf_path, overwrite):
-            j = b.new_job(f'HaplotypeCaller, {sn} [reuse]')
-        else:
-            if intervals_j is None:
-                intervals_j = _add_split_intervals_job(
-                    b,
-                    utils.UNPADDED_INTERVALS,
-                    utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS,
-                    utils.REF_FASTA,
-                )
-                if depends_on:
-                    intervals_j.depends_on(*depends_on)
-            haplotype_caller_jobs = []
-            for idx in range(utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS):
-                haplotype_caller_jobs.append(
-                    _add_haplotype_caller_job(
-                        b,
-                        cram=b.read_input_group(
-                            **{'cram': bam_fpath, 'cram.crai': index_fpath}
-                        ),
-                        interval=intervals_j.intervals[f'interval_{idx}'],
-                        reference=reference,
-                        sample_name=sn,
-                        interval_idx=idx,
-                        number_of_intervals=utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS,
-                        depends_on=depends_on,
-                    )
-                )
-            j = _add_merge_gvcfs_job(
+    out_gvcf_path = join(out_bucket, f'{sample_name}.g.vcf.gz')
+    analysis = AnalysisModel(
+        type='gvcf',
+        output=out_gvcf_path,
+        status='queued',
+        sample_ids=[sample_name],
+    )
+    if utils.can_reuse(out_gvcf_path, overwrite=overwrite):
+        analysis.status = 'completed'
+        if sm_db_name:
+            aapi.create_new_analysis(project=sm_db_name, analysis_model=analysis)
+        return b.new_job('Make GVCF [reuse]'), analysis
+    if sm_db_name:
+        analysis_id = aapi.create_new_analysis(
+            project=sm_db_name, analysis_model=analysis
+        )
+        logger.info('     Queueing variant calling')
+    else:
+        analysis_id = None
+
+    haplotype_caller_jobs = []
+    for idx in range(utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS):
+        haplotype_caller_jobs.append(
+            _add_haplotype_caller_job(
                 b,
-                gvcfs=[j.output_gvcf for j in haplotype_caller_jobs],
-                output_gvcf_path=called_gvcf_path,
-                sample_name=sn,
+                cram=b.read_input_group(
+                    **{
+                        'cram': cram_path,
+                        'crai': re.sub('.cram$', '.crai', cram_path),
+                    }
+                ),
+                interval=intervals[f'interval_{idx}'],
+                reference=reference,
+                sample_name=sample_name,
+                interval_idx=idx,
+                number_of_intervals=utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS,
+                depends_on=depends_on,
+                analysis_id=analysis_id,
+                sm_db_name=sm_db_name,
             )
-        merge_gvcf_job_by_sn[sn] = j
-        samples_df.loc[sn, 'file'] = called_gvcf_path
-        samples_df.loc[sn, 'index'] = called_gvcf_path + '.tbi'
-        samples_df.loc[sn, 'type'] = 'gvcf'
-
-    gvcf_df = samples_df[samples_df['type'] == 'gvcf']
-    jobs = []
-    for sn, gvcf_fpath, tbi_path in zip(
-        gvcf_df['s'], gvcf_df['file'], gvcf_df['index']
-    ):
-        called_gvcf_path = join(work_bucket, f'{sn}.g.vcf.gz')
-        reblock_gvcf_job = _add_reblock_gvcf_job(
-            b,
-            input_gvcf=b.read_input_group(
-                **{'g.vcf.gz': gvcf_fpath, 'g.vcf.gz.tbi': tbi_path}
-            ),
-            overwrite=overwrite,
         )
-        if merge_gvcf_job_by_sn.get(sn):
-            reblock_gvcf_job.depends_on(merge_gvcf_job_by_sn[sn])
-        subset_to_noalt_job = _add_subset_noalt_step(
-            b,
-            input_gvcf=reblock_gvcf_job.output_gvcf,
-            noalt_regions=noalt_regions,
-            overwrite=overwrite,
-            output_gvcf_path=called_gvcf_path,
-        )
-        jobs.append(subset_to_noalt_job)
-        samples_df.loc[sn, 'file'] = called_gvcf_path
-        samples_df.loc[sn, 'index'] = called_gvcf_path + '.tbi'
-        samples_df.loc[sn, 'type'] = 'gvcf'
+    hc_gvcf_path = join(tmp_bucket, 'raw', f'{sample_name}.g.vcf.gz')
+    merge_j = _add_merge_gvcfs_job(
+        b,
+        gvcfs=[j.output_gvcf for j in haplotype_caller_jobs],
+        output_gvcf_path=hc_gvcf_path,
+        sample_name=sample_name,
+    )
 
-    return jobs, samples_df
+    postproc_job = _make_postproc_gvcf_jobs(
+        b=b,
+        input_gvcf_path=hc_gvcf_path,
+        out_gvcf_path=out_gvcf_path,
+        noalt_regions=noalt_regions,
+        overwrite=overwrite,
+        depends_on=[merge_j],
+        analysis_id=analysis_id,
+        sm_db_name=sm_db_name,
+    )
+    return postproc_job, analysis
+
+
+def _make_postproc_gvcf_jobs(
+    b: hb.Batch,
+    input_gvcf_path: str,
+    out_gvcf_path: str,
+    noalt_regions: hb.ResourceFile,
+    overwrite: bool,  # pylint: disable=unused-argument
+    depends_on: Optional[List[Job]] = None,
+    analysis_id: int = None,
+    sm_db_name: str = None,
+) -> Job:
+    reblock_gvcf_job = _add_reblock_gvcf_job(
+        b,
+        input_gvcf=b.read_input_group(
+            **{'g.vcf.gz': input_gvcf_path, 'g.vcf.gz.tbi': input_gvcf_path + '.tbi'}
+        ),
+        overwrite=overwrite,
+    )
+    if depends_on:
+        reblock_gvcf_job.depends_on(*depends_on)
+    subset_to_noalt_job = _add_subset_noalt_step(
+        b,
+        input_gvcf=reblock_gvcf_job.output_gvcf,
+        noalt_regions=noalt_regions,
+        overwrite=overwrite,
+        output_gvcf_path=out_gvcf_path,
+        analysis_id=analysis_id,
+        sm_db_name=sm_db_name,
+    )
+    return subset_to_noalt_job
 
 
 def _add_reblock_gvcf_job(
@@ -686,7 +688,7 @@ def _add_reblock_gvcf_job(
     required for recalibration
     """
     job_name = 'ReblockGVCF'
-    if output_gvcf_path and file_exists(output_gvcf_path) and not overwrite:
+    if utils.can_reuse(output_gvcf_path, overwrite):
         return b.new_job(job_name + ' [reuse]')
 
     j = b.new_job(job_name)
@@ -721,6 +723,8 @@ def _add_subset_noalt_step(
     noalt_regions: str,
     overwrite: bool,
     output_gvcf_path: Optional[str] = None,
+    analysis_id: int = None,
+    sm_db_name: str = None,
 ) -> Job:
     """
     1. Subset GVCF to main chromosomes to avoid downstream errors
@@ -728,7 +732,7 @@ def _add_subset_noalt_step(
        from Hail about mismatched INFO annotations
     """
     job_name = 'SubsetToNoalt'
-    if output_gvcf_path and file_exists(output_gvcf_path) and not overwrite:
+    if utils.can_reuse(output_gvcf_path, overwrite):
         return b.new_job(job_name + ' [reuse]')
 
     j = b.new_job(job_name)
@@ -753,8 +757,11 @@ def _add_subset_noalt_step(
         -Oz
 
     bcftools index --tbi {j.output_gvcf['g.vcf.gz']}
+
+    {utils.make_update_status_curl('completed', sm_db_name, analysis_id)}
         """
     )
+    j.env('TOKEN', utils.GCLOUD_TOKEN)
     if output_gvcf_path:
         b.write_output(j.output_gvcf, output_gvcf_path.replace('.g.vcf.gz', ''))
     return j
@@ -763,25 +770,28 @@ def _add_subset_noalt_step(
 def _make_joint_genotype_jobs(
     b: hb.Batch,
     genomicsdb_bucket: str,
-    samples_df: pd.DataFrame,
+    samples: List,
+    gvcf_by_sid: Dict[str, str],
     reference: hb.ResourceGroup,
     dbsnp: str,
-    work_bucket: str,
+    out_bucket: str,
+    tmp_bucket: str,
     local_tmp_dir: str,
     overwrite: bool,
     depends_on: Optional[List[Job]] = None,
-) -> Tuple[Job, str]:
+    sm_db_name: str = None,
+) -> Tuple[Job, AnalysisModel]:
     """
     Assumes all samples have a 'file' of 'type'='gvcf' in `samples_df`.
     Adds samples to the GenomicsDB and runs joint genotyping on them.
     Outputs a multi-sample VCF under `output_vcf_path`.
     """
-    is_small_callset = len(samples_df) < 1000
+    is_small_callset = len(samples) < 1000
     # 1. For small callsets, we don't apply the ExcessHet filtering.
     # 2. For small callsets, we gather the VCF shards and collect QC metrics directly.
     # For anything larger, we need to keep the VCF sharded and gather metrics
     # collected from them.
-    is_huge_callset = len(samples_df) >= 100000
+    is_huge_callset = len(samples) >= 100000
     # For huge callsets, we allocate more memory for the SNPs Create Model step
 
     intervals_j = _add_split_intervals_job(
@@ -793,48 +803,82 @@ def _make_joint_genotype_jobs(
     if depends_on:
         intervals_j.depends_on(*depends_on)
 
-    samples_to_be_in_db_per_interval = dict()
     genomics_gcs_path_per_interval = dict()
-    import_gvcfs_job_per_interval = dict()
     for idx in range(utils.NUMBER_OF_GENOMICS_DB_INTERVALS):
         genomics_gcs_path_per_interval[idx] = join(
             genomicsdb_bucket,
             f'interval_{idx}_outof_{utils.NUMBER_OF_GENOMICS_DB_INTERVALS}.tar',
         )
 
-        import_gvcfs_job, samples_to_be_in_db = _add_import_gvcfs_job(
+    # Determining which samples to add. Using the first interval, so the assumption
+    # is that all DBs have the same set of samples.
+    (
+        samples_to_add,
+        sample_names_will_be_in_db,
+        sample_names_to_skip,
+        updating_existing_db,
+        sample_map_bucket_path,
+    ) = _samples_to_add_to_db(
+        genomicsdb_gcs_path=genomics_gcs_path_per_interval[0],
+        interval_idx=0,
+        local_tmp_dir=local_tmp_dir,
+        samples=samples,
+        tmp_bucket=tmp_bucket,
+        gvcf_by_sid=gvcf_by_sid,
+    )
+
+    samples_hash = utils.hash_sample_names(sample_names_will_be_in_db)
+    gathered_vcf_path = join(
+        out_bucket, 'jointly-called', 'tmp', 'gathered', samples_hash + '.vcf.gz'
+    )
+    vqsred_vcf_path = join(out_bucket, 'jointly-called', samples_hash + '.vcf.gz')
+
+    analysis = AnalysisModel(
+        sample_ids=[s.id for s in samples],
+        type='joint-calling',
+        output=vqsred_vcf_path,
+        status='queued',
+    )
+    if utils.can_reuse(vqsred_vcf_path, overwrite=overwrite):
+        analysis.status = 'completed'
+        if sm_db_name:
+            aapi.create_new_analysis(project=sm_db_name, analysis_model=analysis)
+        return b.new_job('Joint-calling + VQSR [reuse]'), analysis
+    if sm_db_name:
+        analysis_id = aapi.create_new_analysis(
+            project=sm_db_name, analysis_model=analysis
+        )
+        logger.info(f'Queueing {analysis.type}, analysis ID: {analysis_id}')
+    else:
+        analysis_id = None
+
+    import_gvcfs_job_per_interval = dict()
+    for idx in range(utils.NUMBER_OF_GENOMICS_DB_INTERVALS):
+        import_gvcfs_job, _ = _add_import_gvcfs_job(
             b=b,
             genomicsdb_gcs_path=genomics_gcs_path_per_interval[idx],
-            samples_df=samples_df,
-            work_bucket=work_bucket,
-            local_tmp_dir=local_tmp_dir,
+            samples_to_add=samples_to_add,
+            sample_names_to_skip=sample_names_to_skip,
+            sample_names_will_be_in_db=sample_names_will_be_in_db,
+            updating_existing_db=updating_existing_db,
+            sample_map_bucket_path=sample_map_bucket_path,
             interval=intervals_j.intervals[f'interval_{idx}'],
             interval_idx=idx,
             number_of_intervals=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
+            sm_db_name=sm_db_name,
+            analysis_id=analysis_id,
         )
         import_gvcfs_job_per_interval[idx] = import_gvcfs_job
-        samples_to_be_in_db_per_interval[idx] = samples_to_be_in_db
-
-    # Post-import-genomicsdb check:
-    # we expect each DB to contain the same set of samples
-    intervals_per_sample_sets = defaultdict(set)
-    for interval_idx, samples_to_be_in_db in samples_to_be_in_db_per_interval.items():
-        intervals_per_sample_sets[frozenset(samples_to_be_in_db)].add(interval_idx)
-    if len(intervals_per_sample_sets) > 1:
-        logger.critical(
-            f'GenomicsDB for each interval is expected to contain the same '
-            f'set of samples. Got: {intervals_per_sample_sets}'
-        )
 
     make_site_only_jobs = []
     scattered_vcf_by_interval: Dict[int, hb.ResourceGroup] = dict()
 
     for idx in range(utils.NUMBER_OF_GENOMICS_DB_INTERVALS):
-        samples_hash = hash_sample_names(samples_to_be_in_db_per_interval[idx])
+        samples_hash = utils.hash_sample_names(sample_names_will_be_in_db)
         site_only_vcf_path = join(
-            work_bucket, 'jointly-called', samples_hash, f'interval_{idx}.vcf.gz'
+            tmp_bucket, 'jointly-called', samples_hash, f'interval_{idx}.vcf.gz'
         )
-        if site_only_vcf_path and file_exists(site_only_vcf_path) and not overwrite:
+        if utils.can_reuse(site_only_vcf_path, overwrite):
             make_site_only_jobs.append(b.new_job('Joint genotyping [reuse]'))
             scattered_vcf_by_interval[idx] = b.read_input_group(
                 **{
@@ -851,7 +895,7 @@ def _make_joint_genotype_jobs(
                 dbsnp=dbsnp,
                 overwrite=overwrite,
                 interval_idx=idx,
-                number_of_samples=len(samples_to_be_in_db_per_interval[idx]),
+                number_of_samples=len(sample_names_will_be_in_db),
                 number_of_intervals=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
             )
             if import_gvcfs_job_per_interval.get(idx):
@@ -874,42 +918,33 @@ def _make_joint_genotype_jobs(
             make_site_only_jobs.append(make_site_only_job)
             scattered_vcf_by_interval[idx] = make_site_only_job.output_vcf
 
-    samples_to_be_in_db = list(samples_to_be_in_db_per_interval.values())[0]
-    samples_hash = hash_sample_names(samples_to_be_in_db)
-    gathered_vcf_path = join(
-        work_bucket, 'jointly-called', samples_hash, f'gathered.vcf.gz'
-    )
     final_gathered_vcf_job = _add_final_gather_vcf_job(
         b,
         input_vcfs=list(scattered_vcf_by_interval.values()),
         overwrite=overwrite,
         output_vcf_path=gathered_vcf_path,
     )
-
-    vqsr_bucket = join(work_bucket, 'vqsrred', samples_hash)
-    vqsred_vcf_path = join(vqsr_bucket, f'output.vcf.gz')
-    if overwrite or not utils.file_exists(vqsred_vcf_path):
-        vqsr_job = make_vqsr_jobs(
-            b,
-            input_vcf_gathered=gathered_vcf_path,
-            input_vcfs_scattered=list(scattered_vcf_by_interval.values()),
-            is_small_callset=is_small_callset,
-            is_huge_callset=is_huge_callset,
-            work_bucket=vqsr_bucket,
-            web_bucket=vqsr_bucket,
-            depends_on=[final_gathered_vcf_job],
-            vqsr_params_d={
-                'snp_filter_level': 99.7,
-                'indel_filter_level': 99.0,
-            },
-            intervals=intervals_j.intervals,
-            scatter_count=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
-            output_vcf_path=vqsred_vcf_path,
-        )
-    else:
-        vqsr_job = b.new_job('VQSR [reuse]')
-
-    return vqsr_job, vqsred_vcf_path
+    tmp_vqsr_bucket = join(tmp_bucket, 'vqsr', samples_hash)
+    vqsr_job = make_vqsr_jobs(
+        b,
+        input_vcf_gathered=gathered_vcf_path,
+        input_vcfs_scattered=list(scattered_vcf_by_interval.values()),
+        is_small_callset=is_small_callset,
+        is_huge_callset=is_huge_callset,
+        work_bucket=tmp_vqsr_bucket,
+        web_bucket=tmp_vqsr_bucket,
+        depends_on=[final_gathered_vcf_job],
+        vqsr_params_d={
+            'snp_filter_level': 99.7,
+            'indel_filter_level': 99.0,
+        },
+        intervals=intervals_j.intervals,
+        scatter_count=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
+        output_vcf_path=vqsred_vcf_path,
+        sm_db_name=sm_db_name,
+        analysis_id=analysis_id,
+    )
+    return vqsr_job, analysis
 
 
 def _add_split_intervals_job(
@@ -964,6 +999,8 @@ def _add_haplotype_caller_job(
     depends_on: Optional[List[Job]] = None,
     output_gvcf_path: Optional[str] = None,
     overwrite: bool = False,
+    analysis_id: int = None,
+    sm_db_name: str = None,
 ) -> Job:
     """
     Run HaplotypeCaller on an input BAM or CRAM, and output GVCF
@@ -971,7 +1008,7 @@ def _add_haplotype_caller_job(
     job_name = 'HaplotypeCaller'
     if interval_idx is not None:
         job_name += f', {sample_name} {interval_idx}/{number_of_intervals}'
-    if output_gvcf_path and not overwrite and utils.file_exists(output_gvcf_path):
+    if utils.can_reuse(output_gvcf_path, overwrite):
         return b.new_job(f'{job_name} [reuse]')
 
     j = b.new_job(job_name)
@@ -993,6 +1030,9 @@ def _add_haplotype_caller_job(
         f"""set -e
     (while true; do df -h; pwd; du -sh $(dirname {j.output_gvcf['g.vcf.gz']}); free -m; sleep 300; done) &
 
+    {utils.make_update_status_curl('in-progress', sm_db_name, analysis_id) 
+        if interval_idx == 0 or interval_idx is None else ''}
+
     gatk --java-options "-Xms{java_mem}g -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10" \\
       HaplotypeCaller \\
       -R {reference.base} \\
@@ -1006,6 +1046,7 @@ def _add_haplotype_caller_job(
     df -h; pwd; du -sh $(dirname {j.output_gvcf['g.vcf.gz']}); free -m
     """
     )
+    j.env('TOKEN', utils.GCLOUD_TOKEN)
     if output_gvcf_path:
         b.write_output(j.output_gvcf, j.output_gvcf)
     return j
@@ -1053,24 +1094,15 @@ def _add_merge_gvcfs_job(
     return j
 
 
-def _add_import_gvcfs_job(
-    b: hb.Batch,
-    genomicsdb_gcs_path: str,
-    samples_df: pd.DataFrame,
-    work_bucket: str,
-    local_tmp_dir: str,
-    interval: hb.ResourceFile,
-    interval_idx: Optional[int] = None,
-    number_of_intervals: int = 1,
-    depends_on: Optional[List[Job]] = None,
-) -> Tuple[Optional[Job], Set[str]]:
-    """
-    Add GVCFs to a genomics database (or create a new instance if it doesn't exist)
-    Returns a Job, or None if no new samples to add
-    """
-    new_samples_df = samples_df[samples_df['type'] == 'gvcf']
-
-    if file_exists(genomicsdb_gcs_path):
+def _samples_to_add_to_db(
+    genomicsdb_gcs_path,
+    interval_idx,
+    local_tmp_dir,
+    samples,
+    tmp_bucket: str,
+    gvcf_by_sid: Dict[str, str],
+) -> Tuple[List[Sample], Set[str], Set[str], bool, str]:
+    if utils.file_exists(genomicsdb_gcs_path):
         # Check if sample exists in the DB already
         genomicsdb_metadata = join(local_tmp_dir, f'callset-{interval_idx}.json')
         # This command will download the DB metadata file locally.
@@ -1085,26 +1117,74 @@ def _add_import_gvcfs_job(
 
         with open(genomicsdb_metadata) as f:
             db_metadata = json.load(f)
-        samples_in_db = set(s['sample_name'] for s in db_metadata['callsets'])
-        new_samples = set(new_samples_df.s)
-        samples_to_add = new_samples - samples_in_db
-        samples_to_skip = new_samples & samples_in_db
-        if samples_to_skip:
+        sample_names_in_db = set(s['sample_name'] for s in db_metadata['callsets'])
+        new_sample_names = set([s.id for s in samples])
+        sample_names_to_add = new_sample_names - sample_names_in_db
+        sample_names_to_skip = new_sample_names & sample_names_in_db
+        if sample_names_to_skip:
             logger.warning(
-                f'Samples {samples_to_skip} already exist in the DB '
+                f'Samples {sample_names_to_skip} already exist in the DB '
                 f'{genomicsdb_gcs_path}, skipping adding them'
             )
-        if samples_to_add:
+        if sample_names_to_add:
             logger.info(
-                f'Will add samples {samples_to_add} into the DB '
+                f'Will add samples {sample_names_to_add} into the DB '
                 f'{genomicsdb_gcs_path}'
             )
         else:
             logger.warning(f'Nothing will be added into the DB {genomicsdb_gcs_path}')
 
-        samples_to_add_df = new_samples_df[new_samples_df.s.isin(samples_to_add)]
-        samples_will_be_in_db = samples_in_db | samples_to_add
+        samples_to_add = [s for s in samples if s.id in sample_names_to_add]
+        sample_names_will_be_in_db = sample_names_in_db | sample_names_to_add
+        updating_existing_db = True
+    else:
+        # Initiate new DB
+        sample_names_to_skip = set()
+        samples_to_add = samples
+        sample_names_to_add = {s.id for s in samples}
+        sample_names_will_be_in_db = sample_names_to_add
+        updating_existing_db = False
 
+    sample_map_bucket_path = join(tmp_bucket, 'work', 'sample_name.csv')
+    local_sample_map_fpath = join(local_tmp_dir, 'sample_name.csv')
+    with open(local_sample_map_fpath, 'w') as f:
+        for s in samples_to_add:
+            f.write('\t'.join([s.id, gvcf_by_sid[s.id]]) + '\n')
+    subprocess.run(
+        f'gsutil cp {local_sample_map_fpath} {sample_map_bucket_path}',
+        check=False,
+        shell=True,
+    )
+
+    return (
+        samples_to_add,
+        sample_names_will_be_in_db,
+        sample_names_to_skip,
+        updating_existing_db,
+        sample_map_bucket_path,
+    )
+
+
+def _add_import_gvcfs_job(
+    b: hb.Batch,
+    genomicsdb_gcs_path: str,
+    samples_to_add: List[Sample],
+    sample_names_to_skip: Set[str],
+    sample_names_will_be_in_db: Set[str],
+    updating_existing_db: bool,
+    sample_map_bucket_path: str,
+    interval: hb.ResourceFile,
+    interval_idx: Optional[int] = None,
+    number_of_intervals: int = 1,
+    depends_on: Optional[List[Job]] = None,
+    sm_db_name: str = None,
+    analysis_id: int = None,
+) -> Tuple[Optional[Job], Set[str]]:
+    """
+    Add GVCFs to a genomics database (or create a new instance if it doesn't exist)
+    Returns a Job, or None if no new samples to add
+    """
+    if updating_existing_db:
         # Update existing DB
         genomicsdb_param = '--genomicsdb-update-workspace-path workspace'
         genomicsdb = b.read_input(genomicsdb_gcs_path)
@@ -1116,19 +1196,7 @@ def _add_import_gvcfs_job(
         untar_genomicsdb_cmd = ''
         job_name = 'Creating GenomicsDB'
 
-        samples_to_add = set(new_samples_df.s)
-        samples_to_skip = set()
-        samples_to_add_df = new_samples_df
-        samples_will_be_in_db = samples_to_add
-
-    if not samples_to_add:
-        return None, samples_will_be_in_db
-
-    sample_map_fpath = join(work_bucket, 'work', 'sample_name.csv')
-    samples_to_add_df[['s', 'file']].to_csv(
-        sample_map_fpath, sep='\t', header=False, index=False
-    )
-    sample_name_map = b.read_input(sample_map_fpath)
+    sample_map = b.read_input(sample_map_bucket_path)
 
     if interval_idx is not None:
         job_name += f' {interval_idx}/{number_of_intervals}'
@@ -1139,7 +1207,7 @@ def _add_import_gvcfs_job(
     java_mem = 14
     j.memory('lowmem')  # ~ 1G/core ~ 14.4G
     # 1G + 1G per sample divided by the number of intervals
-    j.storage(f'{1 + len(samples_will_be_in_db) * 1 // number_of_intervals}G')
+    j.storage(f'{1 + len(sample_names_will_be_in_db) * 1 // number_of_intervals}G')
     if depends_on:
         j.depends_on(*depends_on)
 
@@ -1163,20 +1231,23 @@ def _add_import_gvcfs_job(
     # within the task; please do not change it without consulting
     # the Hellbender (GATK engine) team!
     
+    {utils.make_update_status_curl('in-progress', sm_db_name, analysis_id) 
+        if interval_idx == 0 or interval_idx is None else ''}
+    
     {untar_genomicsdb_cmd}
 
     (while true; do df -h; pwd; du -sh $(dirname {j.output['tar']}); free -m; sleep 300; done) &
 
-    echo "Adding samples: {', '.join(samples_to_add)}"
+    echo "Adding samples: {', '.join([s.id for s in samples_to_add])}"
     {f'echo "Skipping adding samples that are already in the DB: '
-     f'{", ".join(samples_to_skip)}"' if samples_to_skip else ''}
+     f'{", ".join(sample_names_to_skip)}"' if sample_names_to_skip else ''}
 
     gatk --java-options -Xms{java_mem}g \\
       GenomicsDBImport \\
       {genomicsdb_param} \\
       --batch-size 50 \\
       -L {interval} \\
-      --sample-name-map {sample_name_map} \\
+      --sample-name-map {sample_map} \\
       --reader-threads 14 \\
       --merge-input-intervals \\
       --consolidate
@@ -1188,8 +1259,9 @@ def _add_import_gvcfs_job(
     df -h; pwd; du -sh $(dirname {j.output['tar']}); free -m
     """
     )
+    j.env('TOKEN', utils.GCLOUD_TOKEN)
     b.write_output(j.output, genomicsdb_gcs_path.replace('.tar', ''))
-    return j, samples_will_be_in_db
+    return j, sample_names_will_be_in_db
 
 
 def _add_genotype_gvcfs_job(
@@ -1211,7 +1283,7 @@ def _add_genotype_gvcfs_job(
     if interval_idx is not None:
         job_name += f' {interval_idx}/{number_of_intervals}'
 
-    if output_vcf_path and utils.file_exists(output_vcf_path) and not overwrite:
+    if utils.can_reuse(output_vcf_path, overwrite):
         return b.new_job(job_name + ' [reuse]')
 
     j = b.new_job(job_name)
@@ -1286,7 +1358,7 @@ def _add_gnarly_genotyper_job(
     if interval_idx is not None:
         job_name += f' {interval_idx}/{number_of_intervals}'
 
-    if output_vcf_path and utils.file_exists(output_vcf_path) and not overwrite:
+    if utils.can_reuse(output_vcf_path, overwrite):
         return b.new_job(job_name + ' [reuse]')
 
     j = b.new_job(job_name)
@@ -1350,7 +1422,7 @@ def _add_exccess_het_filter(
     Returns: a Job object with a single output j.output_vcf of type ResourceGroup
     """
     job_name = 'Joint genotyping: ExcessHet filter'
-    if output_vcf_path and utils.file_exists(output_vcf_path) and not overwrite:
+    if utils.can_reuse(output_vcf_path, overwrite):
         return b.new_job(job_name + ' [reuse]')
 
     j = b.new_job(job_name)
@@ -1396,7 +1468,7 @@ def _add_make_sites_only_job(
     Returns: a Job object with a single output j.sites_only_vcf of type ResourceGroup
     """
     job_name = 'Joint genotyping: MakeSitesOnlyVcf'
-    if output_vcf_path and utils.file_exists(output_vcf_path) and not overwrite:
+    if utils.can_reuse(output_vcf_path, overwrite):
         return b.new_job(job_name + ' [reuse]')
 
     j = b.new_job(job_name)
@@ -1434,7 +1506,7 @@ def _add_final_gather_vcf_job(
     """
     job_name = f'Gather {len(input_vcfs)} VCFs'
 
-    if output_vcf_path and file_exists(output_vcf_path) and not overwrite:
+    if utils.can_reuse(output_vcf_path, overwrite):
         return b.new_job(job_name + ' [reuse]')
 
     j = b.new_job(job_name)
@@ -1474,29 +1546,48 @@ def _add_final_gather_vcf_job(
     return j
 
 
-def can_reuse(fpath: str, overwrite: bool) -> bool:
-    """
-    Checks if the file `fpath` exists and we are not overwriting
-    """
-    if not file_exists(fpath):
-        return False
-    elif overwrite:
-        logger.info(f'File {fpath} exists and will be overwritten')
-        return False
-    else:
-        logger.info(f'Reusing existing {fpath}. Use --overwrite to overwrite')
-        return True
+def _verify_reads_data(
+    reads_data: Union[None, str, List[Union[str, List[str]]]]
+) -> Union[
+    str, Tuple[List[str], List[str]], None
+]:  # pylint: disable=too-many-return-statements
 
+    if not reads_data:
+        logger.error(f'     ERROR: no "reads" data')
+        return None
 
-def hash_sample_names(sample_names: Iterable[str]) -> str:
-    """
-    Return a unique hash string from a from a set of strings
-    :param sample_names: set of strings
-    :return: a string hash
-    """
-    for sn in sample_names:
-        assert ' ' not in sn, sn
-    return hashlib.sha224(' '.join(sorted(sample_names)).encode()).hexdigest()
+    error_msg = (
+        f'     ERROR: the "reads" meta data must be a list of '
+        f'str/list (for FASTQ), or a BAM or CRAM path. Got: {reads_data}'
+    )
+    if isinstance(reads_data, str):
+        if not reads_data.endswith('.cram') or reads_data.endswith('.bam'):
+            logger.error(error_msg)
+            return None
+        return reads_data
+
+    elif isinstance(reads_data, list):
+        if not len(reads_data) == 2:
+            logger.error(error_msg)
+            return None
+        reads1 = reads_data[0]
+        reads2 = reads_data[1]
+
+        if isinstance(reads1, str):
+            if not isinstance(reads2, str):
+                logger.error(error_msg)
+                return None
+            reads1 = [reads1]
+            reads2 = [reads2]
+
+        if isinstance(reads1, list):
+            if not isinstance(reads2, list) or not len(reads1) == len(reads2):
+                logger.error(error_msg)
+                return None
+            return reads1, reads2
+
+    logger.error(error_msg)
+    return None
 
 
 if __name__ == '__main__':

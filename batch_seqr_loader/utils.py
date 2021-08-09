@@ -3,6 +3,7 @@ Utility functions for the seqr loader
 """
 import hashlib
 import os
+import subprocess
 from os.path import join
 from typing import Iterable, Tuple
 import logging
@@ -76,6 +77,8 @@ def can_reuse(fpath: str, overwrite: bool) -> bool:
     """
     Checks if the file `fpath` exists and we are not overwriting
     """
+    if not fpath:
+        return False
     if not file_exists(fpath):
         return False
     elif overwrite:
@@ -122,3 +125,33 @@ def get_refs(b: hb.Batch) -> Tuple:
     )
     noalt_regions = b.read_input(join(REF_BUCKET, 'noalt.bed'))
     return reference, bwa_reference, noalt_regions
+
+
+def make_update_status_curl(status, sm_db_name=None, analysis_id=None) -> str:
+    """
+    Generates a curl command that updates the analysis status
+    :param status: "in-progress", "failed", "completed", "queued"
+    :param sm_db_name: name of the SM project
+    :param analysis_id: ID of the analysis DB entry
+    :return: curl command string
+    """
+    api_url = 'https://sample-metadata.populationgenomics.org.au/api/v1'
+    if sm_db_name and analysis_id:
+        return (
+            f'curl --location --request PATCH '
+            + f'\'{api_url}/{sm_db_name}/analysis/{analysis_id}/\' '
+            + f'-d \'{{"status": "{status}"}}\' '
+            + '--header "Authorization: Bearer $TOKEN"'
+        )
+    return ''
+
+
+def get_gcloud_token() -> str:
+    """
+    Call gcloud to the identity token
+    """
+    cmd = 'gcloud auth print-identity-token'
+    return subprocess.check_output(cmd, shell=True).decode().strip()
+
+
+GCLOUD_TOKEN = get_gcloud_token()
