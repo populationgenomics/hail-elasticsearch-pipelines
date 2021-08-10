@@ -29,6 +29,7 @@ SNP_RECALIBRATION_TRANCHE_VALUES = [
     97.0,
     90.0,
 ]
+SNP_HARD_FILTER_LEVEL = 99.7
 SNP_RECALIBRATION_ANNOTATION_VALUES = [
     'AS_QD',
     'AS_MQRankSum',
@@ -53,6 +54,7 @@ INDEL_RECALIBRATION_TRANCHE_VALUES = [
     91.0,
     90.0,
 ]
+INDEL_HARD_FILTER_LEVEL = 99.7
 INDEL_RECALIBRATION_ANNOTATION_VALUES = [
     'AS_FS',
     'AS_SOR',
@@ -71,7 +73,6 @@ def make_vqsr_jobs(
     work_bucket: str,
     web_bucket: str,
     depends_on: Optional[List[Job]],
-    vqsr_params_d: Dict,
     intervals: Dict,
     scatter_count: int,
     output_vcf_path: str,
@@ -241,8 +242,8 @@ def make_vqsr_jobs(
                 snps_recalibration=snps_recalibrations[idx],
                 snps_tranches=snps_gathered_tranches,
                 disk_size=medium_disk,
-                indel_filter_level=vqsr_params_d['indel_filter_level'],
-                snp_filter_level=vqsr_params_d['snp_filter_level'],
+                snp_filter_level=SNP_HARD_FILTER_LEVEL,
+                indel_filter_level=INDEL_HARD_FILTER_LEVEL,
             ).recalibrated_vcf
             for idx in range(scatter_count)
         ]
@@ -277,12 +278,12 @@ def make_vqsr_jobs(
             snps_recalibration=snps_recalibration,
             snps_tranches=snps_tranches,
             disk_size=medium_disk,
-            indel_filter_level=vqsr_params_d['indel_filter_level'],
-            snp_filter_level=vqsr_params_d['snp_filter_level'],
+            indel_filter_level=SNP_HARD_FILTER_LEVEL,
+            snp_filter_level=INDEL_HARD_FILTER_LEVEL,
         )
         recalibrated_gathered_vcf = recalibrated_gathered_vcf_job.recalibrated_vcf
 
-    final_gathered_vcf_job = _add_filter_sb_step(
+    final_gathered_vcf_job = _add_final_filter_job(
         b,
         input_vcf=recalibrated_gathered_vcf,
         disk_size=medium_disk,
@@ -905,7 +906,7 @@ def _add_final_gather_vcf_step(
     return j
 
 
-def _add_filter_sb_step(
+def _add_final_filter_job(
     b: hb.Batch,
     input_vcf: hb.ResourceGroup,
     disk_size: int,
@@ -914,18 +915,17 @@ def _add_filter_sb_step(
     analysis_id: int = None,
 ) -> Job:
     """
-    Removes the INFO/SB field from a VCF.
+    Hard-filters the VQSR'ed VCF.
 
-    The reason we are doing that is because gatk ApplyVQSR replaces the VCF header
+    Also removes the INFO/SB field from a VCF. The reason we are doing that is because
+    gatk ApplyVQSR replaces the VCF header:
     ##INFO=<ID=SB,Number=.,Type=Int,Description="Strand Bias">
-
-    with
+    with:
     ##INFO=<ID=SB,Number=1,Type=Float,Description="Strand Bias">
-
     Even though the actual SB field is still a list of integers: SB=5,2,18,29
-    It breaks parsing the VCF into Hail.
+    Which breaks loading the VCF into Hail.
     """
-    j = b.new_job('VQSR: Remove SB')
+    j = b.new_job('VQSR: final filter')
     j.image(utils.BCFTOOLS_IMAGE)
     j.memory(f'8G')
     j.storage(f'{disk_size}G')
@@ -935,8 +935,9 @@ def _add_filter_sb_step(
 
     j.command(
         f"""
-    bcftools annotate -x INFO/SB {input_vcf['vcf.gz']} -Oz -o 
-    {j.output_vcf['vcf.gz']} && tabix {j.output_vcf['vcf.gz']}
+    bcftools view -f.,PASS {input_vcf['vcf.gz']} | \\
+    bcftools annotate -x INFO/SB -Oz -o {j.output_vcf['vcf.gz']} && \\
+    tabix {j.output_vcf['vcf.gz']}
 
     {utils.make_update_status_curl('completed', sm_db_name, analysis_id)}
     """

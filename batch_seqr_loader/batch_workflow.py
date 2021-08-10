@@ -937,10 +937,6 @@ def _make_joint_genotype_jobs(
         work_bucket=tmp_vqsr_bucket,
         web_bucket=tmp_vqsr_bucket,
         depends_on=[final_gathered_vcf_job],
-        vqsr_params_d={
-            'snp_filter_level': 99.7,
-            'indel_filter_level': 99.0,
-        },
         intervals=intervals_j.intervals,
         scatter_count=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
         output_vcf_path=vqsred_vcf_path,
