@@ -92,7 +92,7 @@ def can_reuse(fpath: str, overwrite: bool) -> bool:
 
 def hash_sample_names(sample_names: Iterable[str]) -> str:
     """
-    Return a unique hash string from a from a set of strings
+    Return a unique hash string from a set of strings
     :param sample_names: set of strings
     :return: a string hash
     """
