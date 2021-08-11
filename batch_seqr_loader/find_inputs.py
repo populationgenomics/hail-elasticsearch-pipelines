@@ -9,7 +9,7 @@ import os
 import re
 import subprocess
 from os.path import join, basename, splitext
-from typing import Optional, List, Dict, Tuple, Union
+from typing import Optional, List, Dict, Tuple
 import pandas as pd
 from utils import file_exists
 
@@ -365,47 +365,3 @@ def _find_fastq_pairs(fpaths: List[str]) -> Dict[str, Tuple[str, str]]:
         sn: (','.join(rs), ','.join(ls))
         for sn, (rs, ls) in fastqs_by_sample_name.items()
     }
-
-
-def sample_id_format(sample_id: Union[int, List[int]]):
-    """
-    Transform raw (int) sample identifier to format (CPGXXXH) where:
-        - CPG is the prefix
-        - H is the Luhn checksum
-        - XXX is the original identifier
-
-    >>> sample_id_format(10)
-    'CPG109'
-
-    >>> sample_id_format(12345)
-    'CPG123455'
-    """
-
-    if isinstance(sample_id, list):
-        return [sample_id_format(s) for s in sample_id]
-
-    if isinstance(sample_id, str) and not sample_id.isdigit():
-        if sample_id.startswith('CPG'):
-            return sample_id
-        raise ValueError(f'Unexpected format for sample identifier "{sample_id}"')
-    sample_id = int(sample_id)
-
-    return f'CPG{sample_id}{luhn_compute(sample_id)}'
-
-
-def luhn_compute(n):
-    """
-    Compute Luhn check digit of number given as string
-
-    >>> luhn_compute(453201511283036)
-    6
-
-    >>> luhn_compute(601151443354620)
-    1
-
-    >>> luhn_compute(677154949558680)
-    2
-    """
-    m = [int(d) for d in reversed(str(n))]
-    result = sum(m) + sum(d + (d >= 5) for d in m[::2])
-    return -result % 10

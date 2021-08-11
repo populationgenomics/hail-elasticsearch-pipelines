@@ -3,13 +3,13 @@ Utility functions for the seqr loader
 """
 import hashlib
 import os
-import subprocess
 from os.path import join
 from typing import Iterable, Tuple
 import logging
 from google.cloud import storage
 import hailtop.batch as hb
-
+from hailtop.batch import Batch
+from hailtop.batch.job import Job
 
 logger = logging.getLogger(__file__)
 logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
@@ -28,6 +28,7 @@ GNARLY_IMAGE = 'australia-southeast1-docker.pkg.dev/cpg-common/images/gnarly_gen
 BCFTOOLS_IMAGE = (
     'australia-southeast1-docker.pkg.dev/cpg-common/images/bcftools:1.10.2--h4f4756c_2'
 )
+SM_IMAGE = f'australia-southeast1-docker.pkg.dev/cpg-common/images/sm-api:1.0.9'
 
 NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS = 10
 NUMBER_OF_DATAPROC_WORKERS = 50
@@ -127,31 +128,60 @@ def get_refs(b: hb.Batch) -> Tuple:
     return reference, bwa_reference, noalt_regions
 
 
-def make_update_status_curl(status, sm_db_name=None, analysis_id=None) -> str:
+def make_sm_in_progress_job(
+    b: Batch, analyais_type: str, sm_db_name: str, analysis_id: str
+) -> Job:
     """
-    Generates a curl command that updates the analysis status
-    :param status: "in-progress", "failed", "completed", "queued"
-    :param sm_db_name: name of the SM project
-    :param analysis_id: ID of the analysis DB entry
-    :return: curl command string
+    Creates a job that updates the sample metadata server entry analysis status
+    to in-progress
     """
-    api_url = 'https://sample-metadata.populationgenomics.org.au/api/v1'
-    if sm_db_name and analysis_id:
-        return (
-            f'curl --location --request PATCH '
-            + f'\'{api_url}/{sm_db_name}/analysis/{analysis_id}/\' '
-            + f'-d \'{{"status": "{status}"}}\' '
-            + '--header "Authorization: Bearer $TOKEN"'
-        )
-    return ''
+    return make_sm_update_status_job(
+        b, analyais_type, 'in-progress', sm_db_name, analysis_id
+    )
 
 
-def get_gcloud_token() -> str:
+def make_sm_completed_job(
+    b: Batch, analyais_type: str, sm_db_name: str, analysis_id: str
+) -> Job:
     """
-    Call gcloud to the identity token
+    Creates a job that updates the sample metadata server entry analysis status
+    to completed
     """
-    cmd = 'gcloud auth print-identity-token'
-    return subprocess.check_output(cmd, shell=True).decode().strip()
+    return make_sm_update_status_job(
+        b, analyais_type, 'completed', sm_db_name, analysis_id
+    )
 
 
-GCLOUD_TOKEN = get_gcloud_token()
+def make_sm_update_status_job(
+    b: Batch, analyais_type: str, status: str, sm_db_name: str, analysis_id: str
+) -> Job:
+    """
+    Creates a job that updates the sample metadata server entry analysis status.
+    """
+    assert status in ['in-progress', 'failed', 'completed', 'queued']
+    j = b.new_job(f'SM: update {analyais_type} to {status}')
+    j.image(SM_IMAGE)
+    j.command(
+        f"""
+set -o pipefail
+set -ex
+
+export GOOGLE_APPLICATION_CREDENTIALS=/gsa-key/key.json
+gcloud -q auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
+export SM_DEV_DB_PROJECT=vladdev
+export SM_ENVIRONMENT=PRODUCTION
+
+cat <<EOT >> update.py
+from sample_metadata.api import AnalysisApi
+from sample_metadata import AnalysisUpdateModel
+aapi = AnalysisApi()
+aapi.update_analysis_status(
+    analysis_id='{analysis_id}',
+    project='{sm_db_name}',
+    analysis_update_model=AnalysisUpdateModel(status='{status}'),
+)
+EOT
+python update.py
+    """
+    )
+    return j
