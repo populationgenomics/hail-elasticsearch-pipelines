@@ -9,7 +9,7 @@ import os
 import re
 import subprocess
 from os.path import join, basename, splitext
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Dict, Tuple, Union
 import pandas as pd
 from utils import file_exists
 
@@ -48,7 +48,7 @@ def find_inputs(
     )
     gvcf_with_index_by_by_sn = find_file_indices(gvcfs)
     cram_with_index_by_by_sn = find_file_indices(crams)
-    fastq_pairs_by_by_sn = _find_fastq_pairs(fastq_to_align)
+    fastq_pairs_by_sn = find_fastq_pairs(fastq_to_align)
     cram_with_index_to_realign_by_sn = find_file_indices(cram_to_realign)
 
     data: Dict[str, List] = {
@@ -66,7 +66,7 @@ def find_inputs(
     all_sns = (
         set(gvcf_with_index_by_by_sn.keys())
         | set(cram_with_index_by_by_sn.keys())
-        | set(fastq_pairs_by_by_sn.keys())
+        | set(fastq_pairs_by_sn.keys())
         | set(cram_with_index_to_realign_by_sn.keys())
     )
     for sn in all_sns:
@@ -94,8 +94,8 @@ def find_inputs(
             data['file2'].append(None)
             data['index'].append(index)
             data['type'].append('cram_to_realign')
-        if sn in fastq_pairs_by_by_sn:
-            file1, file2 = fastq_pairs_by_by_sn[sn]
+        if sn in fastq_pairs_by_sn:
+            file1, file2 = fastq_pairs_by_sn[sn]
             data['file'].append(file1)
             data['file2'].append(file2)
             data['index'].append(None)
@@ -277,7 +277,40 @@ def splitext_gz(fname: str) -> Tuple[str, str]:
     return base, ext
 
 
-def _find_fastq_pairs(fpaths: List[str]) -> Dict[str, Tuple[str, str]]:
+def sm_verify_reads_data(
+    reads_data: List,
+    reads_type: str,
+) -> Union[
+    str, Tuple[List[str], List[str]], None
+]:  # pylint: disable=too-many-return-statements
+    """
+    Verify the meta.reads object in a sample db entry
+    """
+    if not reads_data:
+        logger.error(f'ERROR: no "reads" data')
+        return None
+    if not reads_type in ['fastq', 'bam']:
+        logger.error(f'ERROR: "reads_type" is expected to be fastq or bam')
+
+    error_msg = f'ERROR: cannot read the "reads" meta data: {reads_data}'
+    if reads_type == 'bam':
+        assert len(reads_data) == 1
+        fpath = reads_data[0]['location']
+        if not (fpath.endswith('.cram') or fpath.endswith('.bam')):
+            logger.error(error_msg)
+        return fpath
+
+    else:
+        rs1 = []
+        rs2 = []
+        for lane_data in reads_data:
+            assert len(lane_data) == 2
+            rs1.append(lane_data[0]['location'])
+            rs2.append(lane_data[1]['location'])
+        return rs1, rs2
+
+
+def find_fastq_pairs(fpaths: List[str]) -> Dict[str, Tuple[str, str]]:
     """
     Find pairs of FASTQ files for each sample
     """

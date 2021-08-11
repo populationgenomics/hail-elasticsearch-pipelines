@@ -16,20 +16,23 @@ import sys
 import tempfile
 from os.path import join, dirname, abspath, splitext
 from typing import Optional, List, Tuple, Set, Dict, Union
+from dataclasses import dataclass
 import pandas as pd
 import click
 import hailtop.batch as hb
 from analysis_runner import dataproc
 from hailtop.batch.job import Job
-from models.models.analysis import Analysis
 from sample_metadata import (
     SampleApi,
     AnalysisApi,
     AnalysisModel,
     Sample,
     AnalysisUpdateModel,
+    AnalysisType,
+    AnalysisStatus,
 )
 
+from find_inputs import sm_verify_reads_data
 from vqsr import make_vqsr_jobs
 import utils
 
@@ -152,6 +155,104 @@ def main(
     shutil.rmtree(local_tmp_dir)
 
 
+@dataclass
+class Analysis:
+    """
+    Represents the analysis DB entry
+    """
+
+    id: str
+    type: AnalysisType
+    status: AnalysisStatus
+    output: Optional[str]
+    sample_ids: List[str]
+
+    @staticmethod
+    def from_db(**kwargs):
+        """
+        Convert from db keys, mainly converting id to id_
+        """
+        analysis_type = kwargs.pop('type', None)
+        status = kwargs.pop('status', None)
+        sample_ids = sample_id_format(kwargs['sample_ids'])
+        output = kwargs.pop('output', [])
+        return Analysis(
+            id=kwargs.pop('id'),
+            type=AnalysisType(analysis_type),
+            status=AnalysisStatus(status),
+            sample_ids=list(set(sorted(sample_ids))),
+            output=output,
+        )
+
+
+def sample_id_format(sample_id: Union[int, List[int]]):
+    """
+    Transform raw (int) sample identifier to format (CPGXXXH) where:
+        - CPG is the prefix
+        - H is the Luhn checksum
+        - XXX is the original identifier
+
+    >>> sample_id_format(10)
+    'CPG109'
+
+    >>> sample_id_format(12345)
+    'CPG123455'
+    """
+
+    if isinstance(sample_id, list):
+        return [sample_id_format(s) for s in sample_id]
+
+    if isinstance(sample_id, str) and not sample_id.isdigit():
+        if sample_id.startswith('CPG'):
+            return sample_id
+        raise ValueError(f'Unexpected format for sample identifier "{sample_id}"')
+    sample_id = int(sample_id)
+
+    return f'CPG{sample_id}{luhn_compute(sample_id)}'
+
+
+def luhn_is_valid(n):
+    """
+    Based on: https://stackoverflow.com/a/21079551
+
+    >>> luhn_is_valid(4532015112830366)
+    True
+
+    >>> luhn_is_valid(6011514433546201)
+    True
+
+    >>> luhn_is_valid(6771549495586802)
+    True
+    """
+
+    def digits_of(n):
+        return [int(d) for d in str(n)]
+
+    digits = digits_of(n)
+    odd_digits = digits[-1::-2]
+    even_digits = digits[-2::-2]
+    checksum = sum(odd_digits) + sum(sum(digits_of(d * 2)) for d in even_digits)
+    return checksum % 10 == 0
+
+
+def luhn_compute(n):
+    """
+    Compute Luhn check digit of number given as string
+
+    >>> luhn_compute(453201511283036)
+    6
+
+    >>> luhn_compute(601151443354620)
+    1
+
+    >>> luhn_compute(677154949558680)
+    2
+    """
+    m = [int(d) for d in reversed(str(n))]
+    result = sum(m) + sum(d + (d >= 5) for d in m[::2])
+    return -result % 10
+
+
 def _get_latest_complete_analysis(
     sm_db_name: str,
 ) -> Dict[Tuple[str, Tuple], Analysis]:
@@ -161,20 +262,12 @@ def _get_latest_complete_analysis(
     """
     latest_by_type_and_sids = dict()
     for a_type in ['cram', 'gvcf', 'joint-calling']:
-        latest_complete_analyses = [
-            Analysis(
-                id=a['id'],
-                type=a['type'],
-                status=a['status'],
-                output=a['output'],
-                sample_ids=a['sample_ids'],
-            )
-            for a in aapi.get_latest_complete_analyses_by_type(
-                project=sm_db_name, analysis_type=a_type
-            )
-        ]
-        for a in latest_complete_analyses:
-            latest_by_type_and_sids[(a_type, tuple(set(a.sample_ids)))] = a
+        for a_data in aapi.get_latest_complete_analyses_by_type(
+            project=sm_db_name,
+            analysis_type=a_type,
+        ):
+            a: Analysis = Analysis.from_db(**a_data)
+            latest_by_type_and_sids[(a_type, tuple(a.sample_ids))] = a
     return latest_by_type_and_sids
 
 
@@ -197,6 +290,7 @@ def _add_jobs(
     # web_bucket = f'gs://cpg-seqr-{web_bucket_suffix}/datasets/{seqr_dataset_name}/{seqr_dataset_version}'
 
     samples = sapi.get_all_samples(project=sm_db_name)
+    # samples = [s for s in samples if not s.external_id.startswith('NA12878-from')]
     latest_by_type_and_sids = _get_latest_complete_analysis(sm_db_name)
     reference, bwa_reference, noalt_regions = utils.get_refs(b)
 
@@ -205,7 +299,7 @@ def _add_jobs(
     for s in samples:
         logger.info(f'Processing sample {s.id}')
         cram_analysis = latest_by_type_and_sids.get(('cram', (s.id,)))
-        reads_data = _verify_reads_data(s.meta.get('reads'))
+        reads_data = sm_verify_reads_data(s.meta.get('reads'), s.meta.get('reads_type'))
         if not reads_data:
             continue
         cram_job, cram_fpath = _make_realign_jobs(
@@ -537,6 +631,8 @@ def _make_realign_jobs(
         files2 = [b.read_input(f1) for f1 in file2]
         r1_param = f'<(cat {" ".join(files1)})'
         r2_param = f'<(cat {" ".join(files2)})'
+        logger.info(f'r1_param: {r1_param}')
+        logger.info(f'r2_param: {r2_param}')
 
     rg_line = f'@RG\\tID:{sample_name}\\tSM:{sample_name}'
     # BWA command options:
@@ -1610,50 +1706,6 @@ def _add_final_gather_vcf_job(
     if output_vcf_path:
         b.write_output(j.output_vcf, output_vcf_path.replace('.vcf.gz', ''))
     return j
-
-
-def _verify_reads_data(
-    reads_data: Union[None, str, List[Union[str, List[str]]]]
-) -> Union[
-    str, Tuple[List[str], List[str]], None
-]:  # pylint: disable=too-many-return-statements
-
-    if not reads_data:
-        logger.error(f'     ERROR: no "reads" data')
-        return None
-
-    error_msg = (
-        f'     ERROR: the "reads" meta data must be a list of '
-        f'str/list (for FASTQ), or a BAM or CRAM path. Got: {reads_data}'
-    )
-    if isinstance(reads_data, str):
-        if not reads_data.endswith('.cram') or reads_data.endswith('.bam'):
-            logger.error(error_msg)
-            return None
-        return reads_data
-
-    elif isinstance(reads_data, list):
-        if not len(reads_data) == 2:
-            logger.error(error_msg)
-            return None
-        reads1 = reads_data[0]
-        reads2 = reads_data[1]
-
-        if isinstance(reads1, str):
-            if not isinstance(reads2, str):
-                logger.error(error_msg)
-                return None
-            reads1 = [reads1]
-            reads2 = [reads2]
-
-        if isinstance(reads1, list):
-            if not isinstance(reads2, list) or not len(reads1) == len(reads2):
-                logger.error(error_msg)
-                return None
-            return reads1, reads2
-
-    logger.error(error_msg)
-    return None
 
 
 if __name__ == '__main__':
