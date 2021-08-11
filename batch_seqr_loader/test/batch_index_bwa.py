@@ -1,3 +1,4 @@
+# pylint: skip-file
 #!/usr/bin/env python3
 
 import hailtop.batch as hb
@@ -40,7 +41,7 @@ def _test_bwa(
 ):
     fq1 = b.read_input('gs://cpg-seqr-test/batches/test/tmp_fq')
     j = b.new_job('Test BWA')
-    j.image(SM_CONTAINER)
+    j.image(BAZAM_CONTAINER)
     total_cpu = 16
     bazam_cpu = 3
     bwa_cpu = 10
@@ -83,7 +84,7 @@ df -h; pwd; ls | grep -v proc | xargs du -sh
 
 
 billing_project = os.getenv('HAIL_BILLING_PROJECT') or 'seqr'
-hail_bucket = os.environ.get('HAIL_BUCKET')
+hail_bucket = os.environ.get('HAIL_BUCKET', 'cpg-seqr-test-tmp')
 print(
     f'Starting hail Batch with the project {billing_project}, ' f'bucket {hail_bucket}'
 )

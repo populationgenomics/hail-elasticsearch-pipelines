@@ -197,7 +197,6 @@ def _add_jobs(
     # web_bucket = f'gs://cpg-seqr-{web_bucket_suffix}/datasets/{seqr_dataset_name}/{seqr_dataset_version}'
 
     samples = sapi.get_all_samples(project=sm_db_name)
-    samples = [s for s in samples if not s.external_id.startswith('NA12878-from')]
     latest_by_type_and_sids = _get_latest_complete_analysis(sm_db_name)
     reference, bwa_reference, noalt_regions = utils.get_refs(b)
 
@@ -268,7 +267,7 @@ def _add_jobs(
             f'--bucket {join(out_bucket, "seqr_load")} '
             '--disable-validation '
             '--make-checkpoints ' + (f'--vep-block-size ' if vep_block_size else ''),
-            max_age='8h',
+            max_age='16h',
             packages=utils.DATAPROC_PACKAGES,
             num_secondary_workers=utils.NUMBER_OF_DATAPROC_WORKERS,
             job_name='Annotate',
@@ -284,7 +283,7 @@ def _add_jobs(
         f'--es-index-min-num-shards 1 '
         f'--genome-version GRCh38 '
         f'{"--prod" if prod else ""}',
-        max_age='8h',
+        max_age='16h',
         packages=utils.DATAPROC_PACKAGES,
         num_secondary_workers=10,
         job_name='Add to ES index',

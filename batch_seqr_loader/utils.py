@@ -16,19 +16,16 @@ logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
 logger.setLevel(logging.INFO)
 
 
+AR_REPO = 'australia-southeast1-docker.pkg.dev/cpg-common/images'
 GATK_VERSION = '4.2.0.0'
-GATK_IMAGE = (
-    f'australia-southeast1-docker.pkg.dev/cpg-common/images/gatk:{GATK_VERSION}'
-)
-PICARD_IMAGE = f'us.gcr.io/broad-gotc-prod/picard-cloud:2.23.8'
-BAZAM_IMAGE = f'australia-southeast1-docker.pkg.dev/cpg-common/images/bazam:v2'
-SOMALIER_IMAGE = 'brentp/somalier:latest'
-PEDDY_IMAGE = 'quay.io/biocontainers/peddy:0.4.8--pyh5e36f6f_0'
-GNARLY_IMAGE = 'australia-southeast1-docker.pkg.dev/cpg-common/images/gnarly_genotyper:hail_ukbb_300K'
-BCFTOOLS_IMAGE = (
-    'australia-southeast1-docker.pkg.dev/cpg-common/images/bcftools:1.10.2--h4f4756c_2'
-)
-SM_IMAGE = f'australia-southeast1-docker.pkg.dev/cpg-common/images/sm-api:1.0.9'
+GATK_IMAGE = f'{AR_REPO}/gatk:{GATK_VERSION}'
+PICARD_IMAGE = f'{AR_REPO}/picard-cloud:2.23.8'
+BAZAM_IMAGE = f'{AR_REPO}/bazam:v2'
+SOMALIER_IMAGE = f'{AR_REPO}/somalier:latest'
+PEDDY_IMAGE = f'{AR_REPO}/peddy:0.4.8--pyh5e36f6f_0'
+GNARLY_IMAGE = f'{AR_REPO}/gnarly_genotyper:hail_ukbb_300K'
+BCFTOOLS_IMAGE = f'{AR_REPO}/bcftools:1.10.2--h4f4756c_2'
+SM_IMAGE = f'{AR_REPO}/sm-api:1.0.9'
 
 NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS = 10
 NUMBER_OF_DATAPROC_WORKERS = 50
@@ -153,13 +150,13 @@ def make_sm_completed_job(
 
 
 def make_sm_update_status_job(
-    b: Batch, analyais_type: str, status: str, sm_db_name: str, analysis_id: str
+    b: Batch, analysis_type: str, status: str, sm_db_name: str, analysis_id: str
 ) -> Job:
     """
     Creates a job that updates the sample metadata server entry analysis status.
     """
     assert status in ['in-progress', 'failed', 'completed', 'queued']
-    j = b.new_job(f'SM: update {analyais_type} to {status}')
+    j = b.new_job(f'SM: update {analysis_type} to {status}')
     j.image(SM_IMAGE)
     j.command(
         f"""
@@ -168,7 +165,7 @@ set -ex
 
 export GOOGLE_APPLICATION_CREDENTIALS=/gsa-key/key.json
 gcloud -q auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
-export SM_DEV_DB_PROJECT=vladdev
+export SM_DEV_DB_PROJECT={sm_db_name}
 export SM_ENVIRONMENT=PRODUCTION
 
 cat <<EOT >> update.py
