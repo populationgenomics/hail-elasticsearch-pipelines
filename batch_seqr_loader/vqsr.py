@@ -914,8 +914,7 @@ def _add_final_filter_job(
 
     j.command(
         f"""
-    bcftools view -f.,PASS {input_vcf['vcf.gz']} | \\
-    -Oz -o {j.output_vcf['vcf.gz']} && \\
+    bcftools view -f.,PASS {input_vcf['vcf.gz']} -Oz -o {j.output_vcf['vcf.gz']} && \\
     tabix {j.output_vcf['vcf.gz']}
     """
     )
