@@ -183,10 +183,30 @@ run_test_sm:
 
 .PHONY: run_seqr_loader_test
 run_seqr_loader_test:
+	analysis-runner \
+	--dataset seqr \
+	--access-level test \
+	--output-dir   "seqr_loader_test" \
+	--description  "seqr loader - test $(TEST_VERSION)" \
 	batch_seqr_loader/batch_workflow.py \
 	--namespace test \
 	--test-sm-db-name vladdev \
 	--test-limit-input-to-project test \
+	--dataset-version $(TEST_VERSION) \
+	--reuse \
+	--keep-scratch
+
+.PHONY: run_seqr_loader_test_tiny
+run_seqr_loader_test_tiny:
+	analysis-runner \
+	--dataset seqr \
+	--access-level test \
+	--output-dir   "seqr_loader_test_tiny" \
+	--description  "seqr loader - test tiny $(TEST_VERSION)" \
+	batch_seqr_loader/batch_workflow.py \
+	--namespace test \
+	--test-sm-db-name vladdev \
+	--test-limit-input-to-project test-tiny \
 	--dataset-version $(TEST_VERSION) \
 	--reuse \
 	--keep-scratch

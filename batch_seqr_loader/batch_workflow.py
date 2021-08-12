@@ -360,6 +360,7 @@ def _add_jobs(
         overwrite=overwrite,
         sm_db_name=sm_db_name,
         completed_analysis=jc_analysis,
+        depends_on=gvcf_jobs,
     )
 
     # TODO: split VCF by projects, run the following jobs in parallel
