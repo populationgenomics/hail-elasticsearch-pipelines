@@ -9,7 +9,7 @@ import os
 import re
 import subprocess
 from os.path import join, basename, splitext
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Dict, Tuple, Union
 import pandas as pd
 from utils import file_exists
 
@@ -46,10 +46,10 @@ def find_inputs(
     gvcfs, crams, fastq_to_align, cram_to_realign = _find_files_by_type(
         gvcfs, crams, data_to_realign
     )
-    gvcf_with_index_by_by_sn = _find_file_indices(gvcfs)
-    cram_with_index_by_by_sn = _find_file_indices(crams)
-    fastq_pairs_by_by_sn = _find_fastq_pairs(fastq_to_align)
-    cram_with_index_to_realign_by_sn = _find_file_indices(cram_to_realign)
+    gvcf_with_index_by_by_sn = find_file_indices(gvcfs)
+    cram_with_index_by_by_sn = find_file_indices(crams)
+    fastq_pairs_by_sn = find_fastq_pairs(fastq_to_align)
+    cram_with_index_to_realign_by_sn = find_file_indices(cram_to_realign)
 
     data: Dict[str, List] = {
         'Family.ID': [],
@@ -66,7 +66,7 @@ def find_inputs(
     all_sns = (
         set(gvcf_with_index_by_by_sn.keys())
         | set(cram_with_index_by_by_sn.keys())
-        | set(fastq_pairs_by_by_sn.keys())
+        | set(fastq_pairs_by_sn.keys())
         | set(cram_with_index_to_realign_by_sn.keys())
     )
     for sn in all_sns:
@@ -94,8 +94,8 @@ def find_inputs(
             data['file2'].append(None)
             data['index'].append(index)
             data['type'].append('cram_to_realign')
-        if sn in fastq_pairs_by_by_sn:
-            file1, file2 = fastq_pairs_by_by_sn[sn]
+        if sn in fastq_pairs_by_sn:
+            file1, file2 = fastq_pairs_by_sn[sn]
             data['file'].append(file1)
             data['file2'].append(file2)
             data['index'].append(None)
@@ -140,10 +140,10 @@ def _find_files_by_type(
 
     for input_type, glob_paths in input_globs_by_type.items():
         for glob_path in glob_paths:
+            glob_path = glob_path.strip("'").strip('"')
             assert any(
                 glob_path.endswith(ext) for ext in expected_ext_by_type[input_type]
             ), (input_type, glob_path)
-            glob_path = glob_path.lstrip("'").rstrip("'")
             cmd = f"gsutil ls '{glob_path}'"
             found_files = [
                 line.strip()
@@ -162,7 +162,7 @@ def _find_files_by_type(
     return gvcfs, crams, fastq_to_align, cram_to_realign
 
 
-def _find_file_indices(fpaths: List[str]) -> Dict[str, Tuple[str, Optional[str]]]:
+def find_file_indices(fpaths: List[str]) -> Dict[str, Tuple[str, Optional[str]]]:
     """
     Find corresponding index files. Will look for:
     '<sample>.g.vcf.gz.tbi' for '<sample>.g.vcf.gz',
@@ -277,7 +277,40 @@ def splitext_gz(fname: str) -> Tuple[str, str]:
     return base, ext
 
 
-def _find_fastq_pairs(fpaths: List[str]) -> Dict[str, Tuple[str, str]]:
+def sm_verify_reads_data(
+    reads_data: List,
+    reads_type: str,
+) -> Union[
+    str, Tuple[List[str], List[str]], None
+]:  # pylint: disable=too-many-return-statements
+    """
+    Verify the meta.reads object in a sample db entry
+    """
+    if not reads_data:
+        logger.error(f'ERROR: no "reads" data')
+        return None
+    if not reads_type in ['fastq', 'bam']:
+        logger.error(f'ERROR: "reads_type" is expected to be fastq or bam')
+
+    error_msg = f'ERROR: cannot read the "reads" meta data: {reads_data}'
+    if reads_type == 'bam':
+        assert len(reads_data) == 1
+        fpath = reads_data[0]['location']
+        if not (fpath.endswith('.cram') or fpath.endswith('.bam')):
+            logger.error(error_msg)
+        return fpath
+
+    else:
+        rs1 = []
+        rs2 = []
+        for lane_data in reads_data:
+            assert len(lane_data) == 2
+            rs1.append(lane_data[0]['location'])
+            rs2.append(lane_data[1]['location'])
+        return rs1, rs2
+
+
+def find_fastq_pairs(fpaths: List[str]) -> Dict[str, Tuple[str, str]]:
     """
     Find pairs of FASTQ files for each sample
     """
@@ -289,16 +322,16 @@ def _find_fastq_pairs(fpaths: List[str]) -> Dict[str, Tuple[str, str]]:
         if ext not in ['.fq', '.fq.gz', '.fastq', '.fastq.gz']:
             continue
         sname, l_fpath, r_fpath = None, None, None
-        
+
         # Parsing the file name according to the Illumina spec
         # https://support.illumina.com/help/BaseSpace_OLH_009008/Content/Source/Informatics/BS/NamingConvention_FASTQ-files-swBS.htm
         # Example: SampleName_S1_L001_R1_001.fastq.gz
 
         # Stripping the segment number
-        m = re.match(r'(.*)_\d+', fn)
+        m = re.match(r'(.*)_\d\d\d$', fn)
         if m:
             fn = m.group(1)
-            
+
         # Parsing the number in pair
         if fn.endswith('_1'):
             sname = fn[:-2]
@@ -314,8 +347,8 @@ def _find_fastq_pairs(fpaths: List[str]) -> Dict[str, Tuple[str, str]]:
             r_fpath = fpath
         else:
             logger.critical(
-                f'Fastq file name is expected to have a _1/_2/_R1/_R2 '
-                f'suffix. Found: {fpath}'
+                f'Fastq base file name is expected to have a _1/_2/_R1/_R2 '
+                f'suffix. Found: {fn}'
             )
 
         if sname:
@@ -359,7 +392,9 @@ def _find_fastq_pairs(fpaths: List[str]) -> Dict[str, Tuple[str, str]]:
                 f'left fastqs ({len(ls)}) != the number of '
                 f'right fastqs ({len(rs)})'
             )
-    
+
     # Joining muiltiple pairs with comma
-    return {sn: (','.join(rs), ','.join(ls)) 
-            for sn, (rs, ls) in fastqs_by_sample_name.items()}
+    return {
+        sn: (','.join(rs), ','.join(ls))
+        for sn, (rs, ls) in fastqs_by_sample_name.items()
+    }
