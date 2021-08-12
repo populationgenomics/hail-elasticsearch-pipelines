@@ -48,26 +48,26 @@ aapi = AnalysisApi()
 
 @click.command()
 @click.option(
-    '--sm-db-name',
-    'sm_db_name',
-    default='seqr',
-    help='Override the server metadata project/DB name',
-)
-@click.option(
-    '--seqr-dataset',
-    'seqr_dataset_name',
-    required=True,
-    help='Name of the seqr dataset. If a genomics DB already exists for this dataset, '
-    'it will be extended with the new samples. When loading into the ES, '
-    'the name will be suffixed with the dataset version (set by --version)',
-)
-@click.option('--version', 'seqr_dataset_version', type=str, required=True)
-@click.option(
     '-n',
     '--namespace',
     'output_namespace',
     type=click.Choice(['main', 'test', 'tmp']),
     help='The bucket namespace to write the results to',
+)
+@click.option('--dataset-version', 'dataset_version', type=str, required=True)
+@click.option(
+    '--sm-db-name',
+    'sm_db_name',
+    default='acute-care',
+    help='Optional. Overrides the server metadata DB name to read samples from',
+)
+@click.option(
+    '--project',
+    'projects',
+    multiple=True,
+    required=True,
+    help='Only create ES indicies for the project(s). Can be multiple. '
+    'The name will be suffixed with the dataset version (set by --version)',
 )
 @click.option('--keep-scratch', 'keep_scratch', is_flag=True)
 @click.option(
@@ -92,10 +92,10 @@ aapi = AnalysisApi()
 )
 @click.option('--vep-block-size', 'vep_block_size')
 def main(
-    sm_db_name: str,
-    seqr_dataset_name: str,
-    seqr_dataset_version: str,
     output_namespace: str,
+    sm_db_name: str,
+    dataset_version: str,
+    projects: Optional[List[str]],
     keep_scratch: bool,
     overwrite: bool,
     dry_run: bool,
@@ -109,7 +109,22 @@ def main(
         tmp_bucket_suffix = 'test-tmp'
     else:
         tmp_bucket_suffix = 'main-tmp'
-    tmp_bucket = f'gs://cpg-seqr-{tmp_bucket_suffix}/seqr-loader/{seqr_dataset_name}/{seqr_dataset_version}'
+
+    if output_namespace in ['test', 'main']:
+        output_suffix = output_namespace
+        web_bucket_suffix = f'{output_namespace}-web'
+    else:
+        output_suffix = 'test-tmp'
+        web_bucket_suffix = 'test-tmp'
+    out_bucket = (
+        f'gs://cpg-seqr-{output_suffix}/seqr_loader/{sm_db_name}/{dataset_version}'
+    )
+    tmp_bucket = (
+        f'gs://cpg-seqr-{tmp_bucket_suffix}/seqr_loader/{sm_db_name}/{dataset_version}'
+    )
+    web_bucket = (
+        f'gs://cpg-seqr-{web_bucket_suffix}/seqr_loader/{sm_db_name}/{dataset_version}'
+    )
     hail_bucket = os.environ.get('HAIL_BUCKET')
     if not hail_bucket or keep_scratch:
         # Scratch files are large, so we want to use the temporary bucket to put them in
@@ -123,18 +138,9 @@ def main(
         bucket=hail_bucket.replace('gs://', ''),
     )
     b = hb.Batch(
-        f'Seqr loading pipeline for the seqr dataset "{seqr_dataset_name}"'
-        f', in the namespace "{output_namespace}", DB "{sm_db_name}"',
+        f'Seqr loading pipeline in the namespace "{output_namespace}"',
         backend=backend,
     )
-
-    if output_namespace in ['test', 'main']:
-        output_suffix = output_namespace
-        web_bucket_suffix = f'{output_namespace}-web'
-    else:
-        output_suffix = 'test-tmp'
-        web_bucket_suffix = 'test-tmp'
-    out_bucket = f'gs://cpg-seqr-{output_suffix}/datasets/{seqr_dataset_name}/{seqr_dataset_version}'
 
     local_tmp_dir = tempfile.mkdtemp()
     _add_jobs(
@@ -142,11 +148,10 @@ def main(
         sm_db_name=sm_db_name,
         tmp_bucket=tmp_bucket,
         out_bucket=out_bucket,
+        web_bucket=web_bucket,
         local_tmp_dir=local_tmp_dir,
-        output_suffix=output_suffix,
-        web_bucket_suffix=web_bucket_suffix,
-        seqr_dataset_name=seqr_dataset_name,
-        seqr_dataset_version=seqr_dataset_version,
+        dataset_version=dataset_version,
+        projects=projects or [],
         overwrite=overwrite,
         prod=output_namespace == 'main',
         vep_block_size=vep_block_size,
@@ -276,18 +281,17 @@ def _add_jobs(
     sm_db_name: str,
     out_bucket,
     tmp_bucket,
+    web_bucket,  # pylint: disable=unused-argument
     local_tmp_dir,
-    output_suffix,  # pylint: disable=unused-argument
-    web_bucket_suffix,  # pylint: disable=unused-argument
-    seqr_dataset_name,
-    seqr_dataset_version,  # pylint: disable=unused-argument
+    dataset_version: str,
+    projects: List[str],
     overwrite: bool,
     prod: bool,
     vep_block_size,
 ):
     genomicsdb_bucket = f'{out_bucket}/genomicsdbs'
-    # fingerprints_bucket = f'gs://cpg-seqr-{output_suffix}/datasets/{seqr_dataset_name}/{seqr_dataset_version}/fingerprints'
-    # web_bucket = f'gs://cpg-seqr-{web_bucket_suffix}/datasets/{seqr_dataset_name}/{seqr_dataset_version}'
+    # pylint: disable=unused-variable
+    fingerprints_bucket = f'{out_bucket}/fingerprints'
 
     samples = sapi.get_all_samples(project=sm_db_name)
     # samples = [s for s in samples if not s.external_id.startswith('NA12878-from')]
@@ -349,41 +353,45 @@ def _add_jobs(
         completed_analysis=jc_analysis,
     )
 
-    annotated_mt_path = join(dirname(jc_vcf_path), 'annotated.mt')
-    if utils.can_reuse(annotated_mt_path, overwrite):
-        annotate_job = b.new_job('Annotate [reuse]')
-    else:
-        annotate_job = dataproc.hail_dataproc_job(
+    # TODO: split VCF by projects, run the following jobs in parallel
+    projects = ['acute-care']
+    for project in projects:
+        annotated_mt_path = join(out_bucket, 'annotation', f'{project}.mt')
+        if utils.can_reuse(annotated_mt_path, overwrite):
+            annotate_job = b.new_job(f'Annotate {project} [reuse]')
+        else:
+            annotate_job = dataproc.hail_dataproc_job(
+                b,
+                f'batch_seqr_loader/scripts/make_annotated_mt.py '
+                f'--source-path {jc_vcf_path} '
+                f'--dest-mt-path {annotated_mt_path} '
+                f'--bucket {join(tmp_bucket, "annotation", project)} '
+                '--disable-validation '
+                '--make-checkpoints '
+                + (f'--vep-block-size ' if vep_block_size else ''),
+                max_age='16h',
+                packages=utils.DATAPROC_PACKAGES,
+                num_secondary_workers=utils.NUMBER_OF_DATAPROC_WORKERS,
+                job_name=f'Annotate {project}',
+                vep='GRCh38',
+                depends_on=[jc_job],
+            )
+
+        dataproc.hail_dataproc_job(
             b,
-            f'batch_seqr_loader/scripts/make_annotated_mt.py '
-            f'--source-path {jc_vcf_path} '
-            f'--dest-mt-path {annotated_mt_path} '
-            f'--bucket {join(out_bucket, "seqr_load")} '
-            '--disable-validation '
-            '--make-checkpoints ' + (f'--vep-block-size ' if vep_block_size else ''),
+            f'batch_seqr_loader/scripts/load_to_es.py '
+            f'--mt-path {annotated_mt_path} '
+            f'--es-index {project}-{dataset_version} '
+            f'--es-index-min-num-shards 1 '
+            f'--genome-version GRCh38 '
+            f'{"--prod" if prod else ""}',
             max_age='16h',
             packages=utils.DATAPROC_PACKAGES,
-            num_secondary_workers=utils.NUMBER_OF_DATAPROC_WORKERS,
-            job_name='Annotate',
-            vep='GRCh38',
-            depends_on=[jc_job],
+            num_secondary_workers=10,
+            job_name=f'Add to {project} to ES index',
+            depends_on=[annotate_job],
+            scopes=['cloud-platform'],
         )
-
-    dataproc.hail_dataproc_job(
-        b,
-        f'batch_seqr_loader/scripts/load_to_es.py '
-        f'--mt-path {annotated_mt_path} '
-        f'--es-index {seqr_dataset_name}-{seqr_dataset_name} '
-        f'--es-index-min-num-shards 1 '
-        f'--genome-version GRCh38 '
-        f'{"--prod" if prod else ""}',
-        max_age='16h',
-        packages=utils.DATAPROC_PACKAGES,
-        num_secondary_workers=10,
-        job_name='Add to ES index',
-        depends_on=[annotate_job],
-        scopes=['cloud-platform'],
-    )
     return b
 
 

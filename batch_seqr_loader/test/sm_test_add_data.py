@@ -10,30 +10,58 @@ from sample_metadata.api import SampleApi
 from sample_metadata.models.new_sample import NewSample
 
 
-PROJ = os.environ.get('SM_DEV_DB_PROJECT', 'sm_dev')
+PROJ = os.environ.get('SM_DEV_DB_PROJECT', 'vladdev')
 
 
 sapi = SampleApi()
 s1 = NewSample(
-    external_id='210303_A00692_0190_ML211637',
+    external_id='210303_A00692_0190_ML211637-1',
     type='blood',
     meta={
+        'project': 'test',
+        'reads_type': 'fastq',
         'reads': [
             [
-                'gs://cpg-acute-care-test-upload/cpg_acute_20210729_084835/210303_A00692_0190_ML211637_21W000380-FAM001171_MAN-20210303_NEXTERAFLEXWGS_L001_R1.fastq.gz',
-                'gs://cpg-acute-care-test-upload/cpg_acute_20210729_084835/210303_A00692_0190_ML211637_21W000380-FAM001171_MAN-20210303_NEXTERAFLEXWGS_L002_R1.fastq.gz',
+                {
+                    'basename': '210303_A00692_0190_ML211637_21W000380-FAM001171_MAN-20210303_NEXTERAFLEXWGS_L001_R1.fastq.gz',
+                    'class': 'File',
+                    'location': 'gs://cpg-acute-care-test-upload/cpg_acute_20210729_084835/210303_A00692_0190_ML211637_21W000380-FAM001171_MAN-20210303_NEXTERAFLEXWGS_L001_R1.fastq.gz',
+                },
+                {
+                    'basename': '210303_A00692_0190_ML211637_21W000380-FAM001171_MAN-20210303_NEXTERAFLEXWGS_L001_R2.fastq.gz',
+                    'class': 'File',
+                    'location': 'gs://cpg-acute-care-test-upload/cpg_acute_20210729_084835/210303_A00692_0190_ML211637_21W000380-FAM001171_MAN-20210303_NEXTERAFLEXWGS_L001_R2.fastq.gz',
+                },
             ],
             [
-                'gs://cpg-acute-care-test-upload/cpg_acute_20210729_084835/210303_A00692_0190_ML211637_21W000380-FAM001171_MAN-20210303_NEXTERAFLEXWGS_L001_R2.fastq.gz',
-                'gs://cpg-acute-care-test-upload/cpg_acute_20210729_084835/210303_A00692_0190_ML211637_21W000380-FAM001171_MAN-20210303_NEXTERAFLEXWGS_L002_R2.fastq.gz',
+                {
+                    'basename': '210303_A00692_0190_ML211637_21W000380-FAM001171_MAN-20210303_NEXTERAFLEXWGS_L002_R1.fastq.gz',
+                    'class': 'File',
+                    'location': 'gs://cpg-acute-care-test-upload/cpg_acute_20210729_084835/210303_A00692_0190_ML211637_21W000380-FAM001171_MAN-20210303_NEXTERAFLEXWGS_L002_R1.fastq.gz',
+                },
+                {
+                    'basename': '210303_A00692_0190_ML211637_21W000380-FAM001171_MAN-20210303_NEXTERAFLEXWGS_L002_R2.fastq.gzz',
+                    'class': 'File',
+                    'location': 'gs://cpg-acute-care-test-upload/cpg_acute_20210729_084835/210303_A00692_0190_ML211637_21W000380-FAM001171_MAN-20210303_NEXTERAFLEXWGS_L002_R2.fastq.gz',
+                },
             ],
-        ]
+        ],
     },
 )
 s2 = NewSample(
-    external_id='20W000094-FAM000347',
+    external_id='20W000094-FAM000347-1',
     type='blood',
-    meta={'reads': 'gs://cpg-acute-care-test-upload/20W000094-FAM000347.cram'},
+    meta={
+        'project': 'test',
+        'reads_type': 'bam',
+        'reads': [
+            {
+                'basename': '20W000094-FAM000347.cram',
+                'class': 'File',
+                'location': 'gs://cpg-acute-care-test-upload/20W000094-FAM000347.cram',
+            }
+        ],
+    },
 )
 sample_ids = []
 for s in (s1, s2):

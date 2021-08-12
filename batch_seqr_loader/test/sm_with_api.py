@@ -1,7 +1,11 @@
+#!/usr/bin/env python3
 # pylint: skip-file
+
 """
 Reads input from the sample_metadata server using the generated API
 """
+
+import os
 from typing import Dict, List
 import pandas as pd
 
@@ -10,8 +14,7 @@ from sample_metadata.models.new_sample import NewSample
 from sample_metadata.models.analysis_model import AnalysisModel
 
 
-PROJ = 'vladdev'
-# PROJ = 'dev'
+PROJ = os.environ.get('SM_DEV_DB_PROJECT', 'vladdev')
 
 
 def main():

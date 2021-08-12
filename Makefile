@@ -1,8 +1,5 @@
-TEST_VERSION := v1-14
-TEST_DATASET := na12878-trio
-
-ACUTE_CARE_DATASET := acute-care
-ACUTE_CARE_VERSION := v1-3
+TEST_VERSION := v2-0
+PROD_VERSION := v2-0
 
 .PHONY: package
 package:
@@ -181,5 +178,27 @@ run_test_sm:
 	--version      $(TEST_VERSION) \
 	--seqr-dataset $(ACUTE_CARE_DATASET) \
 	--sm-server-db-name vladdev \
+	--reuse \
+	--keep-scratch
+
+.PHONY: run_seqr_loader_test
+run_seqr_loader_test:
+	batch_seqr_loader/batch_workflow.py \
+	--namespace       test \
+	--sm-db-name      vladdev \
+	--dataset_version $(TEST_VERSION) \
+	--reuse \
+	--keep-scratch
+
+.PHONY: run_seqr_loader_prod
+run_seqr_loader_prod:
+	analysis-runner \
+	--dataset seqr \
+	--access-level standard \
+	--output-dir   "seqr_loader" \
+	--description  "seqr loader $(PROD_VERSION)" \
+	batch_seqr_loader/batch_workflow.py \
+	--namespace       main \
+	--dataset-version $(PROD_VERSION) \
 	--reuse \
 	--keep-scratch

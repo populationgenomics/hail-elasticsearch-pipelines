@@ -1,5 +1,5 @@
-# pylint: skip-file
 #!/usr/bin/env python3
+# pylint: skip-file
 
 import hailtop.batch as hb
 from os.path import join

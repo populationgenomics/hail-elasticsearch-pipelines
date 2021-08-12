@@ -17,7 +17,7 @@ from sample_metadata.models.new_sample import NewSample
 from sample_metadata.models.analysis_model import AnalysisModel
 
 
-PROJ = os.environ.get('SM_DEV_DB_PROJECT', 'sm_dev')
+PROJ = os.environ.get('SM_DEV_DB_PROJECT', 'vladdev')
 
 
 def test_simulate_joint_calling_pipeline():
