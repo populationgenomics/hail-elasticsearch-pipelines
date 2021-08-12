@@ -25,7 +25,7 @@ SOMALIER_IMAGE = f'{AR_REPO}/somalier:latest'
 PEDDY_IMAGE = f'{AR_REPO}/peddy:0.4.8--pyh5e36f6f_0'
 GNARLY_IMAGE = f'{AR_REPO}/gnarly_genotyper:hail_ukbb_300K'
 BCFTOOLS_IMAGE = f'{AR_REPO}/bcftools:1.10.2--h4f4756c_2'
-SM_IMAGE = f'{AR_REPO}/sm-api:1.0.9'
+SM_IMAGE = f'{AR_REPO}/sm-api:2.0.1'
 
 NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS = 10
 NUMBER_OF_DATAPROC_WORKERS = 50
@@ -126,14 +126,14 @@ def get_refs(b: hb.Batch) -> Tuple:
 
 
 def make_sm_in_progress_job(
-    b: Batch, analyais_type: str, sm_db_name: str, analysis_id: str
+    b: Batch, analyais_type: str, analysis_project: str, analysis_id: str
 ) -> Job:
     """
     Creates a job that updates the sample metadata server entry analysis status
     to in-progress
     """
     return make_sm_update_status_job(
-        b, analyais_type, 'in-progress', sm_db_name, analysis_id
+        b, analyais_type, 'in-progress', analysis_project, analysis_id
     )
 
 

@@ -26,7 +26,6 @@ from sample_metadata import (
     SampleApi,
     AnalysisApi,
     AnalysisModel,
-    Sample,
     AnalysisUpdateModel,
     AnalysisType,
     AnalysisStatus,
@@ -59,14 +58,15 @@ aapi = AnalysisApi()
     '--project',
     'projects',
     multiple=True,
+    default=['acute-care'],
     help='Only create ES indicies for the project(s). Can be multiple. '
     'The name will be suffixed with the dataset version (set by --version)',
 )
 @click.option(
-    '--test-sm-db-name',
-    'sm_db_name',
-    default='acute-care',
-    help='Overrides the server metadata DB name to read samples from',
+    '--analysis-project',
+    'analysis_project',
+    default='seqr',
+    help='Overrides the SM project name to write analysis entries to',
 )
 @click.option(
     '--test-limit-input-to-project',
@@ -98,7 +98,7 @@ aapi = AnalysisApi()
 @click.option('--vep-block-size', 'vep_block_size')
 def main(
     output_namespace: str,
-    sm_db_name: str,
+    analysis_project: str,
     input_projects: Optional[List[str]],
     dataset_version: str,
     projects: Optional[List[str]],
@@ -122,15 +122,9 @@ def main(
     else:
         output_suffix = 'test-tmp'
         web_bucket_suffix = 'test-tmp'
-    out_bucket = (
-        f'gs://cpg-seqr-{output_suffix}/seqr_loader/{sm_db_name}/{dataset_version}'
-    )
-    tmp_bucket = (
-        f'gs://cpg-seqr-{tmp_bucket_suffix}/seqr_loader/{sm_db_name}/{dataset_version}'
-    )
-    web_bucket = (
-        f'gs://cpg-seqr-{web_bucket_suffix}/seqr_loader/{sm_db_name}/{dataset_version}'
-    )
+    out_bucket = f'gs://cpg-seqr-{output_suffix}/seqr_loader/{analysis_project}/{dataset_version}'
+    tmp_bucket = f'gs://cpg-seqr-{tmp_bucket_suffix}/seqr_loader/{analysis_project}/{dataset_version}'
+    web_bucket = f'gs://cpg-seqr-{web_bucket_suffix}/seqr_loader/{analysis_project}/{dataset_version}'
     hail_bucket = os.environ.get('HAIL_BUCKET')
     if not hail_bucket or keep_scratch:
         # Scratch files are large, so we want to use the temporary bucket to put them in
@@ -151,17 +145,17 @@ def main(
     local_tmp_dir = tempfile.mkdtemp()
     _add_jobs(
         b=b,
-        sm_db_name=sm_db_name,
         tmp_bucket=tmp_bucket,
         out_bucket=out_bucket,
         web_bucket=web_bucket,
         local_tmp_dir=local_tmp_dir,
         dataset_version=dataset_version,
-        projects=projects or [],
+        projects=projects or ['acute-care'],
         overwrite=overwrite,
         prod=output_namespace == 'main',
-        input_projects=input_projects or [],
+        input_projects=input_projects or ['acute-care'],
         vep_block_size=vep_block_size,
+        analysis_project=analysis_project,
     )
     b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch)
     shutil.rmtree(local_tmp_dir)
@@ -265,9 +259,7 @@ def luhn_compute(n):
     return -result % 10
 
 
-def _get_latest_complete_analysis(
-    sm_db_name: str,
-) -> Dict[Tuple[str, Tuple], Analysis]:
+def _get_latest_complete_analysis() -> Dict[Tuple[str, Tuple], Analysis]:
     """
     Returns a dictionary that maps a tuple (analysis type, sample ids) to the
     lastest complete analysis record (represented by a AnalysisModel object)
@@ -275,7 +267,7 @@ def _get_latest_complete_analysis(
     latest_by_type_and_sids = dict()
     for a_type in ['cram', 'gvcf', 'joint-calling']:
         for a_data in aapi.get_latest_complete_analyses_by_type(
-            project=sm_db_name,
+            project='seqr',
             analysis_type=a_type,
         ):
             a: Analysis = Analysis.from_db(**a_data)
@@ -285,7 +277,6 @@ def _get_latest_complete_analysis(
 
 def _add_jobs(
     b: hb.Batch,
-    sm_db_name: str,
     out_bucket,
     tmp_bucket,
     web_bucket,  # pylint: disable=unused-argument
@@ -296,40 +287,44 @@ def _add_jobs(
     prod: bool,
     input_projects: List[str],
     vep_block_size,
+    analysis_project: str,
 ):
     genomicsdb_bucket = f'{out_bucket}/genomicsdbs'
     # pylint: disable=unused-variable
     fingerprints_bucket = f'{out_bucket}/fingerprints'
 
-    samples = sapi.get_all_samples(project=sm_db_name)
-    if input_projects:
-        samples = [s for s in samples if s.meta.get('project') in input_projects]
-    latest_by_type_and_sids = _get_latest_complete_analysis(sm_db_name)
+    samples = sapi.get_samples(
+        body_get_samples_by_criteria_api_v1_sample_post={'project_ids': input_projects}
+    )
+    samples = samples[:2]
+    latest_by_type_and_sids = _get_latest_complete_analysis()
     reference, bwa_reference, noalt_regions = utils.get_refs(b)
 
     gvcf_jobs = []
     gvcf_by_sid: Dict[str, str] = dict()
     for s in samples:
-        logger.info(f'Processing sample {s.id}')
-        cram_analysis = latest_by_type_and_sids.get(('cram', (s.id,)))
-        reads_data = sm_verify_reads_data(s.meta.get('reads'), s.meta.get('reads_type'))
+        logger.info(f'Processing sample {s["id"]}')
+        cram_analysis = latest_by_type_and_sids.get(('cram', (s['id'],)))
+        reads_data = sm_verify_reads_data(
+            s['meta'].get('reads'), s['meta'].get('reads_type')
+        )
         if not reads_data:
             continue
         cram_job, cram_fpath = _make_realign_jobs(
             b=b,
-            sample_name=s.id,
+            sample_name=s['id'],
             reads_data=reads_data,
             reference=bwa_reference,
             out_bucket=out_bucket,
             overwrite=overwrite,
-            sm_db_name=sm_db_name,
             completed_analysis=cram_analysis,
+            analysis_project=analysis_project,
         )
 
-        gvcf_analysis = latest_by_type_and_sids.get(('gvcf', (s.id,)))
+        gvcf_analysis = latest_by_type_and_sids.get(('gvcf', (s['id'],)))
         gvcf_job, gvcf_fpath = _make_produce_gvcf_jobs(
             b=b,
-            sample_name=s.id,
+            sample_name=s['id'],
             cram_path=cram_fpath,
             reference=reference,
             noalt_regions=noalt_regions,
@@ -337,15 +332,15 @@ def _add_jobs(
             tmp_bucket=tmp_bucket,
             overwrite=overwrite,
             depends_on=[cram_job],
-            sm_db_name=sm_db_name,
+            analysis_project=analysis_project,
             completed_analysis=gvcf_analysis,
         )
         gvcf_jobs.append(gvcf_job)
-        gvcf_by_sid[s.id] = gvcf_fpath
+        gvcf_by_sid[s['id']] = gvcf_fpath
 
     # Is there a complete joint-calling analysis for the requested set of samples?
     jc_analysis = latest_by_type_and_sids.get(
-        ('joint-calling', tuple(set(s.id for s in samples)))
+        ('joint-calling', tuple(set(s['id'] for s in samples)))
     )
     jc_job, jc_vcf_path = _make_joint_genotype_jobs(
         b=b,
@@ -358,7 +353,7 @@ def _add_jobs(
         tmp_bucket=out_bucket,
         local_tmp_dir=local_tmp_dir,
         overwrite=overwrite,
-        sm_db_name=sm_db_name,
+        analysis_project=analysis_project,
         completed_analysis=jc_analysis,
         depends_on=gvcf_jobs,
     )
@@ -536,8 +531,8 @@ def _make_realign_jobs(
     out_bucket: str,
     overwrite: bool,
     depends_on: Optional[List[Job]] = None,
-    sm_db_name: str = None,
     completed_analysis: Optional[Analysis] = None,
+    analysis_project: Optional[str] = None,
 ) -> Tuple[Job, str]:
     """
     Runs BWA to realign reads back again to hg38.
@@ -556,9 +551,10 @@ def _make_realign_jobs(
                 f'but the output file does not exist. Setting status to "failed" '
                 f'and rerunning the analysis.'
             )
-            aapi.update_analysis_status(
-                completed_analysis.id, sm_db_name, AnalysisUpdateModel(status='failed')
-            )
+            if analysis_project:
+                aapi.update_analysis_status(
+                    completed_analysis.id, AnalysisUpdateModel(status='failed')
+                )
     else:
         logger.info(
             f'Sample {sample_name} does not have a completed CRAM analysis yet. '
@@ -574,19 +570,21 @@ def _make_realign_jobs(
     if utils.can_reuse(output_cram_path, overwrite):
         # Create a "completed" analysis and return an empty job
         am.status = 'completed'
-        if sm_db_name:
-            aapi.create_new_analysis(project=sm_db_name, analysis_model=am)
+        if analysis_project:
+            aapi.create_new_analysis(project=analysis_project, analysis_model=am)
         return b.new_job(f'{job_name} [reuse]'), output_cram_path
 
     j = b.new_job(job_name)
-    if sm_db_name:
+    if analysis_project:
         # Interacting with the sample metadata server:
         # 1. Create a "queued" analysis
-        aid = aapi.create_new_analysis(project=sm_db_name, analysis_model=am)
+        aid = aapi.create_new_analysis(project=analysis_project, analysis_model=am)
         # 2. Queue a job that updates the status to "in-progress"
-        sm_in_progress_j = utils.make_sm_in_progress_job(b, 'cram', sm_db_name, aid)
+        sm_in_progress_j = utils.make_sm_in_progress_job(
+            b, 'cram', analysis_project, aid
+        )
         # 2. Queue a job that updates the status to "completed"
-        sm_completed_j = utils.make_sm_completed_job(b, 'cram', sm_db_name, aid)
+        sm_completed_j = utils.make_sm_completed_job(b, 'cram', analysis_project, aid)
         # Set up dependencies
         j.depends_on(sm_in_progress_j)
         sm_completed_j.depends_on(j)
@@ -699,7 +697,7 @@ def _make_produce_gvcf_jobs(
     tmp_bucket: str,  # pylint: disable=unused-argument
     overwrite: bool,  # pylint: disable=unused-argument
     depends_on: Optional[List[Job]] = None,
-    sm_db_name: str = None,
+    analysis_project: str = None,
     completed_analysis: Optional[Analysis] = None,
 ) -> Tuple[Job, AnalysisModel]:
     """
@@ -726,7 +724,7 @@ def _make_produce_gvcf_jobs(
                 f'and rerunning the analysis.'
             )
             aapi.update_analysis_status(
-                completed_analysis.id, sm_db_name, AnalysisUpdateModel(status='failed')
+                completed_analysis.id, AnalysisUpdateModel(status='failed')
             )
     else:
         logger.info(
@@ -743,8 +741,8 @@ def _make_produce_gvcf_jobs(
     if utils.can_reuse(out_gvcf_path, overwrite=overwrite):
         # Create a "completed" analysis and return an empty job
         am.status = 'completed'
-        if sm_db_name:
-            aapi.create_new_analysis(project=sm_db_name, analysis_model=am)
+        if analysis_project:
+            aapi.create_new_analysis(project=analysis_project, analysis_model=am)
         return b.new_job(f'{job_name} [reuse]'), out_gvcf_path
 
     intervals_j = _add_split_intervals_job(
@@ -754,14 +752,16 @@ def _make_produce_gvcf_jobs(
         ref_fasta=utils.REF_FASTA,
     )
 
-    if sm_db_name:
+    if analysis_project:
         # Interacting with the sample metadata server:
         # 1. Create a "queued" analysis
-        aid = aapi.create_new_analysis(project=sm_db_name, analysis_model=am)
+        aid = aapi.create_new_analysis(project=analysis_project, analysis_model=am)
         # 2. Queue a job that updates the status to "in-progress"
-        sm_in_progress_j = utils.make_sm_in_progress_job(b, 'gvcf', sm_db_name, aid)
+        sm_in_progress_j = utils.make_sm_in_progress_job(
+            b, 'gvcf', analysis_project, aid
+        )
         # 2. Queue a job that updates the status to "completed"
-        sm_completed_j = utils.make_sm_completed_job(b, 'gvcf', sm_db_name, aid)
+        sm_completed_j = utils.make_sm_completed_job(b, 'gvcf', analysis_project, aid)
         # Set up dependencies
         intervals_j.depends_on(sm_in_progress_j)
         if depends_on:
@@ -938,7 +938,7 @@ def _make_joint_genotype_jobs(
     local_tmp_dir: str,
     overwrite: bool,
     depends_on: Optional[List[Job]] = None,
-    sm_db_name: str = None,
+    analysis_project: str = None,
     completed_analysis: Optional[Analysis] = None,
 ) -> Tuple[Job, str]:
     """
@@ -997,7 +997,7 @@ def _make_joint_genotype_jobs(
                 f'rerunning the joint-calling analysis.'
             )
             aapi.update_analysis_status(
-                completed_analysis.id, sm_db_name, AnalysisUpdateModel(status='failed')
+                completed_analysis.id, AnalysisUpdateModel(status='failed')
             )
     else:
         logger.info(
@@ -1006,7 +1006,7 @@ def _make_joint_genotype_jobs(
         )
 
     am = AnalysisModel(
-        sample_ids=[s.id for s in samples],
+        sample_ids=[s['id'] for s in samples],
         type='joint-calling',
         output=vqsred_vcf_path,
         status='queued',
@@ -1014,8 +1014,8 @@ def _make_joint_genotype_jobs(
     if utils.can_reuse(vqsred_vcf_path, overwrite=overwrite):
         # Create a "completed" analysis and return an empty job
         am.status = 'completed'
-        if sm_db_name:
-            aapi.create_new_analysis(project=sm_db_name, analysis_model=am)
+        if analysis_project:
+            aapi.create_new_analysis(project=analysis_project, analysis_model=am)
         return b.new_job(f'{job_name} [reuse]'), vqsred_vcf_path
 
     intervals_j = _add_split_intervals_job(
@@ -1025,17 +1025,17 @@ def _make_joint_genotype_jobs(
         ref_fasta=utils.REF_FASTA,
     )
 
-    if sm_db_name:
+    if analysis_project:
         # Interacting with the sample metadata server:
         # 1. Create a "queued" analysis
-        aid = aapi.create_new_analysis(project=sm_db_name, analysis_model=am)
+        aid = aapi.create_new_analysis(project=analysis_project, analysis_model=am)
         # 2. Queue a job that updates the status to "in-progress"
         sm_in_progress_j = utils.make_sm_in_progress_job(
-            b, 'joint-calling', sm_db_name, aid
+            b, 'joint-calling', analysis_project, aid
         )
         # 2. Queue a job that updates the status to "completed"
         sm_completed_j = utils.make_sm_completed_job(
-            b, 'joint-calling', sm_db_name, aid
+            b, 'joint-calling', analysis_project, aid
         )
         # Set up dependencies
         intervals_j.depends_on(sm_in_progress_j)
@@ -1288,7 +1288,7 @@ def _samples_to_add_to_db(
     samples,
     tmp_bucket: str,
     gvcf_by_sid: Dict[str, str],
-) -> Tuple[List[Sample], Set[str], Set[str], bool, str]:
+) -> Tuple[List[Dict], Set[str], Set[str], bool, str]:
     if utils.file_exists(genomicsdb_gcs_path):
         # Check if sample exists in the DB already
         genomicsdb_metadata = join(local_tmp_dir, f'callset-{interval_idx}.json')
@@ -1305,7 +1305,7 @@ def _samples_to_add_to_db(
         with open(genomicsdb_metadata) as f:
             db_metadata = json.load(f)
         sample_names_in_db = set(s['sample_name'] for s in db_metadata['callsets'])
-        new_sample_names = set([s.id for s in samples])
+        new_sample_names = set([s['id'] for s in samples])
         sample_names_to_add = new_sample_names - sample_names_in_db
         sample_names_to_skip = new_sample_names & sample_names_in_db
         if sample_names_to_skip:
@@ -1321,14 +1321,14 @@ def _samples_to_add_to_db(
         else:
             logger.warning(f'Nothing will be added into the DB {genomicsdb_gcs_path}')
 
-        samples_to_add = [s for s in samples if s.id in sample_names_to_add]
+        samples_to_add = [s for s in samples if s['id'] in sample_names_to_add]
         sample_names_will_be_in_db = sample_names_in_db | sample_names_to_add
         updating_existing_db = True
     else:
         # Initiate new DB
         sample_names_to_skip = set()
         samples_to_add = samples
-        sample_names_to_add = {s.id for s in samples}
+        sample_names_to_add = {s['id'] for s in samples}
         sample_names_will_be_in_db = sample_names_to_add
         updating_existing_db = False
 
@@ -1336,7 +1336,7 @@ def _samples_to_add_to_db(
     local_sample_map_fpath = join(local_tmp_dir, 'sample_name.csv')
     with open(local_sample_map_fpath, 'w') as f:
         for s in samples_to_add:
-            f.write('\t'.join([s.id, gvcf_by_sid[s.id]]) + '\n')
+            f.write('\t'.join([s['id'], gvcf_by_sid[s['id']]]) + '\n')
     subprocess.run(
         f'gsutil cp {local_sample_map_fpath} {sample_map_bucket_path}',
         check=False,
@@ -1355,7 +1355,7 @@ def _samples_to_add_to_db(
 def _add_import_gvcfs_job(
     b: hb.Batch,
     genomicsdb_gcs_path: str,
-    samples_to_add: List[Sample],
+    samples_to_add: List[Dict],
     sample_names_to_skip: Set[str],
     sample_names_will_be_in_db: Set[str],
     updating_existing_db: bool,
@@ -1420,7 +1420,7 @@ def _add_import_gvcfs_job(
 
     (while true; do df -h; pwd; du -sh $(dirname {j.output['tar']}); free -m; sleep 300; done) &
 
-    echo "Adding samples: {', '.join([s.id for s in samples_to_add])}"
+    echo "Adding samples: {', '.join([s['id'] for s in samples_to_add])}"
     {f'echo "Skipping adding samples that are already in the DB: '
      f'{", ".join(sample_names_to_skip)}"' if sample_names_to_skip else ''}
 
