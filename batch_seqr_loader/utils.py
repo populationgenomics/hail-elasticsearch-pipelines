@@ -174,7 +174,6 @@ from sample_metadata import AnalysisUpdateModel
 aapi = AnalysisApi()
 aapi.update_analysis_status(
     analysis_id='{analysis_id}',
-    project='{sm_db_name}',
     analysis_update_model=AnalysisUpdateModel(status='{status}'),
 )
 EOT
