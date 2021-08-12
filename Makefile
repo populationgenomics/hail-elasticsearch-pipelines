@@ -184,9 +184,10 @@ run_test_sm:
 .PHONY: run_seqr_loader_test
 run_seqr_loader_test:
 	batch_seqr_loader/batch_workflow.py \
-	--namespace       test \
-	--sm-db-name      vladdev \
-	--dataset_version $(TEST_VERSION) \
+	--namespace test \
+	--test-sm-db-name vladdev \
+	--test-limit-input-to-project test \
+	--dataset-version $(TEST_VERSION) \
 	--reuse \
 	--keep-scratch
 

@@ -56,18 +56,23 @@ aapi = AnalysisApi()
 )
 @click.option('--dataset-version', 'dataset_version', type=str, required=True)
 @click.option(
-    '--sm-db-name',
-    'sm_db_name',
-    default='acute-care',
-    help='Optional. Overrides the server metadata DB name to read samples from',
-)
-@click.option(
     '--project',
     'projects',
     multiple=True,
-    required=True,
     help='Only create ES indicies for the project(s). Can be multiple. '
     'The name will be suffixed with the dataset version (set by --version)',
+)
+@click.option(
+    '--test-sm-db-name',
+    'sm_db_name',
+    default='acute-care',
+    help='Overrides the server metadata DB name to read samples from',
+)
+@click.option(
+    '--test-limit-input-to-project',
+    'input_projects',
+    multiple=True,
+    help='Only read samples that belong to the project(s). Can be multiple.',
 )
 @click.option('--keep-scratch', 'keep_scratch', is_flag=True)
 @click.option(
@@ -94,6 +99,7 @@ aapi = AnalysisApi()
 def main(
     output_namespace: str,
     sm_db_name: str,
+    input_projects: Optional[List[str]],
     dataset_version: str,
     projects: Optional[List[str]],
     keep_scratch: bool,
@@ -154,6 +160,7 @@ def main(
         projects=projects or [],
         overwrite=overwrite,
         prod=output_namespace == 'main',
+        input_projects=input_projects or [],
         vep_block_size=vep_block_size,
     )
     b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch)
@@ -179,7 +186,7 @@ class Analysis:
         """
         analysis_type = kwargs.pop('type', None)
         status = kwargs.pop('status', None)
-        sample_ids = sample_id_format(kwargs['sample_ids'])
+        sample_ids = kwargs['sample_ids']
         output = kwargs.pop('output', [])
         return Analysis(
             id=kwargs.pop('id'),
@@ -287,6 +294,7 @@ def _add_jobs(
     projects: List[str],
     overwrite: bool,
     prod: bool,
+    input_projects: List[str],
     vep_block_size,
 ):
     genomicsdb_bucket = f'{out_bucket}/genomicsdbs'
@@ -294,7 +302,8 @@ def _add_jobs(
     fingerprints_bucket = f'{out_bucket}/fingerprints'
 
     samples = sapi.get_all_samples(project=sm_db_name)
-    # samples = [s for s in samples if not s.external_id.startswith('NA12878-from')]
+    if input_projects:
+        samples = [s for s in samples if s.meta.get('project') in input_projects]
     latest_by_type_and_sids = _get_latest_complete_analysis(sm_db_name)
     reference, bwa_reference, noalt_regions = utils.get_refs(b)
 
@@ -354,7 +363,7 @@ def _add_jobs(
     )
 
     # TODO: split VCF by projects, run the following jobs in parallel
-    projects = ['acute-care']
+    projects = projects or ['acute-care']
     for project in projects:
         annotated_mt_path = join(out_bucket, 'annotation', f'{project}.mt')
         if utils.can_reuse(annotated_mt_path, overwrite):
