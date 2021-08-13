@@ -296,7 +296,6 @@ def _add_jobs(
     samples = sapi.get_samples(
         body_get_samples_by_criteria_api_v1_sample_post={'project_ids': input_projects}
     )
-    samples = samples[:2]
     latest_by_type_and_sids = _get_latest_complete_analysis()
     reference, bwa_reference, noalt_regions = utils.get_refs(b)
 
