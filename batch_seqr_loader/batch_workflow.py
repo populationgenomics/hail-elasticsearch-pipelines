@@ -628,7 +628,7 @@ def _make_realign_jobs(
 
     j.cpu(total_cpu)
     j.memory('standard')
-    j.storage('500G')
+    j.storage('300G')
     j.declare_resource_group(
         output_cram={
             'cram': '{root}.cram',
