@@ -8,8 +8,9 @@ import logging
 import os
 import re
 import subprocess
+from dataclasses import dataclass
 from os.path import join, basename, splitext
-from typing import Optional, List, Dict, Tuple, Union
+from typing import Optional, List, Dict, Tuple
 import pandas as pd
 from utils import file_exists
 
@@ -210,7 +211,8 @@ def _add_ped_info(
     """
     local_sample_list_fpath = join(local_tmp_dir, basename(ped_fpath))
     subprocess.run(
-        f'gsutil cat {ped_fpath} | grep -v ^Family.ID | cut -f1-6 > {local_sample_list_fpath}',
+        f'gsutil cat {ped_fpath} | grep -v ^Family.ID | cut -f1-6 > '
+        f'{local_sample_list_fpath}',
         check=False,
         shell=True,
     )
@@ -277,37 +279,75 @@ def splitext_gz(fname: str) -> Tuple[str, str]:
     return base, ext
 
 
-def sm_verify_reads_data(
-    reads_data: List,
-    reads_type: str,
-) -> Union[
-    str, Tuple[List[str], List[str]], None
-]:  # pylint: disable=too-many-return-statements
+@dataclass
+class AlignmentInput:
+    """
+    Sort of a union type for possible alignment inputs
+    """
+
+    bam_or_cram_path: Optional[str] = None
+    index_path: Optional[str] = None
+    fqs1: Optional[List[str]] = None
+    fqs2: Optional[List[str]] = None
+
+
+def sm_verify_reads_data(  # pylint: disable=too-many-return-statements
+    reads_data: Optional[List],
+    reads_type: Optional[str],
+) -> Optional[AlignmentInput]:
     """
     Verify the meta.reads object in a sample db entry
     """
     if not reads_data:
-        logger.error(f'ERROR: no "reads" data')
+        logger.error(f'ERROR: no "meta/reads" field')
         return None
-    if not reads_type in ['fastq', 'bam']:
-        logger.error(f'ERROR: "reads_type" is expected to be fastq or bam')
+    if not reads_type:
+        logger.error(f'ERROR: no "meta/reads_type" field')
+        return None
+    supported_types = ('fastq', 'bam', 'cram')
+    if reads_type not in supported_types:
+        logger.error(f'ERROR: "reads_type" is expected to be one of {supported_types}')
+        return None
 
-    error_msg = f'ERROR: cannot read the "reads" meta data: {reads_data}'
-    if reads_type == 'bam':
-        assert len(reads_data) == 1
-        fpath = reads_data[0]['location']
-        if not (fpath.endswith('.cram') or fpath.endswith('.bam')):
-            logger.error(error_msg)
-        return fpath
+    if reads_type in ('bam', 'cram'):
+        if len(reads_data) > 1:
+            logger.error('Supporting only single bam/cram input')
+            return None
+
+        bam_path = reads_data[0]['location']
+        if not (bam_path.endswith('.cram') or bam_path.endswith('.bam')):
+            logger.error(
+                f'ERROR: expected the file to have an extention .cram or .bam,'
+                f'got: {bam_path}'
+            )
+            return None
+        if not reads_data[0].get('secondaryFiles'):
+            logger.error(
+                f'ERROR: bam/cram input is expected to have '
+                f'a non-empty list field "secondaryFile" section with indices'
+            )
+            return None
+        index_path = reads_data[0]['secondaryFiles'][0]['location']
+        if (
+            bam_path.endswith('.cram')
+            and not index_path.endswith('.crai')
+            or bam_path.endswith('.bai')
+            and not index_path.endswith('.bai')
+        ):
+            logger.error(
+                f'ERROR: expected the index file to have an extention '
+                f'.crai or .bai, got: {index_path}'
+            )
+        return AlignmentInput(bam_or_cram_path=bam_path, index_path=index_path)
 
     else:
-        rs1 = []
-        rs2 = []
+        fqs1 = []
+        fqs2 = []
         for lane_data in reads_data:
             assert len(lane_data) == 2
-            rs1.append(lane_data[0]['location'])
-            rs2.append(lane_data[1]['location'])
-        return rs1, rs2
+            fqs1.append(lane_data[0]['location'])
+            fqs2.append(lane_data[1]['location'])
+        return AlignmentInput(fqs1=fqs1, fqs2=fqs2)
 
 
 def find_fastq_pairs(fpaths: List[str]) -> Dict[str, Tuple[str, str]]:
@@ -324,7 +364,8 @@ def find_fastq_pairs(fpaths: List[str]) -> Dict[str, Tuple[str, str]]:
         sname, l_fpath, r_fpath = None, None, None
 
         # Parsing the file name according to the Illumina spec
-        # https://support.illumina.com/help/BaseSpace_OLH_009008/Content/Source/Informatics/BS/NamingConvention_FASTQ-files-swBS.htm
+        # https://support.illumina.com/help/BaseSpace_OLH_009008/Content/Source
+        # /Informatics/BS/NamingConvention_FASTQ-files-swBS.htm
         # Example: SampleName_S1_L001_R1_001.fastq.gz
 
         # Stripping the segment number

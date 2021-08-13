@@ -12,7 +12,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 from os.path import join, dirname, abspath, splitext
 from typing import Optional, List, Tuple, Set, Dict, Union
@@ -31,7 +30,7 @@ from sample_metadata import (
     AnalysisStatus,
 )
 
-from find_inputs import sm_verify_reads_data
+from find_inputs import sm_verify_reads_data, AlignmentInput
 from vqsr import make_vqsr_jobs
 import utils
 
@@ -304,15 +303,16 @@ def _add_jobs(
     for s in samples:
         logger.info(f'Processing sample {s["id"]}')
         cram_analysis = latest_by_type_and_sids.get(('cram', (s['id'],)))
-        reads_data = sm_verify_reads_data(
+        alignment_input = sm_verify_reads_data(
             s['meta'].get('reads'), s['meta'].get('reads_type')
         )
-        if not reads_data:
+        if not alignment_input:
             continue
+
         cram_job, cram_fpath = _make_realign_jobs(
             b=b,
             sample_name=s['id'],
-            reads_data=reads_data,
+            alignment_input=alignment_input,
             reference=bwa_reference,
             out_bucket=out_bucket,
             overwrite=overwrite,
@@ -525,7 +525,7 @@ python check_pedigree.py \
 def _make_realign_jobs(
     b: hb.Batch,
     sample_name: str,
-    reads_data: Union[str, Tuple[List[str], List[str]]],
+    alignment_input: AlignmentInput,
     reference: hb.ResourceGroup,
     out_bucket: str,
     overwrite: bool,
@@ -598,28 +598,34 @@ def _make_realign_jobs(
     j.image(utils.BAZAM_IMAGE)
     total_cpu = 32
 
-    file1: Union[str, List[str]]
-    file2: Union[str, List[str]]
-    if isinstance(reads_data, str):
+    if alignment_input.bam_or_cram_path:
         use_bazam = True
-        file1 = reads_data
-        file2 = file1 + '.crai'
-        if not utils.file_exists(file2):
-            file2 = re.sub('.cram$', '.crai', file1)
-            if not utils.file_exists(file2):
-                logger.error(f'Not found CRAI index for file {file1}')
-                sys.exit(1)
-    else:
-        use_bazam = False
-        file1, file2 = reads_data
-    if use_bazam:
-        bazam_cpu = 4
-        bwa_cpu = 24
-        bamsormadup_cpu = 4
-    else:
-        bazam_cpu = 0
+        bazam_cpu = 10
         bwa_cpu = 32
         bamsormadup_cpu = 10
+
+        assert alignment_input.index_path
+        assert not alignment_input.fqs1 and not alignment_input.fqs2
+        cram = b.read_input_group(
+            base=alignment_input.bam_or_cram_path, index=alignment_input.index_path
+        )
+        r1_param = (
+            f'<(bazam -Xmx16g -Dsamjdk.reference_fasta={reference.base}'
+            f' -n{bazam_cpu} -bam {cram.base})'
+        )
+        r2_param = '-'
+    else:
+        assert alignment_input.fqs1 and alignment_input.fqs2
+        use_bazam = False
+        bwa_cpu = 32
+        bamsormadup_cpu = 10
+        files1 = [b.read_input(f1) for f1 in alignment_input.fqs1]
+        files2 = [b.read_input(f1) for f1 in alignment_input.fqs2]
+        r1_param = f'<(cat {" ".join(files1)})'
+        r2_param = f'<(cat {" ".join(files2)})'
+        logger.info(f'r1_param: {r1_param}')
+        logger.info(f'r2_param: {r2_param}')
+
     j.cpu(total_cpu)
     j.memory('standard')
     j.storage('500G')
@@ -630,25 +636,6 @@ def _make_realign_jobs(
         }
     )
 
-    if use_bazam:
-        # if not file2:
-        #     cram = b.read_input_group(base=file1)
-        #     index_cmd = 'samtools index {cram} {cram}.crai'
-        # else:
-        cram = b.read_input_group(base=file1, index=file2)
-        r1_param = (
-            f'<(bazam -Xmx16g -Dsamjdk.reference_fasta={reference.base}'
-            f' -n{bazam_cpu} -bam {cram.base})'
-        )
-        r2_param = '-'
-    else:
-        files1 = [b.read_input(f1) for f1 in file1]
-        files2 = [b.read_input(f1) for f1 in file2]
-        r1_param = f'<(cat {" ".join(files1)})'
-        r2_param = f'<(cat {" ".join(files2)})'
-        logger.info(f'r1_param: {r1_param}')
-        logger.info(f'r2_param: {r2_param}')
-
     rg_line = f'@RG\\tID:{sample_name}\\tSM:{sample_name}'
     # BWA command options:
     # -K     process INT input bases in each batch regardless of nThreads (for reproducibility)
@@ -656,8 +643,7 @@ def _make_realign_jobs(
     # -t16   threads
     # -Y     use soft clipping for supplementary alignments
     # -R     read group header line such as '@RG\tID:foo\tSM:bar'
-    j.command(
-        f"""
+    command = f"""
 set -o pipefail
 set -ex
 
@@ -674,7 +660,7 @@ samtools index -@{total_cpu} {j.output_cram.cram} {j.output_cram.crai}
 
 df -h; pwd; du -sh $(dirname {j.output_cram.cram})
     """
-    )
+    j.command(command)
     b.write_output(j.output_cram, splitext(output_cram_path)[0])
     b.write_output(
         j.duplicate_metrics,
