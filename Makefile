@@ -39,7 +39,7 @@ run_seqr_loader_test:
 	--description  "seqr loader - test $(TEST_VERSION)" \
 	batch_seqr_loader/batch_workflow.py \
 	--namespace test \
-	--analysis-project acute-care \
+	--analysis-project seqr-test \
 	--test-limit-input-to-project acute-care \
 	--dataset-version $(TEST_VERSION) \
 	--reuse \
@@ -53,7 +53,8 @@ run_seqr_loader_prod:
 	--output-dir   "seqr_loader" \
 	--description  "seqr loader $(PROD_VERSION)" \
 	batch_seqr_loader/batch_workflow.py \
-	--namespace       main \
+	--namespace main \
+	--analysis-project seqr \
 	--dataset-version $(PROD_VERSION) \
 	--reuse \
 	--keep-scratch

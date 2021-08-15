@@ -52,7 +52,12 @@ def check_sample():
 
 def list_samples():
     sapi = SampleApi()
-    samples = sapi.get_samples(PROJ)
+    samples = sapi.get_samples(
+        body_get_samples_by_criteria_api_v1_sample_post={
+            'project_ids': ['acute-care'],
+            'active': True,
+        }
+    )
     print(samples)
 
 
