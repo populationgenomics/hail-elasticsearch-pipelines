@@ -14,7 +14,7 @@ import shutil
 import subprocess
 import tempfile
 from os.path import join, dirname, abspath, splitext
-from typing import Optional, List, Tuple, Set, Dict, Union
+from typing import Optional, List, Tuple, Set, Dict
 from dataclasses import dataclass
 import pandas as pd
 import click
@@ -137,7 +137,11 @@ def main(
         bucket=hail_bucket.replace('gs://', ''),
     )
     b = hb.Batch(
-        f'Seqr loading pipeline in the namespace "{output_namespace}"',
+        f'Seqr loading. '
+        f'Project: {analysis_project}, '
+        f'input projects: {input_projects}, '
+        f'dataset version: {dataset_version}, '
+        f'namespace: "{output_namespace}"',
         backend=backend,
     )
 
@@ -190,75 +194,9 @@ class Analysis:
         )
 
 
-def sample_id_format(sample_id: Union[int, List[int]]):
-    """
-    Transform raw (int) sample identifier to format (CPGXXXH) where:
-        - CPG is the prefix
-        - H is the Luhn checksum
-        - XXX is the original identifier
-
-    >>> sample_id_format(10)
-    'CPG109'
-
-    >>> sample_id_format(12345)
-    'CPG123455'
-    """
-
-    if isinstance(sample_id, list):
-        return [sample_id_format(s) for s in sample_id]
-
-    if isinstance(sample_id, str) and not sample_id.isdigit():
-        if sample_id.startswith('CPG'):
-            return sample_id
-        raise ValueError(f'Unexpected format for sample identifier "{sample_id}"')
-    sample_id = int(sample_id)
-
-    return f'CPG{sample_id}{luhn_compute(sample_id)}'
-
-
-def luhn_is_valid(n):
-    """
-    Based on: https://stackoverflow.com/a/21079551
-
-    >>> luhn_is_valid(4532015112830366)
-    True
-
-    >>> luhn_is_valid(6011514433546201)
-    True
-
-    >>> luhn_is_valid(6771549495586802)
-    True
-    """
-
-    def digits_of(n):
-        return [int(d) for d in str(n)]
-
-    digits = digits_of(n)
-    odd_digits = digits[-1::-2]
-    even_digits = digits[-2::-2]
-    checksum = sum(odd_digits) + sum(sum(digits_of(d * 2)) for d in even_digits)
-    return checksum % 10 == 0
-
-
-def luhn_compute(n):
-    """
-    Compute Luhn check digit of number given as string
-
-    >>> luhn_compute(453201511283036)
-    6
-
-    >>> luhn_compute(601151443354620)
-    1
-
-    >>> luhn_compute(677154949558680)
-    2
-    """
-    m = [int(d) for d in reversed(str(n))]
-    result = sum(m) + sum(d + (d >= 5) for d in m[::2])
-    return -result % 10
-
-
-def _get_latest_complete_analysis() -> Dict[Tuple[str, Tuple], Analysis]:
+def _get_latest_complete_analysis(
+    analysis_project: str,
+) -> Dict[Tuple[str, Tuple], Analysis]:
     """
     Returns a dictionary that maps a tuple (analysis type, sample ids) to the
     lastest complete analysis record (represented by a AnalysisModel object)
@@ -266,7 +204,7 @@ def _get_latest_complete_analysis() -> Dict[Tuple[str, Tuple], Analysis]:
     latest_by_type_and_sids = dict()
     for a_type in ['cram', 'gvcf', 'joint-calling']:
         for a_data in aapi.get_latest_complete_analyses_by_type(
-            project='seqr',
+            project=analysis_project,
             analysis_type=a_type,
         ):
             a: Analysis = Analysis.from_db(**a_data)
@@ -293,9 +231,12 @@ def _add_jobs(
     fingerprints_bucket = f'{out_bucket}/fingerprints'
 
     samples = sapi.get_samples(
-        body_get_samples_by_criteria_api_v1_sample_post={'project_ids': input_projects}
+        body_get_samples_by_criteria_api_v1_sample_post={
+            'project_ids': input_projects,
+            'active': True,
+        }
     )
-    latest_by_type_and_sids = _get_latest_complete_analysis()
+    latest_by_type_and_sids = _get_latest_complete_analysis(analysis_project)
     reference, bwa_reference, noalt_regions = utils.get_refs(b)
 
     gvcf_jobs = []
