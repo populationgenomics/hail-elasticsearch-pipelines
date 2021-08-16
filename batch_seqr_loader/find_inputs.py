@@ -321,6 +321,11 @@ def sm_verify_reads_data(  # pylint: disable=too-many-return-statements
                 f'got: {bam_path}'
             )
             return None
+        if not file_exists(bam_path):
+            logger.error(f'ERROR: index file doesn\'t exist: {bam_path}')
+            return None
+
+        # Index:
         if not reads_data[0].get('secondaryFiles'):
             logger.error(
                 f'ERROR: bam/cram input is expected to have '
@@ -338,6 +343,10 @@ def sm_verify_reads_data(  # pylint: disable=too-many-return-statements
                 f'ERROR: expected the index file to have an extention '
                 f'.crai or .bai, got: {index_path}'
             )
+        if not file_exists(index_path):
+            logger.error(f'ERROR: index file doesn\'t exist: {index_path}')
+            return None
+
         return AlignmentInput(bam_or_cram_path=bam_path, index_path=index_path)
 
     else:

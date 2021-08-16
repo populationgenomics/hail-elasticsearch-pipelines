@@ -41,7 +41,7 @@ run_seqr_loader_test:
 	--namespace test \
 	--analysis-project seqr-test \
 	--input-projects seqr-test \
-	--dataset-version $(TEST_VERSION) \
+	--output-version $(TEST_VERSION) \
 	--reuse \
 	--keep-scratch
 
@@ -56,6 +56,6 @@ run_seqr_loader_prod:
 	--namespace main \
 	--analysis-project seqr \
 	--input-projects acute-care \
-	--dataset-version $(PROD_VERSION) \
+	--output-version $(PROD_VERSION) \
 	--reuse \
 	--keep-scratch

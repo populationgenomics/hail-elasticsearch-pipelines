@@ -251,15 +251,6 @@ def _add_jobs(
     # pylint: disable=unused-variable
     fingerprints_bucket = f'{out_bucket}/fingerprints'
 
-    samples_by_project = dict()
-    for proj in input_projects:
-        samples_by_project[proj] = sapi.get_samples(
-            body_get_samples_by_criteria_api_v1_sample_post={
-                'project_ids': [proj],
-                'active': True,
-            }
-        )
-
     latest_by_type_and_sids = _get_latest_complete_analysis(analysis_project)
     reference, bwa_reference, noalt_regions = utils.get_refs(b)
     intervals_j = _add_split_intervals_job(
@@ -271,6 +262,18 @@ def _add_jobs(
 
     gvcf_jobs = []
     gvcf_by_sid: Dict[str, str] = dict()
+
+    samples_by_project = dict()
+    for proj in input_projects:
+        samples_by_project[proj] = sapi.get_samples(
+            body_get_samples_by_criteria_api_v1_sample_post={
+                'project_ids': [proj],
+                'active': True,
+            }
+        )
+
+    # after dropping samples with incorrect metadata, missing inputs, etc
+    good_samples = []
     for proj, samples in samples_by_project.items():
         for s in samples:
             logger.info(f'Project {proj}. Processing sample {s["id"]}')
@@ -311,19 +314,16 @@ def _add_jobs(
             )
             gvcf_jobs.append(gvcf_job)
             gvcf_by_sid[s['id']] = gvcf_fpath
+            good_samples.append(s)
 
     # Is there a complete joint-calling analysis for the requested set of samples?
-    all_samples = []
-    for _, samples in samples_by_project.items():
-        all_samples.extend(samples)
-
     jc_analysis = latest_by_type_and_sids.get(
-        ('joint-calling', tuple(set(s['id'] for s in all_samples)))
+        ('joint-calling', tuple(set(s['id'] for s in good_samples)))
     )
     jc_job, jc_vcf_path = _make_joint_genotype_jobs(
         b=b,
         genomicsdb_bucket=genomicsdb_bucket,
-        samples=all_samples,
+        samples=good_samples,
         gvcf_by_sid=gvcf_by_sid,
         reference=reference,
         dbsnp=utils.DBSNP_VCF,
