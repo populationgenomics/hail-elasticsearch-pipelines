@@ -52,26 +52,32 @@ aapi = AnalysisApi()
     type=click.Choice(['main', 'test', 'tmp']),
     help='The bucket namespace to write the results to',
 )
-@click.option('--dataset-version', 'dataset_version', type=str, required=True)
-@click.option(
-    '--project',
-    'projects',
-    multiple=True,
-    default=['acute-care'],
-    help='Only create ES indicies for the project(s). Can be multiple. '
-    'The name will be suffixed with the dataset version (set by --version)',
-)
 @click.option(
     '--analysis-project',
     'analysis_project',
     default='seqr',
-    help='Overrides the SM project name to write analysis entries to',
+    help='SM project name to write the intermediate/joint-calling analysis entries to',
 )
 @click.option(
-    '--test-limit-input-to-project',
+    '--input-projects',
     'input_projects',
     multiple=True,
+    required=True,
     help='Only read samples that belong to the project(s). Can be multiple.',
+)
+@click.option('--output-version', 'output_version', type=str, required=True)
+@click.option(
+    '--output-projects',
+    'output_projects',
+    multiple=True,
+    help='Only create ES indicies for the project(s). Can be multiple. '
+    'Defaults to --input-projects. The name of the ES index will be suffixed '
+    'with the dataset version (set by --version)',
+)
+@click.option(
+    '--start-from-stage',
+    'start_from_stage',
+    type=click.Choice(['cram', 'gvcf', 'joint_calling', 'annotate', 'load_to_es']),
 )
 @click.option('--keep-scratch', 'keep_scratch', is_flag=True)
 @click.option(
@@ -98,9 +104,10 @@ aapi = AnalysisApi()
 def main(
     output_namespace: str,
     analysis_project: str,
-    input_projects: Optional[List[str]],
-    dataset_version: str,
-    projects: Optional[List[str]],
+    input_projects: List[str],
+    output_version: str,
+    output_projects: Optional[List[str]],
+    start_from_stage: str,
     keep_scratch: bool,
     overwrite: bool,
     dry_run: bool,
@@ -121,9 +128,20 @@ def main(
     else:
         output_suffix = 'test-tmp'
         web_bucket_suffix = 'test-tmp'
-    out_bucket = f'gs://cpg-seqr-{output_suffix}/seqr_loader/{analysis_project}/{dataset_version}'
-    tmp_bucket = f'gs://cpg-seqr-{tmp_bucket_suffix}/seqr_loader/{analysis_project}/{dataset_version}'
-    web_bucket = f'gs://cpg-seqr-{web_bucket_suffix}/seqr_loader/{analysis_project}/{dataset_version}'
+    out_bucket = (
+        f'gs://cpg-seqr-{output_suffix}/seqr_loader/{analysis_project}/{output_version}'
+    )
+    tmp_bucket = f'gs://cpg-seqr-{tmp_bucket_suffix}/seqr_loader/{analysis_project}/{output_version}'
+    web_bucket = f'gs://cpg-seqr-{web_bucket_suffix}/seqr_loader/{analysis_project}/{output_version}'
+
+    assert input_projects
+    if output_projects:
+        if not all(op in input_projects for op in output_projects):
+            logger.critical(
+                'All output projects must be contained within '
+                'the specified input projects'
+            )
+
     hail_bucket = os.environ.get('HAIL_BUCKET')
     if not hail_bucket or keep_scratch:
         # Scratch files are large, so we want to use the temporary bucket to put them in
@@ -140,27 +158,29 @@ def main(
         f'Seqr loading. '
         f'Project: {analysis_project}, '
         f'input projects: {input_projects}, '
-        f'dataset version: {dataset_version}, '
+        f'dataset version: {output_version}, '
         f'namespace: "{output_namespace}"',
         backend=backend,
     )
 
     local_tmp_dir = tempfile.mkdtemp()
+
     _add_jobs(
         b=b,
         tmp_bucket=tmp_bucket,
         out_bucket=out_bucket,
         web_bucket=web_bucket,
         local_tmp_dir=local_tmp_dir,
-        dataset_version=dataset_version,
-        projects=projects or ['acute-care'],
+        output_version=output_version,
         overwrite=overwrite,
         prod=output_namespace == 'main',
-        input_projects=input_projects or ['acute-care'],
+        input_projects=input_projects,
+        output_projects=output_projects or input_projects,
         vep_block_size=vep_block_size,
         analysis_project=analysis_project,
+        start_from_stage=start_from_stage,
     )
-    b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch)
+    b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch, wait=False)
     shutil.rmtree(local_tmp_dir)
 
 
@@ -218,74 +238,92 @@ def _add_jobs(
     tmp_bucket,
     web_bucket,  # pylint: disable=unused-argument
     local_tmp_dir,
-    dataset_version: str,
-    projects: List[str],
+    output_version: str,
     overwrite: bool,
     prod: bool,
     input_projects: List[str],
+    output_projects: List[str],
     vep_block_size,
     analysis_project: str,
+    start_from_stage: Optional[str],  # pylint: disable=unused-argument
 ):
     genomicsdb_bucket = f'{out_bucket}/genomicsdbs'
     # pylint: disable=unused-variable
     fingerprints_bucket = f'{out_bucket}/fingerprints'
 
-    samples = sapi.get_samples(
-        body_get_samples_by_criteria_api_v1_sample_post={
-            'project_ids': input_projects,
-            'active': True,
-        }
-    )
+    samples_by_project = dict()
+    for proj in input_projects:
+        samples_by_project[proj] = sapi.get_samples(
+            body_get_samples_by_criteria_api_v1_sample_post={
+                'project_ids': [proj],
+                'active': True,
+            }
+        )
+
     latest_by_type_and_sids = _get_latest_complete_analysis(analysis_project)
     reference, bwa_reference, noalt_regions = utils.get_refs(b)
+    intervals_j = _add_split_intervals_job(
+        b=b,
+        interval_list=utils.UNPADDED_INTERVALS,
+        scatter_count=utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS,
+        ref_fasta=utils.REF_FASTA,
+    )
 
     gvcf_jobs = []
     gvcf_by_sid: Dict[str, str] = dict()
-    for s in samples:
-        logger.info(f'Processing sample {s["id"]}')
-        cram_analysis = latest_by_type_and_sids.get(('cram', (s['id'],)))
-        alignment_input = sm_verify_reads_data(
-            s['meta'].get('reads'), s['meta'].get('reads_type')
-        )
-        if not alignment_input:
-            continue
+    for proj, samples in samples_by_project.items():
+        for s in samples:
+            logger.info(f'Project {proj}. Processing sample {s["id"]}')
+            cram_analysis = latest_by_type_and_sids.get(('cram', (s['id'],)))
+            alignment_input = sm_verify_reads_data(
+                s['meta'].get('reads'), s['meta'].get('reads_type')
+            )
+            if not alignment_input:
+                continue
 
-        cram_job, cram_fpath = _make_realign_jobs(
-            b=b,
-            sample_name=s['id'],
-            alignment_input=alignment_input,
-            reference=bwa_reference,
-            out_bucket=out_bucket,
-            overwrite=overwrite,
-            completed_analysis=cram_analysis,
-            analysis_project=analysis_project,
-        )
+            cram_job, cram_fpath = _make_realign_jobs(
+                b=b,
+                sample_name=s['id'],
+                project_name=proj,
+                alignment_input=alignment_input,
+                reference=bwa_reference,
+                out_bucket=out_bucket,
+                overwrite=overwrite,
+                completed_analysis=cram_analysis,
+                analysis_project=analysis_project,
+            )
 
-        gvcf_analysis = latest_by_type_and_sids.get(('gvcf', (s['id'],)))
-        gvcf_job, gvcf_fpath = _make_produce_gvcf_jobs(
-            b=b,
-            sample_name=s['id'],
-            cram_path=cram_fpath,
-            reference=reference,
-            noalt_regions=noalt_regions,
-            out_bucket=out_bucket,
-            tmp_bucket=tmp_bucket,
-            overwrite=overwrite,
-            depends_on=[cram_job],
-            analysis_project=analysis_project,
-            completed_analysis=gvcf_analysis,
-        )
-        gvcf_jobs.append(gvcf_job)
-        gvcf_by_sid[s['id']] = gvcf_fpath
+            gvcf_analysis = latest_by_type_and_sids.get(('gvcf', (s['id'],)))
+            gvcf_job, gvcf_fpath = _make_produce_gvcf_jobs(
+                b=b,
+                sample_name=s['id'],
+                project_name=proj,
+                cram_path=cram_fpath,
+                intervals_j=intervals_j,
+                reference=reference,
+                noalt_regions=noalt_regions,
+                out_bucket=out_bucket,
+                tmp_bucket=tmp_bucket,
+                overwrite=overwrite,
+                depends_on=[cram_job],
+                analysis_project=analysis_project,
+                completed_analysis=gvcf_analysis,
+            )
+            gvcf_jobs.append(gvcf_job)
+            gvcf_by_sid[s['id']] = gvcf_fpath
 
     # Is there a complete joint-calling analysis for the requested set of samples?
+    all_samples = []
+    for _, samples in samples_by_project.items():
+        all_samples.extend(samples)
+
     jc_analysis = latest_by_type_and_sids.get(
-        ('joint-calling', tuple(set(s['id'] for s in samples)))
+        ('joint-calling', tuple(set(s['id'] for s in all_samples)))
     )
     jc_job, jc_vcf_path = _make_joint_genotype_jobs(
         b=b,
         genomicsdb_bucket=genomicsdb_bucket,
-        samples=samples,
+        samples=all_samples,
         gvcf_by_sid=gvcf_by_sid,
         reference=reference,
         dbsnp=utils.DBSNP_VCF,
@@ -298,12 +336,10 @@ def _add_jobs(
         depends_on=gvcf_jobs,
     )
 
-    # TODO: split VCF by projects, run the following jobs in parallel
-    projects = projects or ['acute-care']
-    for project in projects:
+    for project in output_projects:
         annotated_mt_path = join(out_bucket, 'annotation', f'{project}.mt')
         if utils.can_reuse(annotated_mt_path, overwrite):
-            annotate_job = b.new_job(f'Annotate {project} [reuse]')
+            annotate_job = b.new_job(f'{project}: annotate [reuse]')
         else:
             annotate_job = dataproc.hail_dataproc_job(
                 b,
@@ -326,14 +362,14 @@ def _add_jobs(
             b,
             f'batch_seqr_loader/scripts/load_to_es.py '
             f'--mt-path {annotated_mt_path} '
-            f'--es-index {project}-{dataset_version} '
+            f'--es-index {project}-{output_version} '
             f'--es-index-min-num-shards 1 '
             f'--genome-version GRCh38 '
             f'{"--prod" if prod else ""}',
             max_age='16h',
             packages=utils.DATAPROC_PACKAGES,
             num_secondary_workers=10,
-            job_name=f'Add to {project} to ES index',
+            job_name=f'{project}: add to the ES index',
             depends_on=[annotate_job],
             scopes=['cloud-platform'],
         )
@@ -466,6 +502,7 @@ python check_pedigree.py \
 def _make_realign_jobs(
     b: hb.Batch,
     sample_name: str,
+    project_name: str,
     alignment_input: AlignmentInput,
     reference: hb.ResourceGroup,
     out_bucket: str,
@@ -479,7 +516,7 @@ def _make_realign_jobs(
 
     When the input is CRAM/BAM, uses Bazam to stream reads to BWA.
     """
-    job_name = f'BWA align, {sample_name}'
+    job_name = f'{project_name}/{sample_name}: BWA align'
     output_cram_path = join(out_bucket, f'{sample_name}.cram')
     if completed_analysis:
         if utils.file_exists(output_cram_path):
@@ -521,10 +558,22 @@ def _make_realign_jobs(
         aid = aapi.create_new_analysis(project=analysis_project, analysis_model=am)
         # 2. Queue a job that updates the status to "in-progress"
         sm_in_progress_j = utils.make_sm_in_progress_job(
-            b, 'cram', analysis_project, aid
+            b,
+            'cram',
+            analysis_project,
+            aid,
+            project_name=project_name,
+            sample_name=sample_name,
         )
         # 2. Queue a job that updates the status to "completed"
-        sm_completed_j = utils.make_sm_completed_job(b, 'cram', analysis_project, aid)
+        sm_completed_j = utils.make_sm_completed_job(
+            b,
+            'cram',
+            analysis_project,
+            aid,
+            project_name=project_name,
+            sample_name=sample_name,
+        )
         # Set up dependencies
         j.depends_on(sm_in_progress_j)
         sm_completed_j.depends_on(j)
@@ -616,7 +665,9 @@ df -h; pwd; du -sh $(dirname {j.output_cram.cram})
 def _make_produce_gvcf_jobs(
     b: hb.Batch,
     sample_name: str,
+    project_name: str,
     cram_path: str,
+    intervals_j: Job,
     reference: hb.ResourceGroup,
     noalt_regions: hb.ResourceFile,
     out_bucket: str,
@@ -633,7 +684,7 @@ def _make_produce_gvcf_jobs(
     HaplotypeCaller is run in an interval-based sharded way, with per-interval
     HaplotypeCaller jobs defined in a nested loop.
     """
-    job_name = f'Make GVCF, {sample_name}'
+    job_name = f'{project_name}/{sample_name}: make GVCF'
     out_gvcf_path = join(out_bucket, f'{sample_name}.g.vcf.gz')
     if completed_analysis:
         if utils.file_exists(out_gvcf_path):
@@ -671,33 +722,6 @@ def _make_produce_gvcf_jobs(
             aapi.create_new_analysis(project=analysis_project, analysis_model=am)
         return b.new_job(f'{job_name} [reuse]'), out_gvcf_path
 
-    intervals_j = _add_split_intervals_job(
-        b=b,
-        interval_list=utils.UNPADDED_INTERVALS,
-        scatter_count=utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS,
-        ref_fasta=utils.REF_FASTA,
-    )
-
-    if analysis_project:
-        # Interacting with the sample metadata server:
-        # 1. Create a "queued" analysis
-        aid = aapi.create_new_analysis(project=analysis_project, analysis_model=am)
-        # 2. Queue a job that updates the status to "in-progress"
-        sm_in_progress_j = utils.make_sm_in_progress_job(
-            b, 'gvcf', analysis_project, aid
-        )
-        # 2. Queue a job that updates the status to "completed"
-        sm_completed_j = utils.make_sm_completed_job(b, 'gvcf', analysis_project, aid)
-        # Set up dependencies
-        intervals_j.depends_on(sm_in_progress_j)
-        if depends_on:
-            sm_in_progress_j.depends_on(*depends_on)
-        logger.info(f'Queueing GVCF analysis')
-    else:
-        if depends_on:
-            intervals_j.depends_on(*depends_on)
-        sm_completed_j = None
-
     haplotype_caller_jobs = []
     for idx in range(utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS):
         haplotype_caller_jobs.append(
@@ -719,20 +743,49 @@ def _make_produce_gvcf_jobs(
         )
     hc_gvcf_path = join(tmp_bucket, 'raw', f'{sample_name}.g.vcf.gz')
     merge_j = _add_merge_gvcfs_job(
-        b,
+        b=b,
+        sample_name=sample_name,
+        project_name=project_name,
         gvcfs=[j.output_gvcf for j in haplotype_caller_jobs],
         output_gvcf_path=hc_gvcf_path,
-        sample_name=sample_name,
     )
 
     postproc_job = _make_postproc_gvcf_jobs(
         b=b,
+        sample_name=sample_name,
+        project_name=project_name,
         input_gvcf_path=hc_gvcf_path,
         out_gvcf_path=out_gvcf_path,
         noalt_regions=noalt_regions,
         overwrite=overwrite,
         depends_on=[merge_j],
     )
+
+    if analysis_project:
+        # Interacting with the sample metadata server:
+        # 1. Create a "queued" analysis
+        aid = aapi.create_new_analysis(project=analysis_project, analysis_model=am)
+        # 2. Queue a job that updates the status to "in-progress"
+        sm_in_progress_j = utils.make_sm_in_progress_job(
+            b,
+            'gvcf',
+            analysis_project,
+            aid,
+            project_name=project_name,
+            sample_name=sample_name,
+        )
+        # 2. Queue a job that updates the status to "completed"
+        sm_completed_j = utils.make_sm_completed_job(b, 'gvcf', analysis_project, aid)
+        # Set up dependencies
+        haplotype_caller_jobs[0].depends_on(sm_in_progress_j)
+        if depends_on:
+            sm_in_progress_j.depends_on(*depends_on)
+        logger.info(f'Queueing GVCF analysis')
+    else:
+        if depends_on:
+            haplotype_caller_jobs[0].depends_on(*depends_on)
+        sm_completed_j = None
+
     if sm_completed_j:
         sm_completed_j.depends_on(postproc_job)
         return sm_completed_j, out_gvcf_path
@@ -742,6 +795,8 @@ def _make_produce_gvcf_jobs(
 
 def _make_postproc_gvcf_jobs(
     b: hb.Batch,
+    sample_name: str,
+    project_name: str,
     input_gvcf_path: str,
     out_gvcf_path: str,
     noalt_regions: hb.ResourceFile,
@@ -750,6 +805,8 @@ def _make_postproc_gvcf_jobs(
 ) -> Job:
     reblock_gvcf_job = _add_reblock_gvcf_job(
         b,
+        sample_name=sample_name,
+        project_name=project_name,
         input_gvcf=b.read_input_group(
             **{'g.vcf.gz': input_gvcf_path, 'g.vcf.gz.tbi': input_gvcf_path + '.tbi'}
         ),
@@ -759,6 +816,8 @@ def _make_postproc_gvcf_jobs(
         reblock_gvcf_job.depends_on(*depends_on)
     subset_to_noalt_job = _add_subset_noalt_step(
         b,
+        sample_name=sample_name,
+        project_name=project_name,
         input_gvcf=reblock_gvcf_job.output_gvcf,
         noalt_regions=noalt_regions,
         overwrite=overwrite,
@@ -769,6 +828,8 @@ def _make_postproc_gvcf_jobs(
 
 def _add_reblock_gvcf_job(
     b: hb.Batch,
+    sample_name: str,
+    project_name: str,
     input_gvcf: hb.ResourceGroup,
     overwrite: bool,
     output_gvcf_path: Optional[str] = None,
@@ -777,7 +838,7 @@ def _add_reblock_gvcf_job(
     Runs ReblockGVCF to annotate with allele-specific VCF INFO fields
     required for recalibration
     """
-    job_name = 'ReblockGVCF'
+    job_name = f'{project_name}/{sample_name} ReblockGVCF'
     if utils.can_reuse(output_gvcf_path, overwrite):
         return b.new_job(job_name + ' [reuse]')
 
@@ -809,6 +870,8 @@ def _add_reblock_gvcf_job(
 
 def _add_subset_noalt_step(
     b: hb.Batch,
+    sample_name: str,
+    project_name: str,
     input_gvcf: hb.ResourceGroup,
     noalt_regions: str,
     overwrite: bool,
@@ -819,7 +882,7 @@ def _add_subset_noalt_step(
     2. Removes the DS INFO field that is added to some HGDP GVCFs to avoid errors
        from Hail about mismatched INFO annotations
     """
-    job_name = 'SubsetToNoalt'
+    job_name = f'{project_name}/{sample_name} SubsetToNoalt'
     if utils.can_reuse(output_gvcf_path, overwrite):
         return b.new_job(job_name + ' [reuse]')
 
@@ -923,7 +986,8 @@ def _make_joint_genotype_jobs(
                 f'rerunning the joint-calling analysis.'
             )
             aapi.update_analysis_status(
-                completed_analysis.id, AnalysisUpdateModel(status='failed')
+                completed_analysis.id,
+                AnalysisUpdateModel(status='failed'),
             )
     else:
         logger.info(
@@ -1161,21 +1225,22 @@ def _add_haplotype_caller_job(
     """
     )
     if output_gvcf_path:
-        b.write_output(j.output_gvcf, j.output_gvcf)
+        b.write_output(j.output_gvcf, output_gvcf_path)
     return j
 
 
 def _add_merge_gvcfs_job(
     b: hb.Batch,
+    sample_name: str,
+    project_name: str,
     gvcfs: List[hb.ResourceGroup],
     output_gvcf_path: Optional[str],
-    sample_name: str,
 ) -> Job:
     """
     Combine by-interval GVCFs into a single sample GVCF file
     """
 
-    job_name = f'Merge {len(gvcfs)} GVCFs, {sample_name}'
+    job_name = f'{project_name}/{sample_name}: merge {len(gvcfs)} GVCFs'
     j = b.new_job(job_name)
     j.image(utils.PICARD_IMAGE)
     j.cpu(2)

@@ -19,7 +19,7 @@ REF_FASTA = join(REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
 UNPADDED_INTERVALS = join(REF_BUCKET, 'hg38.even.handcurated.20k.intervals')
 
 CRAM_PATH = 'gs://cpg-seqr-test/datasets/acute-care/v1-14/CPG13185.cram'
-TMP_BUCKET = 'gs://cpg-seqr-test-tmp/seqr-loader/test-hc'
+TMP_BUCKET = 'gs://cpg-seqr-test-tmp/seqr_loader/test_hc'
 
 
 def _add_split_intervals_job(
@@ -114,7 +114,7 @@ def _add_haplotype_caller_job(
     """
     )
     if output_gvcf_path:
-        b.write_output(j.output_gvcf, j.output_gvcf)
+        b.write_output(j.output_gvcf, output_gvcf_path)
     return j
 
 
@@ -154,7 +154,6 @@ def _add_hc_jobs(b: hb.Batch, reference: hb.ResourceGroup) -> List[Job]:
                         sample_name=gvcf_name,
                         interval_idx=idx,
                         number_of_intervals=n_intervals,
-                        depends_on=intervals_j,
                     )
                 )
             hc_gvcf_path = join(TMP_BUCKET, f'{gvcf_name}.g.vcf.gz')
