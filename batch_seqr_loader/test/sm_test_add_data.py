@@ -9,7 +9,8 @@ from datetime import datetime
 from sample_metadata.api import SampleApi
 from sample_metadata.models.new_sample import NewSample
 
-PROJ = os.environ.get('SM_DEV_DB_PROJECT', 'vladdev')
+
+PROJ = os.environ.get('SM_DEV_DB_PROJECT', 'seqr-test')
 
 sapi = SampleApi()
 
@@ -23,7 +24,6 @@ def add_large():
         external_id='210303_A00692_0190_ML211637-1',
         type='blood',
         meta={
-            'project': 'test',
             'reads_type': 'fastq',
             'reads': [
                 [
@@ -57,7 +57,6 @@ def add_large():
         external_id='20W000094-FAM000347-1',
         type='blood',
         meta={
-            'project': 'test',
             'reads_type': 'bam',
             'reads': [
                 {
@@ -84,7 +83,6 @@ def add_tiny():
         external_id='NA12878-fastq',
         type='blood',
         meta={
-            'project': 'test-tiny',
             'reads_type': 'fastq',
             'reads': [
                 [
@@ -118,7 +116,6 @@ def add_tiny():
         external_id='NA12878-cram',
         type='blood',
         meta={
-            'project': 'test-tiny',
             'reads_type': 'bam',
             'reads': [
                 {
