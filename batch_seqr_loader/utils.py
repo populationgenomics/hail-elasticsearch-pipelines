@@ -4,7 +4,7 @@ Utility functions for the seqr loader
 import hashlib
 import os
 from os.path import join
-from typing import Iterable, Tuple
+from typing import Iterable, Tuple, Optional
 import logging
 from google.cloud import storage
 import hailtop.batch as hb
@@ -27,7 +27,7 @@ GNARLY_IMAGE = f'{AR_REPO}/gnarly_genotyper:hail_ukbb_300K'
 BCFTOOLS_IMAGE = f'{AR_REPO}/bcftools:1.10.2--h4f4756c_2'
 SM_IMAGE = f'{AR_REPO}/sm-api:2.0.5'
 
-NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS = 10
+NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS = 50
 NUMBER_OF_DATAPROC_WORKERS = 50
 NUMBER_OF_GENOMICS_DB_INTERVALS = 10
 
@@ -126,37 +126,69 @@ def get_refs(b: hb.Batch) -> Tuple:
 
 
 def make_sm_in_progress_job(
-    b: Batch, analyais_type: str, analysis_project: str, analysis_id: str
+    b: Batch,
+    analysis_type: str,
+    analysis_project: str,
+    analysis_id: str,
+    sample_name: Optional[str] = None,
+    project_name: Optional[str] = None,
 ) -> Job:
     """
     Creates a job that updates the sample metadata server entry analysis status
     to in-progress
     """
     return make_sm_update_status_job(
-        b, analyais_type, 'in-progress', analysis_project, analysis_id
+        b,
+        analysis_type,
+        'in-progress',
+        analysis_project,
+        analysis_id,
+        sample_name=sample_name,
+        project_name=project_name,
     )
 
 
 def make_sm_completed_job(
-    b: Batch, analyais_type: str, sm_db_name: str, analysis_id: str
+    b: Batch,
+    analysis_type: str,
+    sm_db_name: str,
+    analysis_id: str,
+    sample_name: Optional[str] = None,
+    project_name: Optional[str] = None,
 ) -> Job:
     """
     Creates a job that updates the sample metadata server entry analysis status
     to completed
     """
     return make_sm_update_status_job(
-        b, analyais_type, 'completed', sm_db_name, analysis_id
+        b,
+        analysis_type,
+        'completed',
+        sm_db_name,
+        analysis_id,
+        sample_name=sample_name,
+        project_name=project_name,
     )
 
 
 def make_sm_update_status_job(
-    b: Batch, analysis_type: str, status: str, sm_db_name: str, analysis_id: str
+    b: Batch,
+    analysis_type: str,
+    status: str,
+    project: str,
+    analysis_id: str,
+    sample_name: Optional[str] = None,
+    project_name: Optional[str] = None,
 ) -> Job:
     """
     Creates a job that updates the sample metadata server entry analysis status.
     """
     assert status in ['in-progress', 'failed', 'completed', 'queued']
-    j = b.new_job(f'SM: update {analysis_type} to {status}')
+    job_name = ''
+    if project_name and sample_name:
+        job_name += f'{project_name}/{sample_name}: '
+    job_name += f'Update SM: {analysis_type} to {status}'
+    j = b.new_job(job_name)
     j.image(SM_IMAGE)
     j.command(
         f"""
@@ -165,7 +197,7 @@ set -ex
 
 export GOOGLE_APPLICATION_CREDENTIALS=/gsa-key/key.json
 gcloud -q auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
-export SM_DEV_DB_PROJECT={sm_db_name}
+export SM_DEV_DB_PROJECT={project}
 export SM_ENVIRONMENT=PRODUCTION
 
 cat <<EOT >> update.py
