@@ -354,6 +354,17 @@ def sm_verify_reads_data(  # pylint: disable=too-many-return-statements
         fqs2 = []
         for lane_data in reads_data:
             assert len(lane_data) == 2
+            if not file_exists(lane_data[0]['location']):
+                logger.error(
+                    f'ERROR: read 1 file doesn\'t exist: {lane_data[0]["location"]}'
+                )
+                return None
+            if not file_exists(lane_data[1]['location']):
+                logger.error(
+                    f'ERROR: read 2 file doesn\'t exist: {lane_data[1]["location"]}'
+                )
+                return None
+
             fqs1.append(lane_data[0]['location'])
             fqs2.append(lane_data[1]['location'])
         return AlignmentInput(fqs1=fqs1, fqs2=fqs2)
