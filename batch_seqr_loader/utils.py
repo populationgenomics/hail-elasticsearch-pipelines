@@ -187,7 +187,7 @@ def make_sm_update_status_job(
     job_name = ''
     if project_name and sample_name:
         job_name += f'{project_name}/{sample_name}: '
-    job_name += f'update SM: {analysis_type} to {status}'
+    job_name += f'Update SM: {analysis_type} to {status}'
     j = b.new_job(job_name)
     j.image(SM_IMAGE)
     j.command(

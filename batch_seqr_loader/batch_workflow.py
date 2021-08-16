@@ -727,6 +727,8 @@ def _make_produce_gvcf_jobs(
         haplotype_caller_jobs.append(
             _add_haplotype_caller_job(
                 b,
+                sample_name=sample_name,
+                project_name=project_name,
                 cram=b.read_input_group(
                     **{
                         'cram': cram_path,
@@ -735,7 +737,6 @@ def _make_produce_gvcf_jobs(
                 ),
                 interval=intervals_j.intervals[f'interval_{idx}'],
                 reference=reference,
-                sample_name=sample_name,
                 interval_idx=idx,
                 number_of_intervals=utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS,
                 depends_on=depends_on,
@@ -775,7 +776,14 @@ def _make_produce_gvcf_jobs(
             sample_name=sample_name,
         )
         # 2. Queue a job that updates the status to "completed"
-        sm_completed_j = utils.make_sm_completed_job(b, 'gvcf', analysis_project, aid)
+        sm_completed_j = utils.make_sm_completed_job(
+            b,
+            'gvcf',
+            analysis_project,
+            aid,
+            sample_name=sample_name,
+            project_name=project_name,
+        )
         # Set up dependencies
         haplotype_caller_jobs[0].depends_on(sm_in_progress_j)
         if depends_on:
@@ -838,7 +846,7 @@ def _add_reblock_gvcf_job(
     Runs ReblockGVCF to annotate with allele-specific VCF INFO fields
     required for recalibration
     """
-    job_name = f'{project_name}/{sample_name} ReblockGVCF'
+    job_name = f'{project_name}/{sample_name}: ReblockGVCF'
     if utils.can_reuse(output_gvcf_path, overwrite):
         return b.new_job(job_name + ' [reuse]')
 
@@ -882,7 +890,7 @@ def _add_subset_noalt_step(
     2. Removes the DS INFO field that is added to some HGDP GVCFs to avoid errors
        from Hail about mismatched INFO annotations
     """
-    job_name = f'{project_name}/{sample_name} SubsetToNoalt'
+    job_name = f'{project_name}/{sample_name}: SubsetToNoalt'
     if utils.can_reuse(output_gvcf_path, overwrite):
         return b.new_job(job_name + ' [reuse]')
 
@@ -1173,10 +1181,11 @@ def _add_split_intervals_job(
 
 def _add_haplotype_caller_job(
     b: hb.Batch,
+    sample_name: str,
+    project_name: str,
     cram: hb.ResourceGroup,
     interval: hb.ResourceFile,
     reference: hb.ResourceGroup,
-    sample_name: str,
     interval_idx: Optional[int] = None,
     number_of_intervals: int = 1,
     depends_on: Optional[List[Job]] = None,
@@ -1186,7 +1195,7 @@ def _add_haplotype_caller_job(
     """
     Run HaplotypeCaller on an input BAM or CRAM, and output GVCF
     """
-    job_name = 'HaplotypeCaller'
+    job_name = f'{project_name}/{sample_name}: HaplotypeCaller'
     if interval_idx is not None:
         job_name += f', {sample_name} {interval_idx}/{number_of_intervals}'
     if utils.can_reuse(output_gvcf_path, overwrite):
