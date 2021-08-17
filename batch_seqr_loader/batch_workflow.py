@@ -63,14 +63,14 @@ aapi = AnalysisApi()
     'input_projects',
     multiple=True,
     required=True,
-    help='Only read samples that belong to the project(s). Can be multiple.',
+    help='Only read samples that belong to the project(s). Can be set multiple times.',
 )
 @click.option('--output-version', 'output_version', type=str, required=True)
 @click.option(
     '--output-projects',
     'output_projects',
     multiple=True,
-    help='Only create ES indicies for the project(s). Can be multiple. '
+    help='Only create ES indicies for the project(s). Can be set multiple times. '
     'Defaults to --input-projects. The name of the ES index will be suffixed '
     'with the dataset version (set by --version)',
 )
@@ -81,9 +81,10 @@ aapi = AnalysisApi()
 )
 @click.option(
     '--skip-sample',
-    '-S' 'skip_samples',
+    '-S',
+    'skip_samples',
     multiple=True,
-    help='Don\'t process specified samples. Can be multiple.',
+    help='Don\'t process specified samples. Can be set multiple times.',
 )
 @click.option('--keep-scratch', 'keep_scratch', is_flag=True)
 @click.option(
