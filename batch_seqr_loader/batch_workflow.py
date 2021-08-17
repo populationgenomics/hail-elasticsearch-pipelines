@@ -79,6 +79,12 @@ aapi = AnalysisApi()
     'start_from_stage',
     type=click.Choice(['cram', 'gvcf', 'joint_calling', 'annotate', 'load_to_es']),
 )
+@click.option(
+    '--skip-sample',
+    '-S' 'skip_samples',
+    multiple=True,
+    help='Don\'t process specified samples. Can be multiple.',
+)
 @click.option('--keep-scratch', 'keep_scratch', is_flag=True)
 @click.option(
     '--overwrite/--reuse',
@@ -108,6 +114,7 @@ def main(
     output_version: str,
     output_projects: Optional[List[str]],
     start_from_stage: str,
+    skip_samples: List[str],
     keep_scratch: bool,
     overwrite: bool,
     dry_run: bool,
@@ -179,6 +186,7 @@ def main(
         vep_block_size=vep_block_size,
         analysis_project=analysis_project,
         start_from_stage=start_from_stage,
+        skip_samples=skip_samples,
     )
     b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch, wait=False)
     shutil.rmtree(local_tmp_dir)
@@ -246,6 +254,7 @@ def _add_jobs(
     vep_block_size,
     analysis_project: str,
     start_from_stage: Optional[str],  # pylint: disable=unused-argument
+    skip_samples: List[str],
 ):
     genomicsdb_bucket = f'{out_bucket}/genomicsdbs'
     # pylint: disable=unused-variable
@@ -263,14 +272,20 @@ def _add_jobs(
     gvcf_jobs = []
     gvcf_by_sid: Dict[str, str] = dict()
 
-    samples_by_project = dict()
+    samples_by_project: Dict[str, List[Dict]] = dict()
     for proj in input_projects:
-        samples_by_project[proj] = sapi.get_samples(
+        samples = sapi.get_samples(
             body_get_samples_by_criteria_api_v1_sample_post={
                 'project_ids': [proj],
                 'active': True,
             }
         )
+        samples_by_project[proj] = []
+        for s in samples:
+            if s['id'] in skip_samples:
+                logger.info(f'Skiping sample: {s["id"]}')
+            else:
+                samples_by_project[proj].append(s)
 
     # after dropping samples with incorrect metadata, missing inputs, etc
     good_samples = []
@@ -640,10 +655,10 @@ set -ex
 (while true; do df -h; pwd; du -sh $(dirname {j.output_cram.cram}); sleep 600; done) &
 
 bwa mem -K 100000000 {'-p' if use_bazam else ''} -t{bwa_cpu} -Y \\
--R '{rg_line}' {reference.base} {r1_param} {r2_param} | \\
+    -R '{rg_line}' {reference.base} {r1_param} {r2_param} | \\
 bamsormadup inputformat=sam threads={bamsormadup_cpu} SO=coordinate \\
-M={j.duplicate_metrics} outputformat=sam \\
-tmpfile=$(dirname {j.output_cram.cram})/bamsormadup-tmp | \\
+    M={j.duplicate_metrics} outputformat=sam \\
+    tmpfile=$(dirname {j.output_cram.cram})/bamsormadup-tmp | \\
 samtools view -T {reference.base} -O cram -o {j.output_cram.cram}
 
 samtools index -@{total_cpu} {j.output_cram.cram} {j.output_cram.crai}
