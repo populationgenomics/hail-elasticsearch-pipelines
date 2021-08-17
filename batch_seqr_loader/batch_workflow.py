@@ -59,18 +59,18 @@ aapi = AnalysisApi()
     help='SM project name to write the intermediate/joint-calling analysis entries to',
 )
 @click.option(
-    '--input-projects',
+    '--input-project',
     'input_projects',
     multiple=True,
     required=True,
-    help='Only read samples that belong to the project(s). Can be multiple.',
+    help='Only read samples that belong to the project(s). Can be set multiple times.',
 )
 @click.option('--output-version', 'output_version', type=str, required=True)
 @click.option(
     '--output-projects',
     'output_projects',
     multiple=True,
-    help='Only create ES indicies for the project(s). Can be multiple. '
+    help='Only create ES indicies for the project(s). Can be set multiple times. '
     'Defaults to --input-projects. The name of the ES index will be suffixed '
     'with the dataset version (set by --version)',
 )
@@ -78,6 +78,13 @@ aapi = AnalysisApi()
     '--start-from-stage',
     'start_from_stage',
     type=click.Choice(['cram', 'gvcf', 'joint_calling', 'annotate', 'load_to_es']),
+)
+@click.option(
+    '--skip-sample',
+    '-S',
+    'skip_samples',
+    multiple=True,
+    help='Don\'t process specified samples. Can be set multiple times.',
 )
 @click.option('--keep-scratch', 'keep_scratch', is_flag=True)
 @click.option(
@@ -108,6 +115,7 @@ def main(
     output_version: str,
     output_projects: Optional[List[str]],
     start_from_stage: str,
+    skip_samples: List[str],
     keep_scratch: bool,
     overwrite: bool,
     dry_run: bool,
@@ -165,7 +173,7 @@ def main(
 
     local_tmp_dir = tempfile.mkdtemp()
 
-    _add_jobs(
+    b = _add_jobs(
         b=b,
         tmp_bucket=tmp_bucket,
         out_bucket=out_bucket,
@@ -179,8 +187,10 @@ def main(
         vep_block_size=vep_block_size,
         analysis_project=analysis_project,
         start_from_stage=start_from_stage,
+        skip_samples=skip_samples,
     )
-    b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch, wait=False)
+    if b:
+        b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch, wait=False)
     shutil.rmtree(local_tmp_dir)
 
 
@@ -246,7 +256,8 @@ def _add_jobs(
     vep_block_size,
     analysis_project: str,
     start_from_stage: Optional[str],  # pylint: disable=unused-argument
-):
+    skip_samples: List[str],
+) -> Optional[hb.Batch]:
     genomicsdb_bucket = f'{out_bucket}/genomicsdbs'
     # pylint: disable=unused-variable
     fingerprints_bucket = f'{out_bucket}/fingerprints'
@@ -263,14 +274,20 @@ def _add_jobs(
     gvcf_jobs = []
     gvcf_by_sid: Dict[str, str] = dict()
 
-    samples_by_project = dict()
+    samples_by_project: Dict[str, List[Dict]] = dict()
     for proj in input_projects:
-        samples_by_project[proj] = sapi.get_samples(
+        samples = sapi.get_samples(
             body_get_samples_by_criteria_api_v1_sample_post={
                 'project_ids': [proj],
                 'active': True,
             }
         )
+        samples_by_project[proj] = []
+        for s in samples:
+            if s['id'] in skip_samples:
+                logger.info(f'Skiping sample: {s["id"]}')
+            else:
+                samples_by_project[proj].append(s)
 
     # after dropping samples with incorrect metadata, missing inputs, etc
     good_samples = []
@@ -315,6 +332,10 @@ def _add_jobs(
             gvcf_jobs.append(gvcf_job)
             gvcf_by_sid[s['id']] = gvcf_fpath
             good_samples.append(s)
+
+    if not good_samples:
+        logger.info('No samples left to joint-call')
+        return None
 
     # Is there a complete joint-calling analysis for the requested set of samples?
     jc_analysis = latest_by_type_and_sids.get(
@@ -640,10 +661,10 @@ set -ex
 (while true; do df -h; pwd; du -sh $(dirname {j.output_cram.cram}); sleep 600; done) &
 
 bwa mem -K 100000000 {'-p' if use_bazam else ''} -t{bwa_cpu} -Y \\
--R '{rg_line}' {reference.base} {r1_param} {r2_param} | \\
+    -R '{rg_line}' {reference.base} {r1_param} {r2_param} | \\
 bamsormadup inputformat=sam threads={bamsormadup_cpu} SO=coordinate \\
-M={j.duplicate_metrics} outputformat=sam \\
-tmpfile=$(dirname {j.output_cram.cram})/bamsormadup-tmp | \\
+    M={j.duplicate_metrics} outputformat=sam \\
+    tmpfile=$(dirname {j.output_cram.cram})/bamsormadup-tmp | \\
 samtools view -T {reference.base} -O cram -o {j.output_cram.cram}
 
 samtools index -@{total_cpu} {j.output_cram.cram} {j.output_cram.crai}
@@ -960,9 +981,9 @@ def _make_joint_genotype_jobs(
     # Determining which samples to add. Using the first interval, so the assumption
     # is that all DBs have the same set of samples.
     (
-        samples_to_add,
+        sample_names_to_add,
         sample_names_will_be_in_db,
-        sample_names_to_skip,
+        sample_names_already_added,
         updating_existing_db,
         sample_map_bucket_path,
     ) = _samples_to_add_to_db(
@@ -1046,13 +1067,13 @@ def _make_joint_genotype_jobs(
         sm_completed_j = None
 
     import_gvcfs_job_per_interval = dict()
-    if samples_to_add:
+    if sample_names_to_add:
         for idx in range(utils.NUMBER_OF_GENOMICS_DB_INTERVALS):
             import_gvcfs_job, _ = _add_import_gvcfs_job(
                 b=b,
                 genomicsdb_gcs_path=genomics_gcs_path_per_interval[idx],
-                samples_to_add=samples_to_add,
-                sample_names_to_skip=sample_names_to_skip,
+                sample_names_to_add=sample_names_to_add,
+                sample_names_to_skip=sample_names_already_added,
                 sample_names_will_be_in_db=sample_names_will_be_in_db,
                 updating_existing_db=updating_existing_db,
                 sample_map_bucket_path=sample_map_bucket_path,
@@ -1288,7 +1309,7 @@ def _samples_to_add_to_db(
     samples,
     tmp_bucket: str,
     gvcf_by_sid: Dict[str, str],
-) -> Tuple[List[Dict], Set[str], Set[str], bool, str]:
+) -> Tuple[Set[str], Set[str], Set[str], bool, str]:
     if utils.file_exists(genomicsdb_gcs_path):
         # Check if sample exists in the DB already
         genomicsdb_metadata = join(local_tmp_dir, f'callset-{interval_idx}.json')
@@ -1305,29 +1326,42 @@ def _samples_to_add_to_db(
         with open(genomicsdb_metadata) as f:
             db_metadata = json.load(f)
         sample_names_in_db = set(s['sample_name'] for s in db_metadata['callsets'])
-        new_sample_names = set([s['id'] for s in samples])
-        sample_names_to_add = new_sample_names - sample_names_in_db
-        sample_names_to_skip = new_sample_names & sample_names_in_db
-        if sample_names_to_skip:
-            logger.warning(
-                f'Samples {sample_names_to_skip} already exist in the DB '
-                f'{genomicsdb_gcs_path}, skipping adding them'
-            )
-        if sample_names_to_add:
-            logger.info(
-                f'Will add samples {sample_names_to_add} into the DB '
-                f'{genomicsdb_gcs_path}'
-            )
+        sample_names_requested = set([s['id'] for s in samples])
+        sample_names_to_add = sample_names_requested - sample_names_in_db
+        sample_names_to_remove = sample_names_in_db - sample_names_requested
+        if sample_names_to_remove:
+            # GenomicsDB doesn't support removing, so creating a new DB
+            updating_existing_db = False
+            sample_names_already_added = set()
+            sample_names_to_add = {s['id'] for s in samples}
+            sample_names_will_be_in_db = sample_names_to_add
         else:
-            logger.warning(f'Nothing will be added into the DB {genomicsdb_gcs_path}')
-
-        samples_to_add = [s for s in samples if s['id'] in sample_names_to_add]
-        sample_names_will_be_in_db = sample_names_in_db | sample_names_to_add
-        updating_existing_db = True
+            updating_existing_db = True
+            sample_names_will_be_in_db = sample_names_in_db | sample_names_to_add
+            sample_names_already_added = sample_names_requested & sample_names_in_db
+            if sample_names_already_added:
+                logger.info(
+                    f'Samples {sample_names_already_added} already exist in the DB '
+                    f'{genomicsdb_gcs_path}, skipping adding them'
+                )
+            if sample_names_to_remove:
+                logger.info(
+                    f'There are samples that need to be removed from the DB '
+                    f'{genomicsdb_gcs_path}: {sample_names_to_remove}. Re-creating the DB '
+                    f'using the updated set of samples'
+                )
+            elif sample_names_to_add:
+                logger.info(
+                    f'Will add samples {sample_names_to_add} into the DB '
+                    f'{genomicsdb_gcs_path}'
+                )
+            else:
+                logger.warning(
+                    f'Nothing will be added into the DB {genomicsdb_gcs_path}'
+                )
     else:
         # Initiate new DB
-        sample_names_to_skip = set()
-        samples_to_add = samples
+        sample_names_already_added = set()
         sample_names_to_add = {s['id'] for s in samples}
         sample_names_will_be_in_db = sample_names_to_add
         updating_existing_db = False
@@ -1335,8 +1369,8 @@ def _samples_to_add_to_db(
     sample_map_bucket_path = join(tmp_bucket, 'work', 'sample_name.csv')
     local_sample_map_fpath = join(local_tmp_dir, 'sample_name.csv')
     with open(local_sample_map_fpath, 'w') as f:
-        for s in samples_to_add:
-            f.write('\t'.join([s['id'], gvcf_by_sid[s['id']]]) + '\n')
+        for sid in sample_names_to_add:
+            f.write('\t'.join([sid, gvcf_by_sid[sid]]) + '\n')
     subprocess.run(
         f'gsutil cp {local_sample_map_fpath} {sample_map_bucket_path}',
         check=False,
@@ -1344,9 +1378,9 @@ def _samples_to_add_to_db(
     )
 
     return (
-        samples_to_add,
+        sample_names_to_add,
         sample_names_will_be_in_db,
-        sample_names_to_skip,
+        sample_names_already_added,
         updating_existing_db,
         sample_map_bucket_path,
     )
@@ -1355,7 +1389,7 @@ def _samples_to_add_to_db(
 def _add_import_gvcfs_job(
     b: hb.Batch,
     genomicsdb_gcs_path: str,
-    samples_to_add: List[Dict],
+    sample_names_to_add: Set[str],
     sample_names_to_skip: Set[str],
     sample_names_will_be_in_db: Set[str],
     updating_existing_db: bool,
@@ -1420,7 +1454,7 @@ def _add_import_gvcfs_job(
 
     (while true; do df -h; pwd; du -sh $(dirname {j.output['tar']}); free -m; sleep 300; done) &
 
-    echo "Adding samples: {', '.join([s['id'] for s in samples_to_add])}"
+    echo "Adding samples: {', '.join(sample_names_to_add)}"
     {f'echo "Skipping adding samples that are already in the DB: '
      f'{", ".join(sample_names_to_skip)}"' if sample_names_to_skip else ''}
 
