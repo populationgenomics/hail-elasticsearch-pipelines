@@ -40,7 +40,7 @@ run_seqr_loader_test:
 	batch_seqr_loader/batch_workflow.py \
 	--namespace test \
 	--analysis-project seqr-test \
-	--input-projects seqr-test \
+	--input-project seqr-test \
 	--output-version $(TEST_VERSION) \
 	--reuse \
 	--keep-scratch
@@ -55,7 +55,7 @@ run_seqr_loader_prod:
 	batch_seqr_loader/batch_workflow.py \
 	--namespace main \
 	--analysis-project seqr \
-	--input-projects acute-care \
+	--input-project acute-care \
 	--output-version $(PROD_VERSION) \
 	--reuse \
 	--keep-scratch

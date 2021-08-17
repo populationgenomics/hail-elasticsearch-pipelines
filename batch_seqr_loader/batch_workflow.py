@@ -59,7 +59,7 @@ aapi = AnalysisApi()
     help='SM project name to write the intermediate/joint-calling analysis entries to',
 )
 @click.option(
-    '--input-projects',
+    '--input-project',
     'input_projects',
     multiple=True,
     required=True,
