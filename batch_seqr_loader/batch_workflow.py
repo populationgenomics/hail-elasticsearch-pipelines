@@ -173,7 +173,7 @@ def main(
 
     local_tmp_dir = tempfile.mkdtemp()
 
-    _add_jobs(
+    b = _add_jobs(
         b=b,
         tmp_bucket=tmp_bucket,
         out_bucket=out_bucket,
@@ -189,7 +189,8 @@ def main(
         start_from_stage=start_from_stage,
         skip_samples=skip_samples,
     )
-    b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch, wait=False)
+    if b:
+        b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch, wait=False)
     shutil.rmtree(local_tmp_dir)
 
 
@@ -256,7 +257,7 @@ def _add_jobs(
     analysis_project: str,
     start_from_stage: Optional[str],  # pylint: disable=unused-argument
     skip_samples: List[str],
-):
+) -> Optional[hb.Batch]:
     genomicsdb_bucket = f'{out_bucket}/genomicsdbs'
     # pylint: disable=unused-variable
     fingerprints_bucket = f'{out_bucket}/fingerprints'
@@ -334,7 +335,7 @@ def _add_jobs(
 
     if not good_samples:
         logger.info('No samples left to joint-call')
-        return b
+        return None
 
     # Is there a complete joint-calling analysis for the requested set of samples?
     jc_analysis = latest_by_type_and_sids.get(
