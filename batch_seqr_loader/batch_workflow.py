@@ -1652,9 +1652,14 @@ def _add_gnarly_genotyper_job(
     j.declare_resource_group(
         output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
     )
+    genomicsdb = b.read_input(genomicsdb_path)
 
     j.command(
         f"""set -e
+    cd $(dirname {genomicsdb})
+    
+    tar -xf {genomicsdb} >/dev/null 2>&1
+        
     (while true; do df -h; pwd; free -m; sleep 300; done) &
 
     df -h; pwd; free -m
@@ -1666,7 +1671,7 @@ def _add_gnarly_genotyper_job(
       -D {dbsnp} \\
       --only-output-calls-starting-in-intervals \\
       --keep-all-sites \\
-      -V {genomicsdb_path} \\
+      -V {genomicsdb} \\
       {f'-L {interval} ' if interval else ''} \\
       --create-output-variant-index"""
     )
