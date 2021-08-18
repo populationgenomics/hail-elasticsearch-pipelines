@@ -238,19 +238,18 @@ reference = b.read_input_group(
 )
 
 sapi = SampleApi()
-samples = [
-    s
-    for s in sapi.get_samples(
-        body_get_samples_by_criteria_api_v1_sample_post={
-            'project_ids': ['acute-care'],
-            'active': True,
-        }
-    )
-    if s['id'] in ['CPG12229', 'CPG12302', 'CPG11981', 'CPG11817']
-]
+samples = []
+for s in sapi.get_samples(
+    body_get_samples_by_criteria_api_v1_sample_post={
+        'project_ids': ['acute-care'],
+        'active': True,
+    }
+):
+    if s['id'] in ['CPG12229', 'CPG12302', 'CPG11981', 'CPG11817']:
+        print(f"Processing sample {s['id']}, with metadata {s['meta']}")
+        samples.append(s)
 
 for s in samples:
-    print(f"Processing sample {s['id']}, with metadata {s['meta']}")
     for cont in BWA_CONTAINER_1, BWA_CONTAINER_2:
         alignment_input = sm_verify_reads_data(
             s['meta'].get('reads'), s['meta'].get('reads_type')
