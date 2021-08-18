@@ -238,11 +238,16 @@ reference = b.read_input_group(
 )
 
 sapi = SampleApi()
-samples = []
-for id in ['CPG12229', 'CPG12302', 'CPG11981', 'CPG11817']:
-    samples.append(
-        sapi.get_sample_by_external_id(external_id=id, project=['acute-care'])
+samples = [
+    s
+    for s in sapi.get_samples(
+        body_get_samples_by_criteria_api_v1_sample_post={
+            'project_ids': ['acute-care'],
+            'active': True,
+        }
     )
+    if s['id'] in ['CPG12229', 'CPG12302', 'CPG11981', 'CPG11817']
+]
 
 for s in samples:
     print(f"Processing sample {s['id']}, with metadata {s['meta']}")
