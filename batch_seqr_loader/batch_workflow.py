@@ -301,7 +301,7 @@ def _add_jobs(
                 cram_job = None
                 if not cram_analysis:
                     logger.warning(
-                        f'No completed cram analysis found for sample {s["id"]}, '
+                        f'No completed CRAM analysis found for sample {s["id"]}, '
                         f'and start_from_stage is {start_from_stage}, so'
                         f'skipping this sample'
                     )
@@ -334,33 +334,45 @@ def _add_jobs(
                 )
 
             gvcf_analysis = latest_by_type_and_sids.get(('gvcf', (s['id'],)))
-            if start_from_stage is None and start_from_stage not in ['cram', 'gvcf']:
+            if start_from_stage is not None and start_from_stage not in [
+                'cram',
+                'gvcf',
+            ]:
                 if not gvcf_analysis:
                     logger.warning(
-                        f'No gvcf analysis found for sample {s["id"]}, '
+                        f'No completed GVCF analysis found for sample {s["id"]}, '
                         f'and start_from_stage is {start_from_stage}, so'
                         f'skipping this sample'
                     )
                     continue
+                gvcf_fpath = gvcf_analysis.output
+                if not gvcf_fpath or not utils.file_exists(gvcf_fpath):
+                    logger.error(
+                        f'Sample {s["id"]} has a completed GVCF analysis, '
+                        f'but the output file {gvcf_fpath} does not exist, so '
+                        f'skipping this sample'
+                    )
+                    continue
+                gvcf_fpath = str(gvcf_fpath)
+            else:
+                gvcf_job, gvcf_fpath = _make_produce_gvcf_jobs(
+                    b=b,
+                    sample_name=s['id'],
+                    project_name=proj,
+                    cram_path=cram_fpath,
+                    intervals_j=intervals_j,
+                    reference=reference,
+                    noalt_regions=noalt_regions,
+                    out_bucket=out_bucket,
+                    tmp_bucket=tmp_bucket,
+                    overwrite=overwrite,
+                    depends_on=[cram_job] if cram_job else [],
+                    analysis_project=analysis_project,
+                    completed_analysis=gvcf_analysis,
+                )
+                gvcf_jobs.append(gvcf_job)
 
-            gvcf_job, gvcf_fpath = _make_produce_gvcf_jobs(
-                b=b,
-                sample_name=s['id'],
-                project_name=proj,
-                cram_path=cram_fpath,
-                intervals_j=intervals_j,
-                reference=reference,
-                noalt_regions=noalt_regions,
-                out_bucket=out_bucket,
-                tmp_bucket=tmp_bucket,
-                overwrite=overwrite,
-                depends_on=[cram_job] if cram_job else [],
-                analysis_project=analysis_project,
-                completed_analysis=gvcf_analysis,
-            )
-            gvcf_jobs.append(gvcf_job)
             gvcf_by_sid[s['id']] = gvcf_fpath
-
             good_samples.append(s)
 
     if not good_samples:
@@ -739,7 +751,7 @@ def _make_produce_gvcf_jobs(
     depends_on: Optional[List[Job]] = None,
     analysis_project: str = None,
     completed_analysis: Optional[Analysis] = None,
-) -> Tuple[Job, AnalysisModel]:
+) -> Tuple[Job, str]:
     """
     Takes all samples with a 'file' of 'type'='bam' in `samples_df`,
     and runs HaplotypeCaller on them, and sets a new 'file' of 'type'='gvcf'
@@ -760,8 +772,8 @@ def _make_produce_gvcf_jobs(
         else:
             logger.warning(
                 f'Sample {sample_name} does have a completed GVCF analysis, '
-                f'but the output file does not exist. Setting status to "failed"'
-                f'and rerunning the analysis.'
+                f'but the output file {out_gvcf_path} does not exist. Setting status '
+                f'to "failed" and rerunning the analysis.'
             )
             aapi.update_analysis_status(
                 completed_analysis.id, AnalysisUpdateModel(status='failed')
