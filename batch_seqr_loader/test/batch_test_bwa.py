@@ -22,9 +22,7 @@ BWA_CONTAINER_2 = (
     f'australia-southeast1-docker.pkg.dev/cpg-common/images/biobambam2:debug-tsan'
 )
 REF_BUCKET = 'gs://cpg-reference/hg38/v1'
-TARGET_BUCKET = 'gs://cpg-seqr-test-tmp/hg38/v1'
 REF_FASTA = join(REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
-TARGET_FASTA = join(TARGET_BUCKET, 'Homo_sapiens_assembly38.fasta')
 
 
 @dataclass
@@ -230,11 +228,17 @@ backend = hb.ServiceBackend(
     bucket=hail_bucket.replace('gs://', ''),
 )
 b = hb.Batch(backend=backend, name='test')
-reference = b.read_input_group(
+
+bwa_reference = b.read_input_group(
     base=REF_FASTA,
     fai=REF_FASTA + '.fai',
     dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
     + '.dict',
+    sa=REF_FASTA + '.sa',
+    amb=REF_FASTA + '.amb',
+    bwt=REF_FASTA + '.bwt',
+    ann=REF_FASTA + '.ann',
+    pac=REF_FASTA + '.pac',
 )
 
 sapi = SampleApi()
@@ -257,5 +261,5 @@ for s in samples:
             s['meta'].get('reads'), s['meta'].get('reads_type')
         )
         logger.info(f'Submitting {alignment_input}')
-        _test_bwa(b, reference, cont, s['external_id'], alignment_input)
+        _test_bwa(b, bwa_reference, cont, s['external_id'], alignment_input)
 b.run(open=True)
