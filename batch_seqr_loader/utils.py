@@ -17,7 +17,7 @@ logger.setLevel(logging.INFO)
 
 
 AR_REPO = 'australia-southeast1-docker.pkg.dev/cpg-common/images'
-GATK_VERSION = '4.2.1.0'
+GATK_VERSION = '4.2.0.0'
 GATK_IMAGE = f'{AR_REPO}/gatk:{GATK_VERSION}'
 PICARD_IMAGE = f'{AR_REPO}/picard-cloud:2.23.8'
 BAZAM_IMAGE = f'{AR_REPO}/bazam:v2'
