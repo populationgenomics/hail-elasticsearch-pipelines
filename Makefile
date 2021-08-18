@@ -57,6 +57,5 @@ run_seqr_loader_prod:
 	--analysis-project seqr \
 	--input-project acute-care \
 	--output-version $(PROD_VERSION) \
-	-S CPG11783 \
 	--reuse \
 	--keep-scratch
