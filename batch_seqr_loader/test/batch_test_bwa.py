@@ -241,12 +241,14 @@ sapi = SampleApi()
 samples = []
 for s in sapi.get_samples(
     body_get_samples_by_criteria_api_v1_sample_post={
-        'project_ids': ['acute-care'],
+        'project_ids': ['seqr-test'],
         'active': True,
     }
 ):
     if s['id'] in ['CPG12229', 'CPG12302', 'CPG11981', 'CPG11817']:
-        print(f"Processing sample {s['id']}, with metadata {s['meta']}")
+        print(
+            f"Processing sample {s['id']/s['external_id']}, with metadata {s['meta']}"
+        )
         samples.append(s)
 
 for s in samples:
@@ -255,5 +257,5 @@ for s in samples:
             s['meta'].get('reads'), s['meta'].get('reads_type')
         )
         if alignment_input:
-            _test_bwa(b, reference, cont, s['id'], alignment_input)
+            _test_bwa(b, reference, cont, s['external_id'], alignment_input)
 b.run(open=True)
