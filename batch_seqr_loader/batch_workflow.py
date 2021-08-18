@@ -1671,7 +1671,7 @@ def _add_gnarly_genotyper_job(
       -D {dbsnp} \\
       --only-output-calls-starting-in-intervals \\
       --keep-all-sites \\
-      -V {genomicsdb} \\
+      -V gendb://workspace \\
       {f'-L {interval} ' if interval else ''} \\
       --create-output-variant-index"""
     )
