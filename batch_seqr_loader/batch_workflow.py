@@ -1160,7 +1160,7 @@ def _make_joint_genotype_jobs(
         else:
             genotype_vcf_job = _add_gnarly_genotyper_job(
                 b,
-                genomicsdb=b.read_input(genomics_gcs_path_per_interval[idx]),
+                genomicsdb_path=genomics_gcs_path_per_interval[idx],
                 interval=intervals_j.intervals[f'interval_{idx}'],
                 reference=reference,
                 dbsnp=dbsnp,
@@ -1611,7 +1611,7 @@ def _add_genotype_gvcfs_job(
 
 def _add_gnarly_genotyper_job(
     b: hb.Batch,
-    genomicsdb: hb.ResourceFile,
+    genomicsdb_path: str,
     reference: hb.ResourceGroup,
     dbsnp: str,
     overwrite: bool,
@@ -1655,8 +1655,6 @@ def _add_gnarly_genotyper_job(
 
     j.command(
         f"""set -e
-    cd $(dirname {genomicsdb})
-
     (while true; do df -h; pwd; free -m; sleep 300; done) &
 
     df -h; pwd; free -m
@@ -1668,7 +1666,7 @@ def _add_gnarly_genotyper_job(
       -D {dbsnp} \\
       --only-output-calls-starting-in-intervals \\
       --keep-all-sites \\
-      -V gendb://workspace \\
+      -V {genomicsdb_path} \\
       {f'-L {interval} ' if interval else ''} \\
       --create-output-variant-index"""
     )
