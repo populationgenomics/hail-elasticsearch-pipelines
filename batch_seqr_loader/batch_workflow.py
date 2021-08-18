@@ -1030,7 +1030,7 @@ def _make_joint_genotype_jobs(
     for idx in range(utils.NUMBER_OF_GENOMICS_DB_INTERVALS):
         genomics_gcs_path_per_interval[idx] = join(
             genomicsdb_bucket,
-            f'interval_{idx}_outof_{utils.NUMBER_OF_GENOMICS_DB_INTERVALS}.tar',
+            f'interval_{idx}_outof_{utils.NUMBER_OF_GENOMICS_DB_INTERVALS}',
         )
     # Determining which samples to add. Using the first interval, so the assumption
     # is that all DBs have the same set of samples.
@@ -1164,7 +1164,7 @@ def _make_joint_genotype_jobs(
                 }
             )
         else:
-            genotype_vcf_job = _add_gnarly_genotyper_job(
+            genotype_vcf_job = _add_genotype_gvcfs_job(
                 b,
                 genomicsdb_path=genomics_gcs_path_per_interval[idx],
                 interval=intervals_j.intervals[f'interval_{idx}'],
@@ -1541,14 +1541,14 @@ def _add_import_gvcfs_job(
 
 def _add_genotype_gvcfs_job(
     b: hb.Batch,
-    genomicsdb: hb.ResourceFile,
-    interval: hb.ResourceFile,
+    genomicsdb_path: str,
     reference: hb.ResourceGroup,
     dbsnp: str,
     overwrite: bool,
     number_of_samples: int,
     interval_idx: Optional[int] = None,
     number_of_intervals: int = 1,
+    interval: Optional[hb.ResourceFile] = None,
     output_vcf_path: Optional[str] = None,
 ) -> Job:
     """
@@ -1564,37 +1564,39 @@ def _add_genotype_gvcfs_job(
     j = b.new_job(job_name)
     j.image(utils.GATK_IMAGE)
     j.cpu(2)
-    java_mem = 7
     j.memory('standard')  # ~ 4G/core ~ 8G
-    # 4G (fasta+fai+dict) + 1G per sample divided by the number of intervals
-    j.storage(f'{4 + number_of_samples * 1 // number_of_intervals}G')
+    # 4G (fasta+fai+dict) + 4G per sample divided by the number of intervals
+    j.storage(f'{4 + number_of_samples * 4 // number_of_intervals}G')
     j.declare_resource_group(
-        output_vcf={
-            'vcf.gz': '{root}.vcf.gz',
-            'vcf.gz.tbi': '{root}.vcf.gz.tbi',
-        }
+        output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
     )
 
     j.command(
-        f"""set -e
-        
-    (while true; do df -h; pwd; free -m; sleep 300; done) &
+        f"""
+set -o pipefail
+set -ex
 
-    tar -xf {genomicsdb}
+cd $(dirname {j.output_vcf})
 
-    df -h; pwd; free -m
+export GOOGLE_APPLICATION_CREDENTIALS=/gsa-key/key.json
+gcloud -q auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
+gsutil -q cp -r {genomicsdb_path} .
 
-    gatk --java-options -Xms{java_mem}g \\
-      GenotypeGVCFs \\
-      -R {reference.base} \\
-      -O {j.output_vcf['vcf.gz']} \\
-      -D {dbsnp} \\
-      --only-output-calls-starting-in-intervals \\
-      -V gendb://workspace \\
-      -L {interval} \\
-      --merge-input-intervals
+(while true; do df -h; pwd; free -m; sleep 300; done) &
 
-    df -h; pwd; free -m
+df -h; pwd; free -m
+
+gatk --java-options -Xms8g \\
+  GenotypeGVCFs \\
+  -R {reference.base} \\
+  -O {j.output_vcf['vcf.gz']} \\
+  -D {dbsnp} \\
+  --only-output-calls-starting-in-intervals \\
+  -V gendb://workspace \\
+  {f'-L {interval} ' if interval else ''} \\
+  --merge-input-intervals
+
+df -h; pwd; free -m
     """
     )
     if output_vcf_path:
@@ -1638,9 +1640,9 @@ def _add_gnarly_genotyper_job(
 
     j = b.new_job(job_name)
     j.image(utils.GATK_IMAGE)
-    j.cpu(4)
-    j.memory('highmem')  # ~ 8G/core ~ 32G
-    # 4G (fasta+fai+dict) + 2G per sample divided by the number of intervals
+    j.cpu(2)
+    j.memory('standard')  # ~ 4G/core ~ 8G
+    # 4G (fasta+fai+dict) + 4G per sample divided by the number of intervals
     j.storage(f'{4 + number_of_samples * 4 // number_of_intervals}G')
     j.declare_resource_group(
         output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
@@ -1654,7 +1656,6 @@ cd $(dirname {j.output_vcf})
 
 export GOOGLE_APPLICATION_CREDENTIALS=/gsa-key/key.json
 gcloud -q auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
-
 gsutil -q cp -r {genomicsdb_path} .
     
 (while true; do df -h; pwd; free -m; sleep 300; done) &
@@ -1671,6 +1672,8 @@ gatk --java-options -Xms8g \\
   -V gendb://{basename(genomicsdb_path)} \\
   {f'-L {interval} ' if interval else ''} \\
   --create-output-variant-index
+
+df -h; pwd; free -m
     """
     )
     if output_vcf_path:
