@@ -74,6 +74,6 @@ run_seqr_loader_prod_test:
 	--input-project acute-care \
 	--output-version $(PROD_VERSION) \
 	-S CPG11783 \
-    --start-from-stage gvcf \
+        --start-from-stage joint_calling \
 	--reuse \
 	--keep-scratch

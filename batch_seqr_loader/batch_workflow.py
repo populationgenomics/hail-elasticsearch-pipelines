@@ -1048,6 +1048,9 @@ def _make_joint_genotype_jobs(
         tmp_bucket=tmp_bucket,
         gvcf_by_sid=gvcf_by_sid,
     )
+    if not sample_names_to_add:
+        logger.info('')
+
     samples_hash = utils.hash_sample_names(sample_names_will_be_in_db)
     gathered_vcf_path = join(
         out_bucket, 'jointly-called', 'tmp', 'gathered', samples_hash + '.vcf.gz'
@@ -1389,6 +1392,11 @@ def _samples_to_add_to_db(
             sample_names_already_added = set()
             sample_names_to_add = {s['id'] for s in samples}
             sample_names_will_be_in_db = sample_names_to_add
+            logger.info(
+                f'GenomicDB {genomicsdb_gcs_path} exists, but a samples '
+                f'{sample_names_to_remove} need to be removed, so creating a new DB '
+                f'with the samples {sample_names_will_be_in_db}'
+            )
         else:
             updating_existing_db = True
             sample_names_will_be_in_db = sample_names_in_db | sample_names_to_add
@@ -1419,6 +1427,10 @@ def _samples_to_add_to_db(
         sample_names_to_add = {s['id'] for s in samples}
         sample_names_will_be_in_db = sample_names_to_add
         updating_existing_db = False
+        logger.info(
+            f'GenomicDB {genomicsdb_gcs_path} doesn\'t exist, so creating a new one '
+            f'with the samples {sample_names_to_add}'
+        )
 
     sample_map_bucket_path = join(tmp_bucket, 'work', 'sample_name.csv')
     local_sample_map_fpath = join(local_tmp_dir, 'sample_name.csv')
