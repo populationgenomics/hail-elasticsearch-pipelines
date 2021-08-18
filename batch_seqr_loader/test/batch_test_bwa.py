@@ -247,7 +247,7 @@ for s in sapi.get_samples(
 ):
     if s['external_id'] in ['CPG12229', 'CPG12302', 'CPG11981', 'CPG11817']:
         print(
-            f"Processing sample {s['id']/s['external_id']}, with metadata {s['meta']}"
+            f"Processing sample {s['id']}/{s['external_id']}, with metadata {s['meta']}"
         )
         samples.append(s)
 
