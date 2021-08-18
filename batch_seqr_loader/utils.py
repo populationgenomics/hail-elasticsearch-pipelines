@@ -1,6 +1,7 @@
 """
-Utility functions for the seqr loader
+Utility functions and constants for the seqr loader pipeline
 """
+
 import hashlib
 import os
 from os.path import join
@@ -17,7 +18,7 @@ logger.setLevel(logging.INFO)
 
 
 AR_REPO = 'australia-southeast1-docker.pkg.dev/cpg-common/images'
-GATK_VERSION = '4.2.0.0'
+GATK_VERSION = '4.2.1.0'
 GATK_IMAGE = f'{AR_REPO}/gatk:{GATK_VERSION}'
 PICARD_IMAGE = f'{AR_REPO}/picard-cloud:2.23.8'
 BAZAM_IMAGE = f'{AR_REPO}/bazam:v2'
@@ -29,7 +30,7 @@ SM_IMAGE = f'{AR_REPO}/sm-api:2.0.5'
 
 NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS = 50
 NUMBER_OF_DATAPROC_WORKERS = 50
-NUMBER_OF_GENOMICS_DB_INTERVALS = 10
+NUMBER_OF_GENOMICS_DB_INTERVALS = 50
 
 REF_BUCKET = 'gs://cpg-reference/hg38/v1'
 REF_FASTA = join(REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
@@ -125,58 +126,30 @@ def get_refs(b: hb.Batch) -> Tuple:
     return reference, bwa_reference, noalt_regions
 
 
-def make_sm_in_progress_job(
-    b: Batch,
-    analysis_type: str,
-    analysis_project: str,
-    analysis_id: str,
-    sample_name: Optional[str] = None,
-    project_name: Optional[str] = None,
-) -> Job:
+def make_sm_in_progress_job(*args, **kwargs) -> Job:
     """
     Creates a job that updates the sample metadata server entry analysis status
-    to in-progress
+    to "in-progress"
     """
-    return make_sm_update_status_job(
-        b,
-        analysis_type,
-        'in-progress',
-        analysis_project,
-        analysis_id,
-        sample_name=sample_name,
-        project_name=project_name,
-    )
+    kwargs['status'] = 'in-progress'
+    return make_sm_update_status_job(*args, **kwargs)
 
 
-def make_sm_completed_job(
-    b: Batch,
-    analysis_type: str,
-    sm_db_name: str,
-    analysis_id: str,
-    sample_name: Optional[str] = None,
-    project_name: Optional[str] = None,
-) -> Job:
+def make_sm_completed_job(*args, **kwargs) -> Job:
     """
     Creates a job that updates the sample metadata server entry analysis status
-    to completed
+    to "completed"
     """
-    return make_sm_update_status_job(
-        b,
-        analysis_type,
-        'completed',
-        sm_db_name,
-        analysis_id,
-        sample_name=sample_name,
-        project_name=project_name,
-    )
+    kwargs['status'] = 'completed'
+    return make_sm_update_status_job(*args, **kwargs)
 
 
 def make_sm_update_status_job(
     b: Batch,
-    analysis_type: str,
-    status: str,
     project: str,
     analysis_id: str,
+    analysis_type: str,
+    status: str,
     sample_name: Optional[str] = None,
     project_name: Optional[str] = None,
 ) -> Job:

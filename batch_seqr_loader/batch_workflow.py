@@ -3,7 +3,7 @@
 """
 Driver for loading data into SEQR for the CPG. See the README for more information.
 
-    - 2021/04/16 Michael Franklin and Vlad Savelyev
+- 2021/04/16 Michael Franklin and Vlad Savelyev
 """
 
 import json
@@ -13,7 +13,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from os.path import join, dirname, abspath, splitext
+from os.path import join, dirname, abspath, splitext, basename
 from typing import Optional, List, Tuple, Set, Dict
 from dataclasses import dataclass
 import pandas as pd
@@ -634,18 +634,18 @@ def _make_realign_jobs(
         # 2. Queue a job that updates the status to "in-progress"
         sm_in_progress_j = utils.make_sm_in_progress_job(
             b,
-            'cram',
-            analysis_project,
-            aid,
+            project=analysis_project,
+            analysis_id=aid,
+            analysis_type='cram',
             project_name=project_name,
             sample_name=sample_name,
         )
         # 2. Queue a job that updates the status to "completed"
         sm_completed_j = utils.make_sm_completed_job(
             b,
-            'cram',
-            analysis_project,
-            aid,
+            project=analysis_project,
+            analysis_id=aid,
+            analysis_type='cram',
             project_name=project_name,
             sample_name=sample_name,
         )
@@ -844,20 +844,20 @@ def _make_produce_gvcf_jobs(
         # 2. Queue a job that updates the status to "in-progress"
         sm_in_progress_j = utils.make_sm_in_progress_job(
             b,
-            'gvcf',
-            analysis_project,
-            aid,
+            project=analysis_project,
+            analysis_id=aid,
+            analysis_type='gvcf',
             project_name=project_name,
             sample_name=sample_name,
         )
         # 2. Queue a job that updates the status to "completed"
         sm_completed_j = utils.make_sm_completed_job(
             b,
-            'gvcf',
-            analysis_project,
-            aid,
-            sample_name=sample_name,
+            project=analysis_project,
+            analysis_id=aid,
+            analysis_type='gvcf',
             project_name=project_name,
+            sample_name=sample_name,
         )
         # Set up dependencies
         haplotype_caller_jobs[0].depends_on(sm_in_progress_j)
@@ -1107,11 +1107,17 @@ def _make_joint_genotype_jobs(
         aid = aapi.create_new_analysis(project=analysis_project, analysis_model=am)
         # 2. Queue a job that updates the status to "in-progress"
         sm_in_progress_j = utils.make_sm_in_progress_job(
-            b, 'joint-calling', analysis_project, aid
+            b,
+            project=analysis_project,
+            analysis_id=aid,
+            analysis_type='joint-calling',
         )
         # 2. Queue a job that updates the status to "completed"
         sm_completed_j = utils.make_sm_completed_job(
-            b, 'joint-calling', analysis_project, aid
+            b,
+            project=analysis_project,
+            analysis_id=aid,
+            analysis_type='joint-calling',
         )
         # Set up dependencies
         intervals_j.depends_on(sm_in_progress_j)
@@ -1471,14 +1477,11 @@ def _add_import_gvcfs_job(
     """
     if updating_existing_db:
         # Update existing DB
-        genomicsdb_param = '--genomicsdb-update-workspace-path workspace'
-        genomicsdb = b.read_input(genomicsdb_gcs_path)
-        untar_genomicsdb_cmd = f'tar -xf {genomicsdb}'
+        genomicsdb_param = f'--genomicsdb-update-workspace-path {genomicsdb_gcs_path}'
         job_name = 'Adding to GenomicsDB'
     else:
         # Initiate new DB
-        genomicsdb_param = '--genomicsdb-workspace-path workspace'
-        untar_genomicsdb_cmd = ''
+        genomicsdb_param = f'--genomicsdb-workspace-path {genomicsdb_gcs_path}'
         job_name = 'Creating GenomicsDB'
 
     sample_map = b.read_input(sample_map_bucket_path)
@@ -1489,10 +1492,8 @@ def _add_import_gvcfs_job(
     j = b.new_job(job_name)
     j.image(utils.GATK_IMAGE)
     j.cpu(16)
-    java_mem = 14
+    java_mem = 16
     j.memory('lowmem')  # ~ 1G/core ~ 14.4G
-    # 1G + 1G per sample divided by the number of intervals
-    j.storage(f'{1 + len(sample_names_will_be_in_db) * 1 // number_of_intervals}G')
     if depends_on:
         j.depends_on(*depends_on)
 
@@ -1515,8 +1516,6 @@ def _add_import_gvcfs_job(
     # is the optimal value for the amount of memory allocated
     # within the task; please do not change it without consulting
     # the Hellbender (GATK engine) team!
-    
-    {untar_genomicsdb_cmd}
 
     (while true; do df -h; pwd; du -sh $(dirname {j.output['tar']}); free -m; sleep 300; done) &
 
@@ -1530,18 +1529,13 @@ def _add_import_gvcfs_job(
       --batch-size 50 \\
       -L {interval} \\
       --sample-name-map {sample_map} \\
-      --reader-threads 14 \\
+      --reader-threads {java_mem} \\
       --merge-input-intervals \\
       --consolidate
 
     df -h; pwd; du -sh $(dirname {j.output['tar']}); free -m
-
-    tar -cf {j.output['tar']} workspace
-
-    df -h; pwd; du -sh $(dirname {j.output['tar']}); free -m
     """
     )
-    b.write_output(j.output, genomicsdb_gcs_path.replace('.tar', ''))
     return j, sample_names_will_be_in_db
 
 
@@ -1643,7 +1637,6 @@ def _add_gnarly_genotyper_job(
         return b.new_job(job_name + ' [reuse]')
 
     j = b.new_job(job_name)
-    # GnarlyGenotyper crashes with NullPointerException when using standard GATK docker
     j.image(utils.GATK_IMAGE)
     j.cpu(4)
     j.memory('highmem')  # ~ 8G/core ~ 32G
@@ -1652,28 +1645,33 @@ def _add_gnarly_genotyper_job(
     j.declare_resource_group(
         output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
     )
-    genomicsdb = b.read_input(genomicsdb_path)
-
     j.command(
-        f"""set -e
-    cd $(dirname {genomicsdb})
+        f"""
+set -o pipefail
+set -ex
+
+cd $(dirname {j.output_vcf})
+
+export GOOGLE_APPLICATION_CREDENTIALS=/gsa-key/key.json
+gcloud -q auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
+
+gsutil -q cp -r {genomicsdb_path} .
     
-    tar -xf {genomicsdb} >/dev/null 2>&1
-        
-    (while true; do df -h; pwd; free -m; sleep 300; done) &
+(while true; do df -h; pwd; free -m; sleep 300; done) &
 
-    df -h; pwd; free -m
+df -h; pwd; free -m
 
-    gatk --java-options -Xms8g \\
-      GnarlyGenotyper \\
-      -R {reference.base} \\
-      -O {j.output_vcf['vcf.gz']} \\
-      -D {dbsnp} \\
-      --only-output-calls-starting-in-intervals \\
-      --keep-all-sites \\
-      -V gendb://workspace \\
-      {f'-L {interval} ' if interval else ''} \\
-      --create-output-variant-index"""
+gatk --java-options -Xms8g \\
+  GnarlyGenotyper \\
+  -R {reference.base} \\
+  -O {j.output_vcf['vcf.gz']} \\
+  -D {dbsnp} \\
+  --only-output-calls-starting-in-intervals \\
+  --keep-all-sites \\
+  -V gendb://{basename(genomicsdb_path)} \\
+  {f'-L {interval} ' if interval else ''} \\
+  --create-output-variant-index
+    """
     )
     if output_vcf_path:
         b.write_output(j.output_vcf, output_vcf_path.replace('.vcf.gz', ''))
