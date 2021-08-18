@@ -245,17 +245,17 @@ for s in sapi.get_samples(
         'active': True,
     }
 ):
-    if s['id'] in ['CPG12229', 'CPG12302', 'CPG11981', 'CPG11817']:
+    if s['external_id'] in ['CPG12229', 'CPG12302', 'CPG11981', 'CPG11817']:
         print(
             f"Processing sample {s['id']/s['external_id']}, with metadata {s['meta']}"
         )
         samples.append(s)
 
 for s in samples:
-    for cont in BWA_CONTAINER_1, BWA_CONTAINER_2:
+    for cont in [BWA_CONTAINER_1, BWA_CONTAINER_2]:
         alignment_input = sm_verify_reads_data(
             s['meta'].get('reads'), s['meta'].get('reads_type')
         )
-        if alignment_input:
-            _test_bwa(b, reference, cont, s['external_id'], alignment_input)
+        logger.info(f'Submitting {alignment_input}')
+        _test_bwa(b, reference, cont, s['external_id'], alignment_input)
 b.run(open=True)
