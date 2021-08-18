@@ -1645,21 +1645,19 @@ def _add_gnarly_genotyper_job(
     j = b.new_job(job_name)
     # GnarlyGenotyper crashes with NullPointerException when using standard GATK docker
     j.image(utils.GATK_IMAGE)
-    j.cpu(8)
-    j.memory('standard')  # ~ 4G/core ~ 32G
+    j.cpu(4)
+    j.memory('highmem')  # ~ 8G/core ~ 32G
     # 4G (fasta+fai+dict) + 2G per sample divided by the number of intervals
-    # j.storage(f'{4 + number_of_samples * 4 // number_of_intervals}G')
-    j.storage(f'100G')
+    j.storage(f'{4 + number_of_samples * 2 // number_of_intervals}G')
     j.declare_resource_group(
         output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
     )
 
     j.command(
         f"""set -e
+    cd $(dirname {genomicsdb})
 
     (while true; do df -h; pwd; free -m; sleep 300; done) &
-
-    tar -xf {genomicsdb}
 
     df -h; pwd; free -m
 
