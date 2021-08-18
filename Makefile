@@ -57,5 +57,23 @@ run_seqr_loader_prod:
 	--analysis-project seqr \
 	--input-project acute-care \
 	--output-version $(PROD_VERSION) \
+    -S CPG11783 \
+	--reuse \
+	--keep-scratch
+
+.PHONY: run_seqr_loader_prod_test
+run_seqr_loader_prod_test:
+	analysis-runner \
+	--dataset seqr \
+	--access-level test \
+	--output-dir   "seqr_loader" \
+	--description  "seqr loader $(PROD_VERSION)" \
+	batch_seqr_loader/batch_workflow.py \
+	--namespace test \
+	--analysis-project seqr \
+	--input-project acute-care \
+	--output-version $(PROD_VERSION) \
+	-S CPG11783 \
+        --start-from-stage joint_calling \
 	--reuse \
 	--keep-scratch

@@ -295,25 +295,54 @@ def _add_jobs(
         for s in samples:
             logger.info(f'Project {proj}. Processing sample {s["id"]}')
             cram_analysis = latest_by_type_and_sids.get(('cram', (s['id'],)))
-            alignment_input = sm_verify_reads_data(
-                s['meta'].get('reads'), s['meta'].get('reads_type')
-            )
-            if not alignment_input:
-                continue
 
-            cram_job, cram_fpath = _make_realign_jobs(
-                b=b,
-                sample_name=s['id'],
-                project_name=proj,
-                alignment_input=alignment_input,
-                reference=bwa_reference,
-                out_bucket=out_bucket,
-                overwrite=overwrite,
-                completed_analysis=cram_analysis,
-                analysis_project=analysis_project,
-            )
+            # Requested to skip this stage, but an existing analysis is not found
+            if start_from_stage is not None and start_from_stage not in ['cram']:
+                cram_job = None
+                if not cram_analysis:
+                    logger.warning(
+                        f'No completed cram analysis found for sample {s["id"]}, '
+                        f'and start_from_stage is {start_from_stage}, so'
+                        f'skipping this sample'
+                    )
+                    continue
+                cram_fpath = cram_analysis.output
+                if not cram_fpath or not utils.file_exists(cram_fpath):
+                    logger.error(
+                        f'Sample {s["id"]} has a completed CRAM analysis, '
+                        f'but the output file {cram_fpath} does not exist, so '
+                        f'skipping this sample'
+                    )
+                    continue
+                cram_fpath = str(cram_fpath)
+            else:
+                alignment_input = sm_verify_reads_data(
+                    s['meta'].get('reads'), s['meta'].get('reads_type')
+                )
+                if not alignment_input:
+                    continue
+                cram_job, cram_fpath = _make_realign_jobs(
+                    b=b,
+                    sample_name=s['id'],
+                    project_name=proj,
+                    alignment_input=alignment_input,
+                    reference=bwa_reference,
+                    out_bucket=out_bucket,
+                    overwrite=overwrite,
+                    completed_analysis=cram_analysis,
+                    analysis_project=analysis_project,
+                )
 
             gvcf_analysis = latest_by_type_and_sids.get(('gvcf', (s['id'],)))
+            if start_from_stage is None and start_from_stage not in ['cram', 'gvcf']:
+                if not gvcf_analysis:
+                    logger.warning(
+                        f'No gvcf analysis found for sample {s["id"]}, '
+                        f'and start_from_stage is {start_from_stage}, so'
+                        f'skipping this sample'
+                    )
+                    continue
+
             gvcf_job, gvcf_fpath = _make_produce_gvcf_jobs(
                 b=b,
                 sample_name=s['id'],
@@ -325,12 +354,13 @@ def _add_jobs(
                 out_bucket=out_bucket,
                 tmp_bucket=tmp_bucket,
                 overwrite=overwrite,
-                depends_on=[cram_job],
+                depends_on=[cram_job] if cram_job else [],
                 analysis_project=analysis_project,
                 completed_analysis=gvcf_analysis,
             )
             gvcf_jobs.append(gvcf_job)
             gvcf_by_sid[s['id']] = gvcf_fpath
+
             good_samples.append(s)
 
     if not good_samples:
@@ -341,6 +371,19 @@ def _add_jobs(
     jc_analysis = latest_by_type_and_sids.get(
         ('joint-calling', tuple(set(s['id'] for s in good_samples)))
     )
+    if start_from_stage is None and start_from_stage not in [
+        'cram',
+        'gvcf',
+        'joint_calling',
+    ]:
+        if not jc_analysis:
+            logger.warning(
+                f'No joint-caling analysis found, '
+                f'and start_from_stage is {start_from_stage}, so '
+                f'stopping here'
+            )
+            return None
+
     jc_job, jc_vcf_path = _make_joint_genotype_jobs(
         b=b,
         genomicsdb_bucket=genomicsdb_bucket,
@@ -553,12 +596,11 @@ def _make_realign_jobs(
                 aapi.update_analysis_status(
                     completed_analysis.id, AnalysisUpdateModel(status='failed')
                 )
-    else:
-        logger.info(
-            f'Sample {sample_name} does not have a completed CRAM analysis yet. '
-            f'Parsing the "reads" metadata field and submitting the alignmentment'
-        )
 
+    logger.info(
+        f'Sample {sample_name} does not have a completed CRAM analysis yet. '
+        f'Parsing the "reads" metadata field and submitting the alignmentment'
+    )
     am = AnalysisModel(
         type='cram',
         output=output_cram_path,
@@ -1582,7 +1624,7 @@ def _add_gnarly_genotyper_job(
     j.cpu(2)
     j.memory(f'32G')
     # 4G (fasta+fai+dict) + 2G per sample divided by the number of intervals
-    j.storage(f'{4 + number_of_samples * 2 // number_of_intervals}G')
+    j.storage(f'{4 + number_of_samples * 4 // number_of_intervals}G')
     j.declare_resource_group(
         output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
     )
