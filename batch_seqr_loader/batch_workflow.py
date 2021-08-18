@@ -1581,8 +1581,8 @@ def _add_gnarly_genotyper_job(
     j.image(utils.GATK_IMAGE)
     j.cpu(2)
     j.memory(f'32G')
-    # 4G (fasta+fai+dict) + 1G per sample divided by the number of intervals
-    j.storage(f'{4 + number_of_samples * 1 // number_of_intervals}G')
+    # 4G (fasta+fai+dict) + 2G per sample divided by the number of intervals
+    j.storage(f'{4 + number_of_samples * 2 // number_of_intervals}G')
     j.declare_resource_group(
         output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
     )
