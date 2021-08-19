@@ -1592,7 +1592,7 @@ gatk --java-options -Xms8g \\
   -O {j.output_vcf['vcf.gz']} \\
   -D {dbsnp} \\
   --only-output-calls-starting-in-intervals \\
-  -V gendb://workspace \\
+  -V gendb://{basename(genomicsdb_path)} \\
   {f'-L {interval} ' if interval else ''} \\
   --merge-input-intervals
 
