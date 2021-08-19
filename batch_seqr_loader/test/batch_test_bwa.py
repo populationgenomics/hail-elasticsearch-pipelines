@@ -21,6 +21,7 @@ BWA_IMAGE_ASAN = (
 BWA_IMAGE_TSAN = (
     f'australia-southeast1-docker.pkg.dev/cpg-common/images/biobambam2:debug-tsan'
 )
+BWA_IMAGE = f'australia-southeast1-docker.pkg.dev/cpg-common/images/bazam:v2'
 REF_BUCKET = 'gs://cpg-reference/hg38/v1'
 REF_FASTA = join(REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
 
@@ -43,12 +44,12 @@ def _test_bwa(
     container: str,
     sample_name: str,
     alignment_input: AlignmentInput,
+    bamsormadup_cpu: int,
 ):
-    j = b.new_job(f'Test BWA with {container}')
+    j = b.new_job(f'Test BWA with {container}, bamsormadup CPU {bamsormadup_cpu}')
     j.image(container)
     total_cpu = 32
     bwa_cpu = total_cpu
-    bamsormadup_cpu = 10
     output_cram_path = f'gs://cpg-seqr-test-tmp/test-biobambam2/{sample_name}-{container.split(":")[1]}.cram'
 
     if alignment_input.bam_or_cram_path:
@@ -66,7 +67,6 @@ def _test_bwa(
         r2_param = '-'
     else:
         assert alignment_input.fqs1 and alignment_input.fqs2
-        bamsormadup_cpu = 1
         use_bazam = False
         files1 = [b.read_input(f1) for f1 in alignment_input.fqs1]
         files2 = [b.read_input(f1) for f1 in alignment_input.fqs2]
@@ -225,7 +225,7 @@ backend = hb.ServiceBackend(
     billing_project=billing_project,
     bucket=hail_bucket.replace('gs://', ''),
 )
-b = hb.Batch(backend=backend, name='test')
+b = hb.Batch(backend=backend, name='Benchmark BWA with 1-core bamsormadup')
 
 bwa_reference = b.read_input_group(
     base=REF_FASTA,
@@ -256,12 +256,24 @@ for s in sapi.get_samples(
 for s in samples:
     for cont in [
         # BWA_IMAGE_ASAN,
-        BWA_IMAGE_TSAN,
+        # BWA_IMAGE_TSAN,
+        BWA_IMAGE,
     ]:
-        alignment_input = sm_verify_reads_data(
-            s['meta'].get('reads'), s['meta'].get('reads_type')
-        )
-        if alignment_input:
-            logger.info(f'Submitting {alignment_input}')
-            _test_bwa(b, bwa_reference, cont, s['external_id'], alignment_input)
+        for bamsormadup_cpu in [
+            1,
+            10,
+        ]:
+            alignment_input = sm_verify_reads_data(
+                s['meta'].get('reads'), s['meta'].get('reads_type')
+            )
+            if alignment_input:
+                logger.info(f'Submitting {alignment_input}')
+                _test_bwa(
+                    b,
+                    bwa_reference,
+                    cont,
+                    s['external_id'],
+                    alignment_input,
+                    bamsormadup_cpu,
+                )
 b.run(open=True)
