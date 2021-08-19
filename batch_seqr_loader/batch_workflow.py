@@ -1374,12 +1374,20 @@ def _samples_to_add_to_db(
     gvcf_by_sid: Dict[str, str],
 ) -> Tuple[Set[str], Set[str], Set[str], bool, str]:
     if utils.file_exists(join(genomicsdb_gcs_path, 'callset.json')):
-        # Check if sample exists in the DB already
+        # Checking if samples exists in the DB already
         genomicsdb_metadata = join(local_tmp_dir, f'callset-{interval_idx}.json')
-        # This command will download the DB metadata file locally.
-        # The `-O` argument to `tar` means "write the file being extracted to the stdout",
-        # and the file to be extracted is specified as a positional argument to `tar`.
-        cmd = f'gsutil cp {join(genomicsdb_gcs_path, "callset.json")} {genomicsdb_metadata}'
+        # The `-o GSUtil:check_hashes=never` flag is required to get around the gsutil
+        # integrity checking error, as conda gsutil doesn't use CRC32c:
+        # > Downloading this composite object requires integrity checking with CRC32c,
+        #   but your crcmod installation isn't using the module's C extension, so the
+        #   hash computation will likely throttle download performance.
+        #
+        #   To download regardless of crcmod performance or to skip slow integrity
+        #   checks, see the "check_hashes" option in your boto config file.
+        cmd = (
+            f'gsutil cp -o GSUtil:check_hashes=never '
+            f'{join(genomicsdb_gcs_path, "callset.json")} {genomicsdb_metadata}'
+        )
         logger.info(cmd)
         subprocess.run(cmd, check=False, shell=True)
 
