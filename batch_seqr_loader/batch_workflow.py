@@ -1373,7 +1373,7 @@ def _samples_to_add_to_db(
     tmp_bucket: str,
     gvcf_by_sid: Dict[str, str],
 ) -> Tuple[Set[str], Set[str], Set[str], bool, str]:
-    if utils.file_exists(genomicsdb_gcs_path):
+    if utils.file_exists(join(genomicsdb_gcs_path, 'callset.json')):
         # Check if sample exists in the DB already
         genomicsdb_metadata = join(local_tmp_dir, f'callset-{interval_idx}.json')
         # This command will download the DB metadata file locally.
@@ -1399,9 +1399,11 @@ def _samples_to_add_to_db(
             sample_names_to_add = {s['id'] for s in samples}
             sample_names_will_be_in_db = sample_names_to_add
             logger.info(
-                f'GenomicDB {genomicsdb_gcs_path} exists, but a samples '
-                f'{sample_names_to_remove} need to be removed, so creating a new DB '
-                f'with the samples {sample_names_will_be_in_db}'
+                f'GenomicDB {genomicsdb_gcs_path} exists, but '
+                f'{len(sample_names_to_remove)} samples need '
+                f'to be removed: {", ".join(sample_names_to_remove)}, so creating a new '
+                f'DB with {len(sample_names_will_be_in_db)} samples: '
+                f'{", ".join(sample_names_will_be_in_db)}'
             )
         else:
             updating_existing_db = True
@@ -1409,19 +1411,21 @@ def _samples_to_add_to_db(
             sample_names_already_added = sample_names_requested & sample_names_in_db
             if sample_names_already_added:
                 logger.info(
-                    f'Samples {sample_names_already_added} already exist in the DB '
-                    f'{genomicsdb_gcs_path}, skipping adding them'
+                    f'{len(sample_names_already_added)} samples '
+                    f'{", ".join(sample_names_already_added)} already exist in the DB '
+                    f'{genomicsdb_gcs_path}, skipping adding them.'
                 )
             if sample_names_to_remove:
                 logger.info(
-                    f'There are samples that need to be removed from the DB '
-                    f'{genomicsdb_gcs_path}: {sample_names_to_remove}. Re-creating the DB '
+                    f'There are {len(sample_names_to_remove)} samples that need to be '
+                    f'removed from the DB {genomicsdb_gcs_path}: '
+                    f'{", ".join(sample_names_to_remove)}. Re-creating the DB '
                     f'using the updated set of samples'
                 )
             elif sample_names_to_add:
                 logger.info(
-                    f'Will add samples {sample_names_to_add} into the DB '
-                    f'{genomicsdb_gcs_path}'
+                    f'Will add {len(sample_names_to_add)} samples '
+                    f'{", ".join(sample_names_to_add)} into the DB {genomicsdb_gcs_path}'
                 )
             else:
                 logger.warning(
@@ -1435,7 +1439,7 @@ def _samples_to_add_to_db(
         updating_existing_db = False
         logger.info(
             f'GenomicDB {genomicsdb_gcs_path} doesn\'t exist, so creating a new one '
-            f'with the samples {sample_names_to_add}'
+            f'with {len(sample_names_to_add)} samples: {", ".join(sample_names_to_add)}'
         )
 
     sample_map_bucket_path = join(tmp_bucket, 'work', 'sample_name.csv')
@@ -1519,8 +1523,8 @@ def _add_import_gvcfs_job(
 
     (while true; do df -h; pwd; du -sh $(dirname {j.output['tar']}); free -m; sleep 300; done) &
 
-    echo "Adding samples: {', '.join(sample_names_to_add)}"
-    {f'echo "Skipping adding samples that are already in the DB: '
+    echo "Adding {len(sample_names_to_add)} samples: {', '.join(sample_names_to_add)}"
+    {f'echo "Skipping adding {len(sample_names_to_skip)} samples that are already in the DB: '
      f'{", ".join(sample_names_to_skip)}"' if sample_names_to_skip else ''}
 
     gatk --java-options -Xms{java_mem}g \\
