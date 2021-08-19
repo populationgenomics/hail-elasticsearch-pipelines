@@ -1379,10 +1379,7 @@ def _samples_to_add_to_db(
         # This command will download the DB metadata file locally.
         # The `-O` argument to `tar` means "write the file being extracted to the stdout",
         # and the file to be extracted is specified as a positional argument to `tar`.
-        cmd = (
-            f'gsutil cat {genomicsdb_gcs_path} | '
-            f'tar -O --extract workspace/callset.json > {genomicsdb_metadata}'
-        )
+        cmd = f'gsutil cp {join(genomicsdb_gcs_path, "callset.json")} {genomicsdb_metadata}'
         logger.info(cmd)
         subprocess.run(cmd, check=False, shell=True)
 
