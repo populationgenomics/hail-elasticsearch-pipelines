@@ -4,7 +4,6 @@
 Simulate communication with the SM server during the workflow
 """
 
-import os
 from datetime import datetime
 from os.path import basename
 
@@ -12,7 +11,7 @@ from sample_metadata.api import SampleApi
 from sample_metadata.models.new_sample import NewSample
 
 
-PROJ = os.environ.get('SM_DEV_DB_PROJECT', 'seqr-test')
+PROJ = 'seqr-test'
 
 sapi = SampleApi()
 
@@ -126,7 +125,7 @@ def add_tiny():
     another with fastq
     """
     s1 = _add_fq_sample(
-        'NA12878-fastq',
+        'NA12878-fastq-2',
         [
             'gs://cpg-seqr-test/batches/NA12878-trio-tiny/NA12878_L001_R1.fq',
             'gs://cpg-seqr-test/batches/NA12878-trio-tiny/NA12878_L002_R1.fq',
@@ -155,4 +154,4 @@ def add_tiny():
 
 
 if __name__ == '__main__':
-    add_for_biobambam2()
+    add_tiny()

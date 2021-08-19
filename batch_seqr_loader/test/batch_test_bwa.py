@@ -2,11 +2,11 @@
 # pylint: skip-file
 
 import hailtop.batch as hb
-from os.path import join, splitext, dirname
+from os.path import join, splitext
 import os
 from sample_metadata import SampleApi
 from google.cloud import storage
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List
 from dataclasses import dataclass
 import logging
 
@@ -14,6 +14,9 @@ logger = logging.getLogger(__file__)
 logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
 logger.setLevel(logging.INFO)
 
+
+# SAMPLE_IDS = ['CPG12229', 'CPG12302', 'CPG11981', 'CPG11817']
+SAMPLE_IDS = ['NA12878-fastq-2']
 
 BWA_IMAGE_ASAN = (
     f'australia-southeast1-docker.pkg.dev/cpg-common/images/biobambam2:debug-asan'
@@ -247,7 +250,7 @@ for s in sapi.get_samples(
         'active': True,
     }
 ):
-    if s['external_id'] in ['CPG12229', 'CPG12302', 'CPG11981', 'CPG11817']:
+    if s['external_id'] in SAMPLE_IDS:
         print(
             f"Processing sample {s['id']}/{s['external_id']}, with metadata {s['meta']}"
         )
@@ -256,12 +259,12 @@ for s in sapi.get_samples(
 for s in samples:
     for cont in [
         # BWA_IMAGE_ASAN,
-        # BWA_IMAGE_TSAN,
-        BWA_IMAGE,
+        BWA_IMAGE_TSAN,
+        # BWA_IMAGE,
     ]:
         for bamsormadup_cpu in [
             1,
-            10,
+            # 10,
         ]:
             alignment_input = sm_verify_reads_data(
                 s['meta'].get('reads'), s['meta'].get('reads_type')
