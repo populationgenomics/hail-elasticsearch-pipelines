@@ -15,10 +15,10 @@ logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
 logger.setLevel(logging.INFO)
 
 
-BWA_CONTAINER_1 = (
+BWA_IMAGE_ASAN = (
     f'australia-southeast1-docker.pkg.dev/cpg-common/images/biobambam2:debug-asan'
 )
-BWA_CONTAINER_2 = (
+BWA_IMAGE_TSAN = (
     f'australia-southeast1-docker.pkg.dev/cpg-common/images/biobambam2:debug-tsan'
 )
 REF_BUCKET = 'gs://cpg-reference/hg38/v1'
@@ -47,14 +47,13 @@ def _test_bwa(
     j = b.new_job(f'Test BWA with {container}')
     j.image(container)
     total_cpu = 32
+    bwa_cpu = total_cpu
+    bamsormadup_cpu = 10
     output_cram_path = f'gs://cpg-seqr-test-tmp/test-biobambam2/{sample_name}-{container.split(":")[1]}.cram'
 
     if alignment_input.bam_or_cram_path:
         use_bazam = True
         bazam_cpu = 10
-        bwa_cpu = 32
-        bamsormadup_cpu = 10
-
         assert alignment_input.index_path
         assert not alignment_input.fqs1 and not alignment_input.fqs2
         cram = b.read_input_group(
@@ -67,9 +66,8 @@ def _test_bwa(
         r2_param = '-'
     else:
         assert alignment_input.fqs1 and alignment_input.fqs2
+        bamsormadup_cpu = 1
         use_bazam = False
-        bwa_cpu = 32
-        bamsormadup_cpu = 10
         files1 = [b.read_input(f1) for f1 in alignment_input.fqs1]
         files2 = [b.read_input(f1) for f1 in alignment_input.fqs2]
         r1_param = f'<(cat {" ".join(files1)})'
@@ -256,10 +254,14 @@ for s in sapi.get_samples(
         samples.append(s)
 
 for s in samples:
-    for cont in [BWA_CONTAINER_1, BWA_CONTAINER_2]:
+    for cont in [
+        # BWA_IMAGE_ASAN,
+        BWA_IMAGE_TSAN,
+    ]:
         alignment_input = sm_verify_reads_data(
             s['meta'].get('reads'), s['meta'].get('reads_type')
         )
-        logger.info(f'Submitting {alignment_input}')
-        _test_bwa(b, bwa_reference, cont, s['external_id'], alignment_input)
+        if alignment_input:
+            logger.info(f'Submitting {alignment_input}')
+            _test_bwa(b, bwa_reference, cont, s['external_id'], alignment_input)
 b.run(open=True)
