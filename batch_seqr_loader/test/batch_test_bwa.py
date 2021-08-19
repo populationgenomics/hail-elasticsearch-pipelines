@@ -279,4 +279,4 @@ for s in samples:
                     alignment_input,
                     bamsormadup_cpu,
                 )
-b.run(open=True)
+b.run(open=True, wait=False)

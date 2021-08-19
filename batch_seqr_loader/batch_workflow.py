@@ -1385,7 +1385,7 @@ def _samples_to_add_to_db(
         #   To download regardless of crcmod performance or to skip slow integrity
         #   checks, see the "check_hashes" option in your boto config file.
         cmd = (
-            f'gsutil cp -o GSUtil:check_hashes=never '
+            f'gsutil -o GSUtil:check_hashes=never cp '
             f'{join(genomicsdb_gcs_path, "callset.json")} {genomicsdb_metadata}'
         )
         logger.info(cmd)
