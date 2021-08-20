@@ -121,7 +121,7 @@ samtools index -@{total_cpu} {j.output_cram.cram} {j.output_cram.crai}
 df -h; pwd; du -sh $(dirname {j.output_cram.cram})
         """
     else:
-        sorted_bam = 'sorted.bam'
+        sorted_bam = f'$(dirname {j.output_cram.cram})/sorted.bam'
         command = f"""
 set -o pipefail
 set -ex
@@ -130,7 +130,7 @@ set -ex
 
 bwa mem -K 100000000 {'-p' if use_bazam else ''} -t{bwa_cpu} -Y \\
     -R '{rg_line}' {reference.base} {r1_param} {r2_param} | \\
-samtools sort -T $(dirname {j.output_cram.cram})/samtools-sort-tmp -o -Obam {sorted_bam}
+samtools sort -T $(dirname {j.output_cram.cram})/samtools-sort-tmp -Obam -o {sorted_bam}
 
 picard MarkDuplicates I={sorted_bam} O=/dev/stdout M={j.duplicate_metrics} \\
     ASSUME_SORT_ORDER=coordinate | \\
@@ -257,7 +257,7 @@ backend = hb.ServiceBackend(
     billing_project=billing_project,
     bucket=hail_bucket.replace('gs://', ''),
 )
-b = hb.Batch(backend=backend, name='Benchmark BWA with 1-core bamsormadup')
+b = hb.Batch(backend=backend, name='Benchmark BWA')
 
 bwa_reference = b.read_input_group(
     base=REF_FASTA,
