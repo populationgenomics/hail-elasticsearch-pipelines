@@ -51,7 +51,12 @@ def _test_bwa(
     bamsormadup_cpu: int,
     use_picard: bool = False,
 ):
-    j = b.new_job(f'Test BWA with {container}, bamsormadup CPU {bamsormadup_cpu}')
+    job_name = f'Test BWA with {container}'
+    if use_picard:
+        job_name += f', picard MarkDuplicates'
+    else:
+        job_name += f', bamsormadup CPU {bamsormadup_cpu}'
+    j = b.new_job(job_name)
     j.image(container)
     total_cpu = 32
     bwa_cpu = total_cpu
