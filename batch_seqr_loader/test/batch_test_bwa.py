@@ -25,6 +25,7 @@ BWA_IMAGE_TSAN = (
     f'australia-southeast1-docker.pkg.dev/cpg-common/images/biobambam2:debug-tsan'
 )
 BWA_IMAGE = f'australia-southeast1-docker.pkg.dev/cpg-common/images/bazam:v2'
+BWA_PICARD_IMAGE = 'australia-southeast1-docker.pkg.dev/cpg-common/images/alignment:v3'
 REF_BUCKET = 'gs://cpg-reference/hg38/v1'
 REF_FASTA = join(REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
 
@@ -48,6 +49,7 @@ def _test_bwa(
     sample_name: str,
     alignment_input: AlignmentInput,
     bamsormadup_cpu: int,
+    use_picard: bool = False,
 ):
     j = b.new_job(f'Test BWA with {container}, bamsormadup CPU {bamsormadup_cpu}')
     j.image(container)
@@ -95,7 +97,8 @@ def _test_bwa(
     # -t16   threads
     # -Y     use soft clipping for supplementary alignments
     # -R     read group header line such as '@RG\tID:foo\tSM:bar'
-    command = f"""
+    if not use_picard:
+        command = f"""
 set -o pipefail
 set -ex
 
@@ -111,7 +114,28 @@ samtools view -T {reference.base} -O cram -o {j.output_cram.cram}
 samtools index -@{total_cpu} {j.output_cram.cram} {j.output_cram.crai}
 
 df -h; pwd; du -sh $(dirname {j.output_cram.cram})
-    """
+        """
+    else:
+        sorted_bam = 'sorted.bam'
+        command = f"""
+set -o pipefail
+set -ex
+
+(while true; do df -h; pwd; du -sh $(dirname {j.output_cram.cram}); sleep 600; done) &
+
+bwa mem -K 100000000 {'-p' if use_bazam else ''} -t{bwa_cpu} -Y \\
+    -R '{rg_line}' {reference.base} {r1_param} {r2_param} | \\
+samtools sort -T $(dirname {j.output_cram.cram})/samtools-sort-tmp -o -Obam {sorted_bam}
+
+picard MarkDuplicates I={sorted_bam} O=/dev/stdout M={j.duplicate_metrics} \\
+    ASSUME_SORT_ORDER=coordinate | \\
+samtools view -@30 -T {reference.base} -O cram -o {j.output_cram.cram}
+
+samtools index -@{total_cpu} {j.output_cram.cram} {j.output_cram.crai}
+
+df -h; pwd; du -sh $(dirname {j.output_cram.cram})
+        """
+
     j.command(command)
     b.write_output(j.output_cram, splitext(output_cram_path)[0])
     return j, output_cram_path
@@ -259,24 +283,30 @@ for s in sapi.get_samples(
 for s in samples:
     for cont in [
         # BWA_IMAGE_ASAN,
-        BWA_IMAGE_TSAN,
+        # BWA_IMAGE_TSAN,
         # BWA_IMAGE,
+        BWA_PICARD_IMAGE,
     ]:
         for bamsormadup_cpu in [
             1,
             # 10,
         ]:
-            alignment_input = sm_verify_reads_data(
-                s['meta'].get('reads'), s['meta'].get('reads_type')
-            )
-            if alignment_input:
-                logger.info(f'Submitting {alignment_input}')
-                _test_bwa(
-                    b,
-                    bwa_reference,
-                    cont,
-                    s['external_id'],
-                    alignment_input,
-                    bamsormadup_cpu,
+            for use_picard in [
+                # False,
+                True,
+            ]:
+                alignment_input = sm_verify_reads_data(
+                    s['meta'].get('reads'), s['meta'].get('reads_type')
                 )
+                if alignment_input:
+                    logger.info(f'Submitting {alignment_input}')
+                    _test_bwa(
+                        b,
+                        bwa_reference,
+                        cont,
+                        s['external_id'],
+                        alignment_input,
+                        bamsormadup_cpu,
+                        use_picard=use_picard,
+                    )
 b.run(open=True, wait=False)
