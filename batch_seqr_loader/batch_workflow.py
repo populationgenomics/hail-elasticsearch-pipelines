@@ -1675,7 +1675,7 @@ gatk --java-options -Xms8g \\
   -D {dbsnp} \\
   --only-output-calls-starting-in-intervals \\
   --keep-all-sites \\
-  -V gendb.gs://{genomicsdb_path} \\
+  -V gendb.{genomicsdb_path} \\
   {f'-L {interval} ' if interval else ''} \\
   --create-output-variant-index
 
