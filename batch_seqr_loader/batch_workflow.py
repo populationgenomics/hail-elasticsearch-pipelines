@@ -1661,12 +1661,9 @@ def _add_gnarly_genotyper_job(
 set -o pipefail
 set -ex
 
-cd $(dirname {j.output_vcf})
-
 export GOOGLE_APPLICATION_CREDENTIALS=/gsa-key/key.json
 gcloud -q auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
-gsutil -q cp -r {genomicsdb_path} .
-    
+
 (while true; do df -h; pwd; free -m; sleep 300; done) &
 
 df -h; pwd; free -m
@@ -1678,7 +1675,7 @@ gatk --java-options -Xms8g \\
   -D {dbsnp} \\
   --only-output-calls-starting-in-intervals \\
   --keep-all-sites \\
-  -V gendb://{basename(genomicsdb_path)} \\
+  -V gendb.gs://{genomicsdb_path} \\
   {f'-L {interval} ' if interval else ''} \\
   --create-output-variant-index
 
