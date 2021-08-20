@@ -1164,16 +1164,16 @@ def _make_joint_genotype_jobs(
                 }
             )
         else:
-            genotype_vcf_job = _add_genotype_gvcfs_job(
+            genotype_vcf_job = _add_gnarly_genotyper_job(
                 b,
                 genomicsdb_path=genomics_gcs_path_per_interval[idx],
-                interval=intervals_j.intervals[f'interval_{idx}'],
                 reference=reference,
                 dbsnp=dbsnp,
                 overwrite=overwrite,
-                interval_idx=idx,
                 number_of_samples=len(sample_names_will_be_in_db),
+                interval_idx=idx,
                 number_of_intervals=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
+                interval=intervals_j.intervals[f'interval_{idx}'],
             )
             if import_gvcfs_job_per_interval.get(idx):
                 genotype_vcf_job.depends_on(import_gvcfs_job_per_interval.get(idx))
