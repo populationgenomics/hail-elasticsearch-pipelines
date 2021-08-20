@@ -15,9 +15,6 @@ logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
 logger.setLevel(logging.INFO)
 
 
-# SAMPLE_IDS = ['CPG12229', 'CPG12302', 'CPG11981', 'CPG11817']
-SAMPLE_IDS = ['NA12878-fastq-2']
-
 BWA_IMAGE_ASAN = (
     f'australia-southeast1-docker.pkg.dev/cpg-common/images/biobambam2:debug-asan'
 )
@@ -270,6 +267,9 @@ bwa_reference = b.read_input_group(
     ann=REF_FASTA + '.ann',
     pac=REF_FASTA + '.pac',
 )
+
+SAMPLE_IDS = ['CPG12229', 'CPG12302', 'CPG11981', 'CPG11817']
+# SAMPLE_IDS = ['NA12878-fastq-2']
 
 sapi = SampleApi()
 samples = []
