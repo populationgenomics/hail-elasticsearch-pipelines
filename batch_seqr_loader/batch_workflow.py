@@ -112,8 +112,13 @@ aapi = AnalysisApi()
     '--use-gnarly',
     'use_gnarly',
     is_flag=True,
-    help='Use GnarlyGenotyper adn AS-VQSR instead of GenotypeGVCFs and '
-    'standard VQSR',
+    help='Use GnarlyGenotyper instead of GenotypeGVCFs',
+)
+@click.option(
+    '--use-as-vqsr',
+    'use_as_vqsr',
+    is_flag=True,
+    help='Use allele-specific annotations for VQSR',
 )
 def main(
     output_namespace: str,
@@ -130,6 +135,7 @@ def main(
     skip_ped_checks: bool,  # pylint: disable=unused-argument
     vep_block_size: Optional[int],  # pylint: disable=unused-argument
     use_gnarly: bool,
+    use_as_vqsr: bool,
 ):  # pylint: disable=missing-function-docstring
     billing_project = os.getenv('HAIL_BILLING_PROJECT') or 'seqr'
 
@@ -197,6 +203,7 @@ def main(
         start_from_stage=start_from_stage,
         skip_samples=skip_samples,
         use_gnarly=use_gnarly,
+        use_as_vqsr=use_as_vqsr,
     )
     if b:
         b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch, wait=False)
@@ -267,6 +274,7 @@ def _add_jobs(
     start_from_stage: Optional[str],  # pylint: disable=unused-argument
     skip_samples: List[str],
     use_gnarly: bool,
+    use_as_vqsr: bool,
 ) -> Optional[hb.Batch]:
     genomicsdb_bucket = f'{out_bucket}/genomicsdbs'
     # pylint: disable=unused-variable
@@ -421,6 +429,7 @@ def _add_jobs(
         completed_analysis=jc_analysis,
         depends_on=gvcf_jobs,
         use_gnarly=use_gnarly,
+        use_as_vqsr=use_as_vqsr,
     )
 
     for project in output_projects:
@@ -1024,6 +1033,7 @@ def _make_joint_genotype_jobs(
     analysis_project: str = None,
     completed_analysis: Optional[Analysis] = None,
     use_gnarly: bool = False,
+    use_as_vqsr: bool = False,
 ) -> Tuple[Job, str]:
     """
     Assumes all samples have a 'file' of 'type'='gvcf' in `samples_df`.
@@ -1229,6 +1239,7 @@ def _make_joint_genotype_jobs(
         intervals=intervals_j.intervals,
         scatter_count=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
         output_vcf_path=vqsred_vcf_path,
+        use_as_annotations=use_as_vqsr,
     )
     if sm_completed_j:
         sm_completed_j.depends_on(vqsr_job)
