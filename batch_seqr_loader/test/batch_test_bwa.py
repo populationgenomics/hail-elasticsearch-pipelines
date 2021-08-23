@@ -73,6 +73,7 @@ def _test_bwa(
             f' -n{bazam_cpu} -bam {cram.base})'
         )
         r2_param = '-'
+        clean_up_cmd = f'rm {cram.base}*'
     else:
         assert alignment_input.fqs1 and alignment_input.fqs2
         use_bazam = False
@@ -82,6 +83,7 @@ def _test_bwa(
         r2_param = f'<(cat {" ".join(files2)})'
         logger.info(f'r1_param: {r1_param}')
         logger.info(f'r2_param: {r2_param}')
+        clean_up_cmd = f'rm {" ".join(files1)} {" ".join(files2)}'
 
     j.cpu(total_cpu)
     j.memory('standard')
@@ -132,7 +134,7 @@ set -ex
     -R '{rg_line}' {reference.base} {r1_param} {r2_param} | \\
     samtools sort -T $(dirname {j.output_cram.cram})/samtools-sort-tmp -Obam -o {sorted_bam}
 
-rm {r1_param} {r2_param}
+{clean_up_cmd}
 
 picard MarkDuplicates I={sorted_bam} O=/dev/stdout M={j.duplicate_metrics} \\
     ASSUME_SORT_ORDER=coordinate | \\
