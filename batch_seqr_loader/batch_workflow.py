@@ -1216,9 +1216,10 @@ def _make_joint_genotype_jobs(
                 b,
                 input_vcf=vcf,
                 overwrite=overwrite,
+                output_vcf_path=site_only_vcf_path,
             )
             make_site_only_jobs.append(make_site_only_job)
-            scattered_vcf_by_interval[idx] = make_site_only_job.output_vcf
+            scattered_vcf_by_interval[idx] = site_only_vcf_path
 
     final_gathered_vcf_job = _add_final_gather_vcf_job(
         b,

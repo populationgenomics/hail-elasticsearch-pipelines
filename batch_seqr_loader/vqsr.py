@@ -850,9 +850,9 @@ def add_apply_recalibration_step(
       --tranches-file {indels_tranches} \\
       --truth-sensitivity-filter-level {indel_filter_level} \\
       --create-output-variant-index true \\
-      -mode INDEL \\
       {f'-L {interval} ' if interval else ''} \\
-      {"--use-allele-specific-annotations " if use_as_annotations else ""}
+      {'--use-allele-specific-annotations ' if use_as_annotations else ''} \\
+      -mode INDEL 
 
     gatk --java-options -Xms5g \\
       ApplyVQSR \\
@@ -862,9 +862,9 @@ def add_apply_recalibration_step(
       --tranches-file {snps_tranches} \\
       --truth-sensitivity-filter-level {snp_filter_level} \\
       --create-output-variant-index true \\
-      -mode SNP \\
       {f'-L {interval} ' if interval else ''} \\
-      {"--use-allele-specific-annotations " if use_as_annotations else ""}
+      {'--use-allele-specific-annotations ' if use_as_annotations else ''} \\
+      -mode SNP
       """
     )
 
