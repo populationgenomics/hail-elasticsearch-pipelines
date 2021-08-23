@@ -21,8 +21,9 @@ BWA_IMAGE_ASAN = (
 BWA_IMAGE_TSAN = (
     f'australia-southeast1-docker.pkg.dev/cpg-common/images/biobambam2:debug-tsan'
 )
-BWA_IMAGE = f'australia-southeast1-docker.pkg.dev/cpg-common/images/bazam:v2'
+BWA_BIOBAMBA_IMAGE = f'australia-southeast1-docker.pkg.dev/cpg-common/images/bazam:v2'
 BWA_PICARD_IMAGE = 'australia-southeast1-docker.pkg.dev/cpg-common/images/alignment:v3'
+BWA2_PICARD_IMAGE = 'australia-southeast1-docker.pkg.dev/cpg-common/images/alignment:v4'
 REF_BUCKET = 'gs://cpg-reference/hg38/v1'
 REF_FASTA = join(REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
 
@@ -45,19 +46,19 @@ def _test_bwa(
     container: str,
     sample_name: str,
     alignment_input: AlignmentInput,
-    bamsormadup_cpu: int,
     use_picard: bool = False,
+    use_bwamem2: bool = False,
 ):
     job_name = f'Test BWA with {container}'
     if use_picard:
         job_name += f', picard MarkDuplicates'
-    else:
-        job_name += f', bamsormadup CPU {bamsormadup_cpu}'
+    if use_bwamem2:
+        job_name += f', bwa-mem2'
     j = b.new_job(job_name)
     j.image(container)
     total_cpu = 32
     bwa_cpu = total_cpu
-    output_cram_path = f'gs://cpg-seqr-test-tmp/test-biobambam2/{sample_name}-{container.split(":")[1]}.cram'
+    output_cram_path = f'gs://cpg-seqr-test-tmp/test-alignment/{sample_name}-{container.split(":")[1]}.cram'
 
     if alignment_input.bam_or_cram_path:
         use_bazam = True
@@ -92,6 +93,8 @@ def _test_bwa(
         }
     )
 
+    bwa_tool = 'bwa' if not use_bwamem2 else 'bwa-mem2'
+
     rg_line = f'@RG\\tID:{sample_name}\\tSM:{sample_name}'
     # BWA command options:
     # -K     process INT input bases in each batch regardless of nThreads (for reproducibility)
@@ -106,9 +109,9 @@ set -ex
 
 (while true; do df -h; pwd; du -sh $(dirname {j.output_cram.cram}); sleep 600; done) &
 
-bwa mem -K 100000000 {'-p' if use_bazam else ''} -t{bwa_cpu} -Y \\
+{bwa_tool} mem -K 100000000 {'-p' if use_bazam else ''} -t{bwa_cpu} -Y \\
     -R '{rg_line}' {reference.base} {r1_param} {r2_param} | \\
-bamsormadup inputformat=sam threads={bamsormadup_cpu} SO=coordinate \\
+bamsormadup inputformat=sam threads=10 SO=coordinate \\
     M={j.duplicate_metrics} outputformat=sam \\
     tmpfile=$(dirname {j.output_cram.cram})/bamsormadup-tmp | \\
 samtools view -T {reference.base} -O cram -o {j.output_cram.cram}
@@ -125,13 +128,15 @@ set -ex
 
 (while true; do df -h; pwd; du -sh $(dirname {j.output_cram.cram}); sleep 600; done) &
 
-bwa mem -K 100000000 {'-p' if use_bazam else ''} -t{bwa_cpu} -Y \\
+{bwa_tool} mem -K 100000000 {'-p' if use_bazam else ''} -t{bwa_cpu} -Y \\
     -R '{rg_line}' {reference.base} {r1_param} {r2_param} | \\
-samtools sort -T $(dirname {j.output_cram.cram})/samtools-sort-tmp -Obam -o {sorted_bam}
+    samtools sort -T $(dirname {j.output_cram.cram})/samtools-sort-tmp -Obam -o {sorted_bam}
+
+rm {r1_param} {r2_param}
 
 picard MarkDuplicates I={sorted_bam} O=/dev/stdout M={j.duplicate_metrics} \\
     ASSUME_SORT_ORDER=coordinate | \\
-samtools view -@30 -T {reference.base} -O cram -o {j.output_cram.cram}
+    samtools view -@30 -T {reference.base} -O cram -o {j.output_cram.cram}
 
 samtools index -@{total_cpu} {j.output_cram.cram} {j.output_cram.crai}
 
@@ -266,6 +271,8 @@ bwa_reference = b.read_input_group(
     bwt=REF_FASTA + '.bwt',
     ann=REF_FASTA + '.ann',
     pac=REF_FASTA + '.pac',
+    o123=REF_FASTA + '.0123',
+    bwa2bit64=REF_FASTA + '.bwt.2bit.64',
 )
 
 SAMPLE_IDS = ['CPG12229', 'CPG12302', 'CPG11981', 'CPG11817']
@@ -286,32 +293,25 @@ for s in sapi.get_samples(
         samples.append(s)
 
 for s in samples:
-    for cont in [
+    for (image, use_picard, use_bwamem2) in [
         # BWA_IMAGE_ASAN,
         # BWA_IMAGE_TSAN,
-        # BWA_IMAGE,
-        BWA_PICARD_IMAGE,
+        (BWA_BIOBAMBA_IMAGE, False, False),
+        (BWA_PICARD_IMAGE, True, False),
+        (BWA2_PICARD_IMAGE, True, True),
     ]:
-        for bamsormadup_cpu in [
-            1,
-            # 10,
-        ]:
-            for use_picard in [
-                # False,
-                True,
-            ]:
-                alignment_input = sm_verify_reads_data(
-                    s['meta'].get('reads'), s['meta'].get('reads_type')
-                )
-                if alignment_input:
-                    logger.info(f'Submitting {alignment_input}')
-                    _test_bwa(
-                        b,
-                        bwa_reference,
-                        cont,
-                        s['external_id'],
-                        alignment_input,
-                        bamsormadup_cpu,
-                        use_picard=use_picard,
-                    )
+        alignment_input = sm_verify_reads_data(
+            s['meta'].get('reads'), s['meta'].get('reads_type')
+        )
+        if alignment_input:
+            logger.info(f'Submitting {alignment_input}')
+            _test_bwa(
+                b,
+                bwa_reference,
+                image,
+                s['external_id'],
+                alignment_input,
+                use_picard=use_picard,
+                use_bwamem2=use_bwamem2,
+            )
 b.run(open=True, wait=False)
