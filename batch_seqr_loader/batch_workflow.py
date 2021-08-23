@@ -108,6 +108,13 @@ aapi = AnalysisApi()
     help='Skip checking provided sex and pedigree against the inferred one',
 )
 @click.option('--vep-block-size', 'vep_block_size')
+@click.option(
+    '--use-gnarly',
+    'use_gnarly',
+    is_flag=True,
+    help='Use GnarlyGenotyper adn AS-VQSR instead of GenotypeGVCFs and '
+    'standard VQSR',
+)
 def main(
     output_namespace: str,
     analysis_project: str,
@@ -121,7 +128,8 @@ def main(
     dry_run: bool,
     make_checkpoints: bool,  # pylint: disable=unused-argument
     skip_ped_checks: bool,  # pylint: disable=unused-argument
-    vep_block_size: Optional[int] = None,  # pylint: disable=unused-argument
+    vep_block_size: Optional[int],  # pylint: disable=unused-argument
+    use_gnarly: bool,
 ):  # pylint: disable=missing-function-docstring
     billing_project = os.getenv('HAIL_BILLING_PROJECT') or 'seqr'
 
@@ -188,6 +196,7 @@ def main(
         analysis_project=analysis_project,
         start_from_stage=start_from_stage,
         skip_samples=skip_samples,
+        use_gnarly=use_gnarly,
     )
     if b:
         b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch, wait=False)
@@ -257,6 +266,7 @@ def _add_jobs(
     analysis_project: str,
     start_from_stage: Optional[str],  # pylint: disable=unused-argument
     skip_samples: List[str],
+    use_gnarly: bool,
 ) -> Optional[hb.Batch]:
     genomicsdb_bucket = f'{out_bucket}/genomicsdbs'
     # pylint: disable=unused-variable
@@ -410,6 +420,7 @@ def _add_jobs(
         analysis_project=analysis_project,
         completed_analysis=jc_analysis,
         depends_on=gvcf_jobs,
+        use_gnarly=use_gnarly,
     )
 
     for project in output_projects:
@@ -1012,6 +1023,7 @@ def _make_joint_genotype_jobs(
     depends_on: Optional[List[Job]] = None,
     analysis_project: str = None,
     completed_analysis: Optional[Analysis] = None,
+    use_gnarly: bool = False,
 ) -> Tuple[Job, str]:
     """
     Assumes all samples have a 'file' of 'type'='gvcf' in `samples_df`.
@@ -1164,7 +1176,10 @@ def _make_joint_genotype_jobs(
                 }
             )
         else:
-            genotype_vcf_job = _add_gnarly_genotyper_job(
+            genotype_fn = (
+                _add_gnarly_genotyper_job if use_gnarly else _add_genotype_gvcfs_job
+            )
+            genotype_vcf_job = genotype_fn(
                 b,
                 genomicsdb_path=genomics_gcs_path_per_interval[idx],
                 reference=reference,
