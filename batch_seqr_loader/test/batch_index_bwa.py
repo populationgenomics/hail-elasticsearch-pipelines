@@ -8,7 +8,7 @@ import os
 
 CONTAINER = f'australia-southeast1-docker.pkg.dev/cpg-common/images/alignment:v4'
 REF_BUCKET = 'gs://cpg-reference/hg38/v1'
-TARGET_BUCKET = 'gs://cpg-reference/hg38/v1'
+TARGET_BUCKET = 'gs://playground-au/cpg-reference/hg38/v1'
 REF_FASTA = join(REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
 TARGET_FASTA = join(TARGET_BUCKET, 'Homo_sapiens_assembly38.fasta')
 
