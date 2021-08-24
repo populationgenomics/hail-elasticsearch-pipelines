@@ -437,11 +437,12 @@ def _add_jobs(
         if utils.can_reuse(annotated_mt_path, overwrite):
             annotate_job = b.new_job(f'{project}: annotate [reuse]')
         else:
-            sample_map_bucket_path = join(tmp_bucket, 'work', 'external_id_map.csv')
+            sample_map_bucket_path = join(tmp_bucket, 'work', 'external_id_map.tsv')
             sample_map_local_fpath = join(
                 local_tmp_dir, basename(sample_map_bucket_path)
             )
             with open(sample_map_local_fpath, 'w') as f:
+                f.write('\t'.join(['s', 'seqr_id']) + '\n')
                 for s in good_samples:
                     f.write('\t'.join([s['id'], s['external_id']]) + '\n')
             subprocess.run(
