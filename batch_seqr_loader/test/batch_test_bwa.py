@@ -151,7 +151,8 @@ set -ex
 
 (while true; do df -h; pwd; du -sh $(dirname {md_j.output_cram.cram}); sleep 600; done) &
 
-picard MarkDuplicates I={j.sorted_bam} O=/dev/stdout M={md_j.duplicate_metrics} \\
+java -Xms6000m -jar /usr/picard/picard.jar MarkDuplicates \\
+        I={j.sorted_bam} O=/dev/stdout M={md_j.duplicate_metrics} \\
         TMP_DIR=$(dirname {md_j.output_cram.cram})/picard-tmp \\
         ASSUME_SORT_ORDER=coordinate | \\
     samtools view -@30 -T {reference.base} -O cram -o {md_j.output_cram.cram}
@@ -295,8 +296,8 @@ bwa_reference = b.read_input_group(
     bwa2bit64=REF_FASTA + '.bwt.2bit.64',
 )
 
-SAMPLE_IDS = ['CPG12229', 'CPG12302', 'CPG11981', 'CPG11817']
-# SAMPLE_IDS = ['NA12878-fastq-2']
+# SAMPLE_IDS = ['CPG12229', 'CPG12302', 'CPG11981', 'CPG11817']
+SAMPLE_IDS = ['NA12878-fastq-2']
 
 sapi = SampleApi()
 samples = []
