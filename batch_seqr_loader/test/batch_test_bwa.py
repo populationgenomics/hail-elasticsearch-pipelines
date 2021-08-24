@@ -138,7 +138,7 @@ df -h; pwd; du -sh $(dirname {j.sorted_bam})
         j.command(command)
 
         md_j = b.new_job('MarkDuplicates')
-        md_j.image(PICARD_IMAGE)
+        md_j.image(container)
         md_j.declare_resource_group(
             output_cram={
                 'cram': '{root}.cram',
@@ -151,7 +151,7 @@ set -ex
 
 (while true; do df -h; pwd; du -sh $(dirname {md_j.output_cram.cram}); sleep 600; done) &
 
-java -Xms6000m -jar /usr/picard/picard.jar MarkDuplicates \\
+picard MarkDuplicates \\
         I={j.sorted_bam} O=/dev/stdout M={md_j.duplicate_metrics} \\
         TMP_DIR=$(dirname {md_j.output_cram.cram})/picard-tmp \\
         ASSUME_SORT_ORDER=coordinate | \\
@@ -296,8 +296,8 @@ bwa_reference = b.read_input_group(
     bwa2bit64=REF_FASTA + '.bwt.2bit.64',
 )
 
-SAMPLE_IDS = ['CPG12229', 'CPG12302', 'CPG11981', 'CPG11817']
-# SAMPLE_IDS = ['NA12878-fastq-2']
+# SAMPLE_IDS = ['CPG12229', 'CPG12302', 'CPG11981', 'CPG11817']
+SAMPLE_IDS = ['NA12878-fastq-2']
 
 sapi = SampleApi()
 samples = []
