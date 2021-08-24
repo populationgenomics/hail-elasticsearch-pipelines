@@ -449,9 +449,10 @@ def add_indels_variant_recalibrator_job(
     """
     j = b.new_job('VQSR: IndelsVariantRecalibrator')
     j.image(utils.GATK_IMAGE)
-    mem_gb = 32
-    j.memory(f'{mem_gb}G')
-    j.cpu(2)
+    j.memory('highmem')
+    ncpu = 4  # ~ 8G/core ~ 32G
+    j.cpu(ncpu)
+    java_mem = ncpu * 8 - 4
     j.storage(f'{disk_size}G')
 
     j.declare_resource_group(recalibration={'index': '{root}.idx', 'base': '{root}'})
@@ -472,7 +473,7 @@ def add_indels_variant_recalibrator_job(
     j.command(
         f"""set -euo pipefail
 
-    gatk --java-options -Xms{mem_gb - 1}g \\
+    gatk --java-options -Xms{java_mem}g \\
       VariantRecalibrator \\
       -V {sites_only_variant_filtered_vcf['vcf.gz']} \\
       -O {j.recalibration} \\
@@ -537,9 +538,13 @@ def add_snps_variant_recalibrator_create_model_step(
     """
     j = b.new_job('VQSR: SNPsVariantRecalibratorCreateModel')
     j.image(utils.GATK_IMAGE)
-    mem_gb = 64 if not is_small_callset else 128
-    j.memory(f'{mem_gb}G')
-    j.cpu(2)
+    j.memory('highmem')
+    if is_small_callset:
+        ncpu = 8  # ~ 8G/core ~ 64G
+    else:
+        ncpu = 16  # ~ 8G/core ~ 128G
+    j.cpu(ncpu)
+    java_mem = ncpu * 8 - 10
     j.storage(f'{disk_size}G')
 
     downsample_factor = 75 if is_huge_callset else 10
@@ -558,7 +563,7 @@ def add_snps_variant_recalibrator_create_model_step(
     j.command(
         f"""set -euo pipefail
 
-    gatk --java-options -Xms{mem_gb - 2}g \\
+    gatk --java-options -Xms{java_mem}g \\
       VariantRecalibrator \\
       -V {sites_only_variant_filtered_vcf['vcf.gz']} \\
       -O {j.recalibration} \\
@@ -699,9 +704,10 @@ def add_snps_variant_recalibrator_step(
     j = b.new_job('VQSR: SNPsVariantRecalibrator')
 
     j.image(utils.GATK_IMAGE)
-    mem_gb = 64  # ~ twice the sum of all input resources and input VCF sizes
-    j.memory(f'{mem_gb}G')
-    j.cpu(2)
+    j.memory('highmem')
+    ncpu = 8  # ~ 8G/core ~ 64G
+    j.cpu(ncpu)
+    java_mem = ncpu * 8 - 8
     j.storage(f'{disk_size}G')
 
     j.declare_resource_group(recalibration={'index': '{root}.idx', 'base': '{root}'})
@@ -720,7 +726,7 @@ def add_snps_variant_recalibrator_step(
     j.command(
         f"""set -euo pipefail
 
-    gatk --java-options -Xms{mem_gb - 1}g \\
+    gatk --java-options -Xms{java_mem}g \\
       VariantRecalibrator \\
       -V {sites_only_variant_filtered_vcf['vcf.gz']} \\
       -O {j.recalibration} \\
@@ -858,7 +864,7 @@ def add_apply_recalibration_step(
       
     df -h; pwd; du -sh $(dirname {j.recalibrated_vcf['vcf.gz']})
 
-    rm {input_vcf} {indels_recalibration} {indels_tranches}
+    rm {input_vcf['vcf.gz']} {indels_recalibration} {indels_tranches}
 
     df -h; pwd; du -sh $(dirname {j.recalibrated_vcf['vcf.gz']})
 
