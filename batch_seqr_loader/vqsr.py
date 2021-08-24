@@ -255,7 +255,7 @@ def make_vqsr_jobs(
                 indels_tranches=indels_tranches,
                 snps_recalibration=snps_recalibrations[idx],
                 snps_tranches=snps_gathered_tranches,
-                disk_size=medium_disk,
+                disk_size=huge_disk,
                 use_as_annotations=use_as_annotations,
                 snp_filter_level=SNP_HARD_FILTER_LEVEL,
                 indel_filter_level=INDEL_HARD_FILTER_LEVEL,
@@ -293,7 +293,7 @@ def make_vqsr_jobs(
             indels_tranches=indels_tranches,
             snps_recalibration=snps_recalibration,
             snps_tranches=snps_tranches,
-            disk_size=medium_disk,
+            disk_size=huge_disk,
             use_as_annotations=use_as_annotations,
             indel_filter_level=SNP_HARD_FILTER_LEVEL,
             snp_filter_level=INDEL_HARD_FILTER_LEVEL,
@@ -842,6 +842,8 @@ def add_apply_recalibration_step(
     j.command(
         f"""set -euo pipefail
 
+    df -h; pwd; du -sh $(dirname {j.recalibrated_vcf['vcf.gz']})
+
     gatk --java-options -Xms5g \\
       ApplyVQSR \\
       -O tmp.indel.recalibrated.vcf \\
@@ -852,7 +854,13 @@ def add_apply_recalibration_step(
       --create-output-variant-index true \\
       {f'-L {interval} ' if interval else ''} \\
       {'--use-allele-specific-annotations ' if use_as_annotations else ''} \\
-      -mode INDEL 
+      -mode INDEL
+      
+    df -h; pwd; du -sh $(dirname {j.recalibrated_vcf['vcf.gz']})
+
+    rm {input_vcf} {indels_recalibration} {indels_tranches}
+
+    df -h; pwd; du -sh $(dirname {j.recalibrated_vcf['vcf.gz']})
 
     gatk --java-options -Xms5g \\
       ApplyVQSR \\
@@ -865,6 +873,8 @@ def add_apply_recalibration_step(
       {f'-L {interval} ' if interval else ''} \\
       {'--use-allele-specific-annotations ' if use_as_annotations else ''} \\
       -mode SNP
+
+    df -h; pwd; du -sh $(dirname {j.recalibrated_vcf['vcf.gz']})
       """
     )
 
