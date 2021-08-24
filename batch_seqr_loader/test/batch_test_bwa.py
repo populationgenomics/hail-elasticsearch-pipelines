@@ -131,13 +131,14 @@ set -ex
 (while true; do df -h; pwd; du -sh $(dirname {j.output_cram.cram}); sleep 600; done) &
 
 {bwa_tool} mem -K 100000000 {'-p' if use_bazam else ''} -t{bwa_cpu} -Y \\
-    -R '{rg_line}' {reference.base} {r1_param} {r2_param} | \\
+        -R '{rg_line}' {reference.base} {r1_param} {r2_param} | \\
     samtools sort -T $(dirname {j.output_cram.cram})/samtools-sort-tmp -Obam -o {sorted_bam}
 
 {clean_up_cmd}
 
 picard MarkDuplicates I={sorted_bam} O=/dev/stdout M={j.duplicate_metrics} \\
-    ASSUME_SORT_ORDER=coordinate | \\
+        TMP_DIR=$(dirname {j.output_cram.cram})/picard-tmp \\
+        ASSUME_SORT_ORDER=coordinate | \\
     samtools view -@30 -T {reference.base} -O cram -o {j.output_cram.cram}
 
 samtools index -@{total_cpu} {j.output_cram.cram} {j.output_cram.crai}
