@@ -16,7 +16,11 @@ logger = logging.getLogger('make_annotated_mt')
 logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
 logger.setLevel(logging.INFO)
 
+GENOME_VERSION = 'GRCh38'
+REF_BUCKET = 'gs://cpg-reference/hg38/v1'
 SEQR_REF_BUCKET = 'gs://cpg-seqr-reference-data'
+REF_HT = f'{SEQR_REF_BUCKET}/GRCh38/all_reference_data/v2/combined_reference_data_grch38-2.0.3.ht'
+CLINVAR_HT = f'{SEQR_REF_BUCKET}/GRCh38/clinvar/clinvar.GRCh38.2020-06-15.ht'
 
 
 @click.command()
@@ -35,27 +39,6 @@ SEQR_REF_BUCKET = 'gs://cpg-seqr-reference-data'
     '--bucket',
     'work_bucket',
     required=True,
-)
-@click.option('--genome-version', 'genome_version', default='GRCh38')
-@click.option(
-    '--reference-ht',
-    'reference_path',
-    required=True,
-    help='Path to the Hail table storing the reference variants.',
-    default=f'{SEQR_REF_BUCKET}/GRCh38/all_reference_data/v2/combined_reference_data_grch38-2.0.3.ht',
-)
-@click.option(
-    '--clinvar-ht',
-    'clinvar_path',
-    required=True,
-    help='Path to the Hail table storing the clinvar variants.',
-    default=f'{SEQR_REF_BUCKET}/GRCh38/clinvar/clinvar.GRCh38.2020-06-15.ht',
-)
-@click.option(
-    '--hgmd-ht',
-    'hgmd_path',
-    help='Path to the Hail table storing the hgmd variants.',
-    # default='gs://seqr-reference-data-private/GRCh38/HGMD/hgmd_pro_2018.4_hg38_without_db_field.vds'
 )
 @click.option('--disable-validation', 'disable_validation', is_flag=True)
 @click.option(
@@ -79,10 +62,6 @@ def main(
     source_paths: List[str],
     dest_path: str,
     work_bucket: str,
-    genome_version: str,
-    reference_path: str,
-    clinvar_path: str,
-    hgmd_path: Optional[str],
     disable_validation: bool,
     remap_path: str,
     subset_path: str,
@@ -91,8 +70,8 @@ def main(
 ):  # pylint: disable=missing-function-docstring
     logger.info('Starting the seqr_load pipeline')
 
-    hl.init(default_reference=genome_version)
-    mt = import_vcf(source_paths, genome_version)
+    hl.init(default_reference=GENOME_VERSION)
+    mt = import_vcf(source_paths, GENOME_VERSION)
     mt = annotate_old_and_split_multi_hts(mt)
     if not disable_validation:
         validate_mt(mt, sample_type='WGS')
@@ -100,26 +79,24 @@ def main(
         mt = remap_sample_ids(mt, remap_path)
     if subset_path:
         mt = subset_samples_and_variants(mt, subset_path)
-    if genome_version == 'GRCh38':
-        mt = add_37_coordinates(mt)
-        if make_checkpoints:
-            mt.write(join(work_bucket, 'add_37_coordinates.mt'), overwrite=True)
+    mt = add_37_coordinates(mt)
+    if make_checkpoints:
+        mt.write(join(work_bucket, 'add_37_coordinates.mt'), overwrite=True)
 
     mt = hl.vep(mt, block_size=vep_block_size or 1000)
     if make_checkpoints:
         mt.write(join(work_bucket, 'run_vep.mt'), overwrite=True)
 
-    ref_data = hl.read_table(reference_path)
-    clinvar = hl.read_table(clinvar_path)
-    hgmd = hl.read_table(hgmd_path) if hgmd_path else None
+    ref_data = hl.read_table(REF_HT)
+    clinvar = hl.read_table(CLINVAR_HT)
 
-    mt = compute_annotated_vcf(mt, ref_data=ref_data, clinvar=clinvar, hgmd=hgmd)
+    mt = compute_annotated_vcf(mt, ref_data=ref_data, clinvar=clinvar)
     if make_checkpoints:
         mt.write(join(work_bucket, 'compute_annotated_vcf.mt'), overwrite=True)
 
     mt = mt.annotate_globals(
         sourceFilePath=','.join(source_paths),
-        genomeVersion=genome_version.replace('GRCh', ''),
+        genomeVersion=GENOME_VERSION.replace('GRCh', ''),
         sampleType='WGS',
         hail_version=hl.version(),
     )
@@ -168,7 +145,7 @@ def annotate_old_and_split_multi_hts(mt):
 
 
 def compute_annotated_vcf(
-    mt, ref_data, clinvar, hgmd, schema_cls=SeqrVariantsAndGenotypesSchema
+    mt, ref_data, clinvar, schema_cls=SeqrVariantsAndGenotypesSchema
 ):
     """
     Returns a matrix table with an annotated rows where each row annotation is a previously called
@@ -199,9 +176,7 @@ def compute_annotated_vcf(
     #        SeqrVariantsAndGenotypesSchema
     #
     # we can call the annotation on this class in two steps:
-    annotation_schema = schema_cls(
-        mt, ref_data=ref_data, clinvar_data=clinvar, hgmd_data=hgmd
-    )
+    annotation_schema = schema_cls(mt, ref_data=ref_data, clinvar_data=clinvar)
 
     mt = annotation_schema.annotate_all(overwrite=True).select_annotated_mt()
 
@@ -384,9 +359,7 @@ def add_37_coordinates(mt):
     """
     rg37 = hl.get_reference('GRCh37')
     rg38 = hl.get_reference('GRCh38')
-    rg38.add_liftover(
-        'gs://hail-common/references/grch38_to_grch37.over.chain.gz', rg37
-    )
+    rg38.add_liftover(join(REF_BUCKET, 'grch38_to_grch37.over.chain.gz'), rg37)
     mt = mt.annotate_rows(rg37_locus=hl.liftover(mt.locus, 'GRCh37'))
     return mt
 

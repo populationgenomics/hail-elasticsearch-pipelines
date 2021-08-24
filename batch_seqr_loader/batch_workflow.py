@@ -437,6 +437,18 @@ def _add_jobs(
         if utils.can_reuse(annotated_mt_path, overwrite):
             annotate_job = b.new_job(f'{project}: annotate [reuse]')
         else:
+            sample_map_bucket_path = join(tmp_bucket, 'work', 'external_id_map.csv')
+            sample_map_local_fpath = join(
+                local_tmp_dir, basename(sample_map_bucket_path)
+            )
+            with open(sample_map_local_fpath, 'w') as f:
+                for s in good_samples:
+                    f.write('\t'.join([s['id'], s['external_id']]) + '\n')
+            subprocess.run(
+                f'gsutil cp {sample_map_local_fpath} {sample_map_bucket_path}',
+                check=False,
+                shell=True,
+            )
             annotate_job = dataproc.hail_dataproc_job(
                 b,
                 f'batch_seqr_loader/scripts/make_annotated_mt.py '
@@ -445,6 +457,7 @@ def _add_jobs(
                 f'--bucket {join(tmp_bucket, "annotation", project)} '
                 '--disable-validation '
                 '--make-checkpoints '
+                f'--remap-tsv {sample_map_bucket_path} '
                 + (f'--vep-block-size ' if vep_block_size else ''),
                 max_age='16h',
                 packages=utils.DATAPROC_PACKAGES,
@@ -1475,12 +1488,12 @@ def _samples_to_add_to_db(
         )
 
     sample_map_bucket_path = join(tmp_bucket, 'work', 'sample_name.csv')
-    local_sample_map_fpath = join(local_tmp_dir, 'sample_name.csv')
-    with open(local_sample_map_fpath, 'w') as f:
+    sample_map_local_fpath = join(local_tmp_dir, basename(sample_map_bucket_path))
+    with open(sample_map_local_fpath, 'w') as f:
         for sid in sample_names_to_add:
             f.write('\t'.join([sid, gvcf_by_sid[sid]]) + '\n')
     subprocess.run(
-        f'gsutil cp {local_sample_map_fpath} {sample_map_bucket_path}',
+        f'gsutil cp {sample_map_local_fpath} {sample_map_bucket_path}',
         check=False,
         shell=True,
     )
@@ -1612,11 +1625,8 @@ def _add_genotype_gvcfs_job(
 set -o pipefail
 set -ex
 
-cd $(dirname {j.output_vcf})
-
 export GOOGLE_APPLICATION_CREDENTIALS=/gsa-key/key.json
 gcloud -q auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
-gsutil -q cp -r {genomicsdb_path} .
 
 (while true; do df -h; pwd; free -m; sleep 300; done) &
 
@@ -1629,9 +1639,8 @@ gatk --java-options -Xms8g \\
   -D {dbsnp} \\
   -G StandardAnnotation -G AS_StandardAnnotation \\
   --only-output-calls-starting-in-intervals \\
-  -V gendb://{basename(genomicsdb_path)} \\
+  -V gendb.{genomicsdb_path} \\
   {f'-L {interval} ' if interval else ''} \\
-  -G 
   --merge-input-intervals
 
 df -h; pwd; free -m
