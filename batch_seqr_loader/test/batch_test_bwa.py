@@ -15,15 +15,14 @@ logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
 logger.setLevel(logging.INFO)
 
 
-BWA_IMAGE_ASAN = (
-    f'australia-southeast1-docker.pkg.dev/cpg-common/images/biobambam2:debug-asan'
-)
-BWA_IMAGE_TSAN = (
-    f'australia-southeast1-docker.pkg.dev/cpg-common/images/biobambam2:debug-tsan'
-)
-BWA_BIOBAMBA_IMAGE = f'australia-southeast1-docker.pkg.dev/cpg-common/images/bazam:v2'
-BWA_PICARD_IMAGE = 'australia-southeast1-docker.pkg.dev/cpg-common/images/alignment:v3'
-BWA2_PICARD_IMAGE = 'australia-southeast1-docker.pkg.dev/cpg-common/images/alignment:v4'
+AR_REPO = 'australia-southeast1-docker.pkg.dev/cpg-common/images'
+BWA_IMAGE_ASAN = f'{AR_REPO}/biobambam2:debug-asan'
+BWA_IMAGE_TSAN = f'{AR_REPO}/biobambam2:debug-tsan'
+BWA_BIOBAMBA_IMAGE = f'{AR_REPO}/bazam:v2'
+BWA_PICARD_IMAGE = f'{AR_REPO}/alignment:v3'
+BWA2_PICARD_IMAGE = f'{AR_REPO}/alignment:v4'
+PICARD_IMAGE = f'{AR_REPO}/picard-cloud:2.23.8'
+
 REF_BUCKET = 'gs://cpg-reference/hg38/v1'
 REF_FASTA = join(REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
 
@@ -50,8 +49,6 @@ def _test_bwa(
     use_bwamem2: bool = False,
 ):
     job_name = f'Test BWA with {container}'
-    if use_picard:
-        job_name += f', picard MarkDuplicates'
     if use_bwamem2:
         job_name += f', bwa-mem2'
     j = b.new_job(job_name)
@@ -73,7 +70,6 @@ def _test_bwa(
             f' -n{bazam_cpu} -bam {cram.base})'
         )
         r2_param = '-'
-        clean_up_cmd = f'rm {cram.base}*'
     else:
         assert alignment_input.fqs1 and alignment_input.fqs2
         use_bazam = False
@@ -83,17 +79,10 @@ def _test_bwa(
         r2_param = f'<(cat {" ".join(files2)})'
         logger.info(f'r1_param: {r1_param}')
         logger.info(f'r2_param: {r2_param}')
-        clean_up_cmd = f'rm {" ".join(files1)} {" ".join(files2)}'
 
     j.cpu(total_cpu)
     j.memory('standard')
     j.storage('300G')
-    j.declare_resource_group(
-        output_cram={
-            'cram': '{root}.cram',
-            'crai': '{root}.crai',
-        }
-    )
 
     bwa_tool = 'bwa' if not use_bwamem2 else 'bwa-mem2'
 
@@ -105,6 +94,12 @@ def _test_bwa(
     # -Y     use soft clipping for supplementary alignments
     # -R     read group header line such as '@RG\tID:foo\tSM:bar'
     if not use_picard:
+        j.declare_resource_group(
+            output_cram={
+                'cram': '{root}.cram',
+                'crai': '{root}.crai',
+            }
+        )
         command = f"""
 set -o pipefail
 set -ex
@@ -122,33 +117,55 @@ samtools index -@{total_cpu} {j.output_cram.cram} {j.output_cram.crai}
 
 df -h; pwd; du -sh $(dirname {j.output_cram.cram})
         """
+        j.command(command)
+        b.write_output(j.output_cram, splitext(output_cram_path)[0])
+        return j, output_cram_path
+
     else:
-        sorted_bam = f'$(dirname {j.output_cram.cram})/sorted.bam'
         command = f"""
 set -o pipefail
 set -ex
 
-(while true; do df -h; pwd; du -sh $(dirname {j.output_cram.cram}); sleep 600; done) &
+(while true; do df -h; pwd; du -sh $(dirname {j.sorted_bam}); sleep 600; done) &
 
 {bwa_tool} mem -K 100000000 {'-p' if use_bazam else ''} -t{bwa_cpu} -Y \\
         -R '{rg_line}' {reference.base} {r1_param} {r2_param} | \\
-    samtools sort -T $(dirname {j.output_cram.cram})/samtools-sort-tmp -Obam -o {sorted_bam}
+    samtools sort -T $(dirname {j.sorted_bam})/samtools-sort-tmp \\
+        -Obam -o {j.sorted_bam}
 
-{clean_up_cmd}
-
-picard MarkDuplicates I={sorted_bam} O=/dev/stdout M={j.duplicate_metrics} \\
-        TMP_DIR=$(dirname {j.output_cram.cram})/picard-tmp \\
-        ASSUME_SORT_ORDER=coordinate | \\
-    samtools view -@30 -T {reference.base} -O cram -o {j.output_cram.cram}
-
-samtools index -@{total_cpu} {j.output_cram.cram} {j.output_cram.crai}
-
-df -h; pwd; du -sh $(dirname {j.output_cram.cram})
+df -h; pwd; du -sh $(dirname {j.sorted_bam})
         """
+        j.command(command)
 
-    j.command(command)
-    b.write_output(j.output_cram, splitext(output_cram_path)[0])
-    return j, output_cram_path
+        md_j = b.new_job('MarkDuplicates')
+        md_j.image(PICARD_IMAGE)
+        md_j.declare_resource_group(
+            output_cram={
+                'cram': '{root}.cram',
+                'crai': '{root}.crai',
+            }
+        )
+        command = f"""
+set -o pipefail
+set -ex
+
+(while true; do df -h; pwd; du -sh $(dirname {md_j.output_cram.cram}); sleep 600; done) &
+
+picard MarkDuplicates I={j.sorted_bam} O=/dev/stdout M={md_j.duplicate_metrics} \\
+        TMP_DIR=$(dirname {md_j.output_cram.cram})/picard-tmp \\
+        ASSUME_SORT_ORDER=coordinate | \\
+    samtools view -@30 -T {reference.base} -O cram -o {md_j.output_cram.cram}
+
+samtools index -@2 {md_j.output_cram.cram} {md_j.output_cram.crai}
+
+df -h; pwd; du -sh $(dirname {md_j.output_cram.cram})
+        """
+        md_j.command(command)
+        md_j.cpu(2)
+        md_j.memory('standard')
+        md_j.storage('150G')
+        b.write_output(md_j.output_cram, splitext(output_cram_path)[0])
+        return md_j, output_cram_path
 
 
 def file_exists(path: str) -> bool:
