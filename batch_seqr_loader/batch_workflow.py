@@ -1625,8 +1625,6 @@ gcloud -q auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIA
 
 (while true; do df -h; pwd; free -m; sleep 300; done) &
 
-df -h; pwd; free -m
-
 gatk --java-options -Xms8g \\
   GenotypeGVCFs \\
   -R {reference.base} \\

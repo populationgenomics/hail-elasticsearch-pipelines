@@ -989,15 +989,19 @@ def _add_final_filter_job(
     j = b.new_job('VQSR: final filter')
     j.image(utils.BCFTOOLS_IMAGE)
     j.memory(f'8G')
-    j.storage(f'10G')
+    j.storage(f'100G')
     j.declare_resource_group(
         output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
     )
 
     j.command(
         f"""
+    df -h; pwd; free -m
+
     bcftools view -f.,PASS {input_vcf['vcf.gz']} -Oz -o {j.output_vcf['vcf.gz']} && \\
     tabix {j.output_vcf['vcf.gz']}
+
+    df -h; pwd; free -m
     """
     )
     if output_vcf_path:
