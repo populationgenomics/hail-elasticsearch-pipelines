@@ -296,8 +296,8 @@ bwa_reference = b.read_input_group(
     bwa2bit64=REF_FASTA + '.bwt.2bit.64',
 )
 
-# SAMPLE_IDS = ['CPG12229', 'CPG12302', 'CPG11981', 'CPG11817']
-SAMPLE_IDS = ['NA12878-fastq-2']
+SAMPLE_IDS = ['CPG12229', 'CPG12302', 'CPG11981', 'CPG11817']
+# SAMPLE_IDS = ['NA12878-fastq-2']
 
 sapi = SampleApi()
 samples = []
