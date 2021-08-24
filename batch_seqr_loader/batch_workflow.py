@@ -1183,20 +1183,19 @@ def _make_joint_genotype_jobs(
             )
             import_gvcfs_job_per_interval[idx] = import_gvcfs_job
 
-    make_site_only_jobs = []
     scattered_vcf_by_interval: Dict[int, hb.ResourceGroup] = dict()
 
     for idx in range(utils.NUMBER_OF_GENOMICS_DB_INTERVALS):
         samples_hash = utils.hash_sample_names(sample_names_will_be_in_db)
-        site_only_vcf_path = join(
+        joint_called_vcf_path = join(
             tmp_bucket, 'jointly-called', samples_hash, f'interval_{idx}.vcf.gz'
         )
-        if utils.can_reuse(site_only_vcf_path, overwrite):
-            make_site_only_jobs.append(b.new_job('Joint genotyping [reuse]'))
+        if utils.can_reuse(joint_called_vcf_path, overwrite):
+            b.new_job('Joint genotyping [reuse]')
             scattered_vcf_by_interval[idx] = b.read_input_group(
                 **{
-                    'vcf.gz': site_only_vcf_path,
-                    'vcf.gz.tbi': site_only_vcf_path + '.tbi',
+                    'vcf.gz': joint_called_vcf_path,
+                    'vcf.gz.tbi': joint_called_vcf_path + '.tbi',
                 }
             )
         else:
@@ -1217,23 +1216,18 @@ def _make_joint_genotype_jobs(
             if import_gvcfs_job_per_interval.get(idx):
                 genotype_vcf_job.depends_on(import_gvcfs_job_per_interval.get(idx))
 
-            vcf = genotype_vcf_job.output_vcf
             if not is_small_callset:
                 exccess_filter_job = _add_exccess_het_filter(
                     b,
-                    input_vcf=vcf,
+                    input_vcf=genotype_vcf_job.output_vcf,
                     overwrite=overwrite,
                     interval=intervals_j.intervals[f'interval_{idx}'],
                 )
-                vcf = exccess_filter_job.output_vcf
-            make_site_only_job = _add_make_sites_only_job(
-                b,
-                input_vcf=vcf,
-                overwrite=overwrite,
-                output_vcf_path=site_only_vcf_path,
-            )
-            make_site_only_jobs.append(make_site_only_job)
-            scattered_vcf_by_interval[idx] = site_only_vcf_path
+                last_job = exccess_filter_job
+            else:
+                last_job = genotype_vcf_job
+
+            scattered_vcf_by_interval[idx] = last_job.output_vcf
 
     final_gathered_vcf_job = _add_final_gather_vcf_job(
         b,
