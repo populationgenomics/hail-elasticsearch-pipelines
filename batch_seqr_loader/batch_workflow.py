@@ -282,12 +282,6 @@ def _add_jobs(
 
     latest_by_type_and_sids = _get_latest_complete_analysis(analysis_project)
     reference, bwa_reference, noalt_regions = utils.get_refs(b)
-    intervals_j = _add_split_intervals_job(
-        b=b,
-        interval_list=utils.UNPADDED_INTERVALS,
-        scatter_count=utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS,
-        ref_fasta=utils.REF_FASTA,
-    )
 
     gvcf_jobs = []
     gvcf_by_sid: Dict[str, str] = dict()
@@ -309,6 +303,7 @@ def _add_jobs(
 
     # after dropping samples with incorrect metadata, missing inputs, etc
     good_samples = []
+    hc_intervals_j = None
     for proj, samples in samples_by_project.items():
         for s in samples:
             logger.info(f'Project {proj}. Processing sample {s["id"]}')
@@ -373,12 +368,19 @@ def _add_jobs(
                     continue
                 gvcf_fpath = str(gvcf_fpath)
             else:
+                if hc_intervals_j is None:
+                    hc_intervals_j = _add_split_intervals_job(
+                        b=b,
+                        interval_list=utils.UNPADDED_INTERVALS,
+                        scatter_count=utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS,
+                        ref_fasta=utils.REF_FASTA,
+                    )
                 gvcf_job, gvcf_fpath = _make_produce_gvcf_jobs(
                     b=b,
                     sample_name=s['id'],
                     project_name=proj,
                     cram_path=cram_fpath,
-                    intervals_j=intervals_j,
+                    intervals_j=hc_intervals_j,
                     reference=reference,
                     noalt_regions=noalt_regions,
                     out_bucket=out_bucket,
@@ -1535,7 +1537,8 @@ def _add_import_gvcfs_job(
 
     j = b.new_job(job_name)
     j.image(utils.GATK_IMAGE)
-    j.cpu(16)
+    ncpu = 16
+    j.cpu(ncpu)
     java_mem = 16
     j.memory('lowmem')  # ~ 1G/core ~ 14.4G
     if depends_on:
@@ -1573,7 +1576,7 @@ def _add_import_gvcfs_job(
       --batch-size 50 \\
       -L {interval} \\
       --sample-name-map {sample_map} \\
-      --reader-threads {java_mem} \\
+      --reader-threads {ncpu} \\
       --merge-input-intervals \\
       --consolidate
 
