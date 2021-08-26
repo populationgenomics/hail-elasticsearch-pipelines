@@ -7,7 +7,7 @@ import os
 import hailtop.batch as hb
 from analysis_runner import dataproc, output_path
 
-PARQUET_TO_ARROW_SHARD_COUNT = 10
+PARQUET_TO_ARROW_SHARD_COUNT = 50
 MT_TO_PARQUET_PY = 'mt_to_parquet.py'
 PARQUET_TO_ARROW_PY = 'parquet_to_arrow.py'
 
