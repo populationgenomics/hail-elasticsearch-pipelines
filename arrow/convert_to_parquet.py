@@ -6,7 +6,9 @@ from analysis_runner import output_path
 
 
 @click.command()
-@click.option('--input', help='Input path for annotated Hail MatrixTable', required=True)
+@click.option(
+    '--input', help='Input path for annotated Hail MatrixTable', required=True
+)
 def convert_to_parquet(input):
     """Script entry point."""
 
@@ -22,7 +24,8 @@ def convert_to_parquet(input):
 
     # Convert HT to Parquet.
     df = ht.to_spark()
-    df.write.option('compression', 'zstd').parquet(output_path('annotated_ht.parquet', 'tmp'))
+    df.write.parquet(output_path('annotated_ht.parquet', 'tmp'))
+
 
 if __name__ == '__main__':
     convert_to_parquet()  # pylint: disable=no-value-for-parameter
