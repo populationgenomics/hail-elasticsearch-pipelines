@@ -88,7 +88,7 @@ def can_reuse(fpath: str, overwrite: bool) -> bool:
         return True
 
 
-def hash_sample_names(sample_names: Iterable[str]) -> str:
+def hash_sample_ids(sample_names: Iterable[str]) -> str:
     """
     Return a unique hash string from a set of strings
     :param sample_names: set of strings
@@ -96,7 +96,7 @@ def hash_sample_names(sample_names: Iterable[str]) -> str:
     """
     for sn in sample_names:
         assert ' ' not in sn, sn
-    return hashlib.sha224(' '.join(sorted(sample_names)).encode()).hexdigest()
+    return hashlib.sha256(' '.join(sorted(sample_names)).encode()).hexdigest()[:32]
 
 
 def get_refs(b: hb.Batch) -> Tuple:
