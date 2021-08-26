@@ -30,13 +30,13 @@ def main(input):
     arrow_path = output_path('annotated_ht.arrow')
 
     # mt_to_parquet_job = dataproc.hail_dataproc_job(
-    #    batch,
-    #    f'{MT_TO_PARQUET_PY} --input="{input}" --output="{parquet_path}"',
-    #    max_age='4h',
-    #    num_secondary_workers=10,
-    #    packages=['click'],
-    #    init=['gs://cpg-reference/hail_dataproc/install_common.sh'],
-    #    job_name='MT to Parquet',
+    #   batch,
+    #   f'{MT_TO_PARQUET_PY} --input="{input}" --output="{parquet_path}"',
+    #   max_age='4h',
+    #   num_secondary_workers=10,
+    #   packages=['click'],
+    #   init=['gs://cpg-reference/hail_dataproc/install_common.sh'],
+    #   job_name='MT to Parquet',
     # )
 
     mt_to_parquet_job = batch.new_job('no-op')
