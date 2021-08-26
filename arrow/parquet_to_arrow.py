@@ -50,7 +50,7 @@ def parquet_to_arrow(input, output, shard_index, shard_count):
         output_name = input_blob.name.split('/')[-1].replace('.parquet', '.arrow')
         output_blob = gcs.Blob(f'{output_dir}/{output_name}', output_bucket)
         print(f'Writing {output_blob.name}...')
-        output_blob.upload_from_string(buffer)
+        output_blob.upload_from_string(buffer.to_pybytes())
 
 
 if __name__ == '__main__':
