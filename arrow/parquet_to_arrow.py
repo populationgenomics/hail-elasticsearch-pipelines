@@ -8,26 +8,46 @@ import pyarrow.parquet as pq
 
 
 @click.command()
-@click.option('--input', help='Input path for Parquet partitions', required=True)
+@click.option('--input', help='Input path for Parquet files', required=True)
+@click.option('--output', help='Output path for Arrow files', required=True)
 @click.option(
-    '--shard_index', help='Shard index over partitions', type=int, required=True
+    '--shard_index', help='Shard index for input files', type=int, required=True
 )
 @click.option(
-    '--shard_count', help='Shard count over partitions', type=int, required=True
+    '--shard_count', help='Shard count for input files', type=int, required=True
 )
 def parquet_to_arrow(input, shard_index, shard_count):
     gcs_client = gcs.Client()
 
-    input_parts = input.split('/')
-    input_bucket = input_parts[2]
-    input_blob_prefix = '/'.join(input_parts[3:])
+    def bucket_and_name(gcs_path):
+        parts = gcs_path.split('/')
+        return parts[2], '/'.join(input_parts[3:])
 
-    all_files = list(gcs_client.list_blobs(input_bucket, prefix=input_blob_prefix))
-    num_files = len(all_files)
-    per_shard = math.ceil(num_files / shard_count)
-    shard_files = all_files[shard_index * per_shard : (shard_index + 1) * per_shard]
-    for file in shard_files:
-        print(file)
+    input_bucket, input_dir = bucket_and_name(input)
+    output_bucket, output_dir = bucket_and_name(output)
+
+    all_blobs = list(gcs_client.list_blobs(input_bucket, prefix=input_dir))
+    parquet_blobs = [blob for blob in all_blobs if blob.name.endswith('.parquet')]
+    num_blobs = len(parquet_blobs)
+    per_shard = math.ceil(num_blobs / shard_count)
+    shard_blobs = parquet_blobs[shard_index * per_shard : (shard_index + 1) * per_shard]
+    for input_blob in shard_blobs:
+        print(f'Reading {input_blob.name}...')
+        bytes = input_blob.download_as_bytes()
+        buffer_reader = pa.BufferReader(bytes)
+        pq_file = pq.ParquetFile(buffer_reader)
+        table = pq_file.read()
+        # TODO(@lgruen): sanitize columns
+
+        output_name = blob.name.split('/')[:-1].replace('.parquet', '.arrow')
+        output_blob = gcs.Blob(f'{output_dir}/{output_name}', output_bucket)
+        print(f'Writing {output_blob.name}')
+        with output_blob.open('wb') as blob_writer:
+            ipc_options = pa.ipc.IpcWriteOptions(compression='zstd')
+            with pa.ipc.RecordBatchFileWriter(
+                blob_writer, table.schema, options=ipc_options
+            ) as ipc_writer:
+                ipc_writer.write_table(table)
 
 
 if __name__ == '__main__':

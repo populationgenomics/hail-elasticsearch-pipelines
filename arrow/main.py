@@ -26,12 +26,13 @@ def main(input):
 
     batch = hb.Batch(name='seqr table conversion', backend=service_backend)
 
-    tmp_path = output_path('annotated_ht.parquet', 'tmp')
+    parquet_path = output_path('annotated_ht.parquet', 'tmp')
+    arrow_path = output_path('annotated_ht.arrow')
 
     # TODO: fix
     # mt_to_parquet_job = dataproc.hail_dataproc_job(
     #    batch,
-    #    f'{MT_TO_PARQUET_PY} --input="{input}" --output="{tmp_path}"',
+    #    f'{MT_TO_PARQUET_PY} --input="{input}" --output="{parquet_path}"',
     #    max_age='4h',
     #    num_secondary_workers=10,
     #    packages=['click'],
@@ -56,7 +57,9 @@ def main(input):
             f'cat <<EOF > {PARQUET_TO_ARROW_PY}\n{parquet_to_arrow_src}\nEOF'
         )
         parquet_to_arrow_job.command(
-            f'python3 {PARQUET_TO_ARROW_PY} --input={tmp_path} '
+            f'python3 {PARQUET_TO_ARROW_PY} '
+            f'--input={parquet_path} '
+            f'--output={arrow_path} '
             f'--shard_index={shard_index} '
             f'--shard_count={PARQUET_TO_ARROW_SHARD_COUNT}'
         )
