@@ -52,6 +52,8 @@ def main(input):
         parquet_to_arrow_job.image(os.getenv('DRIVER_IMAGE'))
         parquet_to_arrow_job.depends_on(mt_to_parquet_job)
 
+        parquet_to_arrow_job.memory('5Gi')
+
         parquet_to_arrow_job.command(
             'gcloud -q auth activate-service-account --key-file=/gsa-key/key.json'
         )
