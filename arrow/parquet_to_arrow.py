@@ -22,7 +22,7 @@ def parquet_to_arrow(input, scatter_index, scatter_count):
     input_bucket = input_parts[2]
     input_blob_prefix = '/'.join(input_parts[3:])
 
-    all_files = gcs_client.list_blobs(input_bucket, prefix=input_blob_prefix)
+    all_files = list(gcs_client.list_blobs(input_bucket, prefix=input_blob_prefix))
     num_files = len(all_files)
     per_shard = math.ceil(num_files / scatter_count)
     shard_files = all_files[shard_index * per_shard : (shard_index + 1) * per_shard]
