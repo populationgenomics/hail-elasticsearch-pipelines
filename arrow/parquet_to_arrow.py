@@ -38,7 +38,7 @@ def parquet_to_arrow(input, output, shard_index, shard_count):
         pq_file = pq.ParquetFile(buffer_reader)
         table = pq_file.read()
 
-        output_name = blob.name.split('/')[:-1].replace('.parquet', '.arrow')
+        output_name = input_blob.name.split('/')[:-1].replace('.parquet', '.arrow')
         output_blob = gcs.Blob(f'{output_dir}/{output_name}', output_bucket)
         print(f'Writing {output_blob.name}')
         with output_blob.open('wb') as blob_writer:
