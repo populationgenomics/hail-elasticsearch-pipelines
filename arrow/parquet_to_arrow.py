@@ -45,7 +45,7 @@ def parquet_to_arrow(input, output, shard_index, shard_count):
         print('Converting to Arrow format...')
         output_buffer_stream = pa.BufferOutputStream()
         ipc_options = pa.ipc.IpcWriteOptions(
-            compression=pyarrow.Codec(COMPRESSION, COMPRESSION_LEVEL)
+            compression=pa.Codec(COMPRESSION, COMPRESSION_LEVEL)
         )
         with pa.ipc.RecordBatchFileWriter(
             output_buffer_stream, table.schema, options=ipc_options
