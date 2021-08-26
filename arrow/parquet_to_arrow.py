@@ -16,7 +16,7 @@ import pyarrow.parquet as pq
 @click.option(
     '--shard_count', help='Shard count for input files', type=int, required=True
 )
-def parquet_to_arrow(input, shard_index, shard_count):
+def parquet_to_arrow(input, output, shard_index, shard_count):
     gcs_client = gcs.Client()
 
     def bucket_and_name(gcs_path):
@@ -37,7 +37,6 @@ def parquet_to_arrow(input, shard_index, shard_count):
         buffer_reader = pa.BufferReader(bytes)
         pq_file = pq.ParquetFile(buffer_reader)
         table = pq_file.read()
-        # TODO(@lgruen): sanitize columns
 
         output_name = blob.name.split('/')[:-1].replace('.parquet', '.arrow')
         output_blob = gcs.Blob(f'{output_dir}/{output_name}', output_bucket)
