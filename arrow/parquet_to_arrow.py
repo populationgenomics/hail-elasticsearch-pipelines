@@ -23,10 +23,11 @@ def parquet_to_arrow(input, output, shard_index, shard_count):
         parts = gcs_path.split('/')
         return parts[2], '/'.join(parts[3:])
 
-    input_bucket, input_dir = bucket_and_name(input)
-    output_bucket, output_dir = bucket_and_name(output)
+    input_bucket_name, input_dir = bucket_and_name(input)
+    output_bucket_name, output_dir = bucket_and_name(output)
+    output_bucket = gcs_client.bucket(output_bucket_name)
 
-    all_blobs = list(gcs_client.list_blobs(input_bucket, prefix=input_dir))
+    all_blobs = list(gcs_client.list_blobs(input_bucket_name, prefix=input_dir))
     parquet_blobs = [blob for blob in all_blobs if blob.name.endswith('.parquet')]
     num_blobs = len(parquet_blobs)
     per_shard = math.ceil(num_blobs / shard_count)
@@ -48,7 +49,7 @@ def parquet_to_arrow(input, output, shard_index, shard_count):
         buffer = output_buffer_stream.getvalue()
 
         output_name = input_blob.name.split('/')[-1].replace('.parquet', '.arrow')
-        output_blob = gcs.Blob(f'{output_dir}/{output_name}', output_bucket)
+        output_blob = output_bucket.blob(f'{output_dir}/{output_name}')
         print(f'Writing {output_blob.name}...')
         output_blob.upload_from_string(buffer.to_pybytes())
 
