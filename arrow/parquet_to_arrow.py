@@ -7,6 +7,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 COMPRESSION = 'zstd'
+COMPRESSION_LEVEL = 22
 
 
 @click.command()
@@ -43,7 +44,9 @@ def parquet_to_arrow(input, output, shard_index, shard_count):
 
         print('Converting to Arrow format...')
         output_buffer_stream = pa.BufferOutputStream()
-        ipc_options = pa.ipc.IpcWriteOptions(compression=COMPRESSION)
+        ipc_options = pa.ipc.IpcWriteOptions(
+            compression=pyarrow.Codec(COMPRESSION, COMPRESSION_LEVEL)
+        )
         with pa.ipc.RecordBatchFileWriter(
             output_buffer_stream, table.schema, options=ipc_options
         ) as ipc_writer:
@@ -55,6 +58,7 @@ def parquet_to_arrow(input, output, shard_index, shard_count):
         output_blob = output_bucket.blob(f'{output_dir}/{output_name}')
         print(f'Writing {output_blob.name}...')
         output_blob.upload_from_string(buffer.to_pybytes())
+        print()
 
 
 if __name__ == '__main__':
