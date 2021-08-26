@@ -7,7 +7,7 @@ import os
 import hailtop.batch as hb
 from analysis_runner import dataproc, output_path
 
-PARQUET_TO_ARROW_SCATTER_COUNT = 10
+PARQUET_TO_ARROW_SHARD_COUNT = 10
 MT_TO_PARQUET_PY = 'mt_to_parquet.py'
 PARQUET_TO_ARROW_PY = 'parquet_to_arrow.py'
 
@@ -43,7 +43,7 @@ def main(input):
     mt_to_parquet_job.command('echo no-op')
 
     parquet_to_arrow_src = open(PARQUET_TO_ARROW_PY).read()
-    for scatter_index in range(PARQUET_TO_ARROW_SCATTER_COUNT):
+    for shard_index in range(PARQUET_TO_ARROW_SHARD_COUNT):
         parquet_to_arrow_job = batch.new_job()
 
         parquet_to_arrow_job.image(os.getenv('DRIVER_IMAGE'))
@@ -57,8 +57,8 @@ def main(input):
         )
         parquet_to_arrow_job.command(
             f'python3 {PARQUET_TO_ARROW_PY} --input={tmp_path} '
-            f'--scatter_index={scatter_index} '
-            f'--scatter_count={PARQUET_TO_ARROW_SCATTER_COUNT}'
+            f'--shard_index={shard_index} '
+            f'--shard_count={PARQUET_TO_ARROW_SHARD_COUNT}'
         )
 
     # Don't wait, which avoids resubmissions if this job gets preempted.

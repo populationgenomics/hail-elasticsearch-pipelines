@@ -10,12 +10,12 @@ import pyarrow.parquet as pq
 @click.command()
 @click.option('--input', help='Input path for Parquet partitions', required=True)
 @click.option(
-    '--scatter_index', help='Scatter index over partitions', type=int, required=True
+    '--shard_index', help='Shard index over partitions', type=int, required=True
 )
 @click.option(
-    '--scatter_count', help='Scatter count over partitions', type=int, required=True
+    '--shard_count', help='Shard count over partitions', type=int, required=True
 )
-def parquet_to_arrow(input, scatter_index, scatter_count):
+def parquet_to_arrow(input, shard_index, shard_count):
     gcs_client = gcs.Client()
 
     input_parts = input.split('/')
@@ -24,7 +24,7 @@ def parquet_to_arrow(input, scatter_index, scatter_count):
 
     all_files = list(gcs_client.list_blobs(input_bucket, prefix=input_blob_prefix))
     num_files = len(all_files)
-    per_shard = math.ceil(num_files / scatter_count)
+    per_shard = math.ceil(num_files / shard_count)
     shard_files = all_files[shard_index * per_shard : (shard_index + 1) * per_shard]
     for file in shard_files:
         print(file)
