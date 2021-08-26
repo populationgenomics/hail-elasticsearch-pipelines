@@ -32,7 +32,7 @@ def parquet_to_arrow(input, output, shard_index, shard_count):
 
     all_blobs = list(gcs_client.list_blobs(input_bucket_name, prefix=input_dir))
     parquet_blobs = sorted(
-        blob for blob in all_blobs if blob.name.endswith('.parquet'),
+        (blob for blob in all_blobs if blob.name.endswith('.parquet')),
         key=lambda blob: blob.name,
     )
     num_blobs = len(parquet_blobs)
