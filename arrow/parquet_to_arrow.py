@@ -21,7 +21,7 @@ def parquet_to_arrow(input, output, shard_index, shard_count):
 
     def bucket_and_name(gcs_path):
         parts = gcs_path.split('/')
-        return parts[2], '/'.join(input_parts[3:])
+        return parts[2], '/'.join(parts[3:])
 
     input_bucket, input_dir = bucket_and_name(input)
     output_bucket, output_dir = bucket_and_name(output)
