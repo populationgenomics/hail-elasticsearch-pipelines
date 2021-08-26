@@ -7,7 +7,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 COMPRESSION = 'zstd'
-COMPRESSION_LEVEL = 22
+COMPRESSION_LEVEL = 19
 
 
 @click.command()
