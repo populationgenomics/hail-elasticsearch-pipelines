@@ -6,6 +6,8 @@ import google.cloud.storage as gcs
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+COMPRESSION = 'zstd'
+
 
 @click.command()
 @click.option('--input', help='Input path for Parquet files', required=True)
@@ -41,14 +43,15 @@ def parquet_to_arrow(input, output, shard_index, shard_count):
 
         print('Converting to Arrow format...')
         output_buffer_stream = pa.BufferOutputStream()
-        ipc_options = pa.ipc.IpcWriteOptions(compression='zstd')
+        ipc_options = pa.ipc.IpcWriteOptions(compression=COMPRESSION)
         with pa.ipc.RecordBatchFileWriter(
             output_buffer_stream, table.schema, options=ipc_options
         ) as ipc_writer:
             ipc_writer.write_table(table)
         buffer = output_buffer_stream.getvalue()
 
-        output_name = input_blob.name.split('/')[-1].replace('.parquet', '.arrow')
+        base_name = input_blob.name.split('/')[-1].split('.')[0]
+        output_name = f'{base_name}.{COMPRESSION}.arrow'
         output_blob = output_bucket.blob(f'{output_dir}/{output_name}')
         print(f'Writing {output_blob.name}...')
         output_blob.upload_from_string(buffer.to_pybytes())
