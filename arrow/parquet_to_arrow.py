@@ -32,7 +32,7 @@ def parquet_to_arrow(input, output, shard_index, shard_count):
     all_blobs = list(gcs_client.list_blobs(input_bucket_name, prefix=input_dir))
     parquet_blobs = [blob for blob in all_blobs if blob.name.endswith('.parquet')]
     num_blobs = len(parquet_blobs)
-    per_shard = math.ceil(num_blobs / shard_count)
+    per_shard = (num_blobs + shard_count - 1) // shard_count
     shard_blobs = parquet_blobs[shard_index * per_shard : (shard_index + 1) * per_shard]
     for input_blob in shard_blobs:
         print(f'Reading {input_blob.name}...')

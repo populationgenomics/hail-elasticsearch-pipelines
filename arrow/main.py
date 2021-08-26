@@ -36,12 +36,14 @@ def main(input):
         num_secondary_workers=10,
         packages=['click'],
         init=['gs://cpg-reference/hail_dataproc/install_common.sh'],
-        job_name='convert to Parquet',
+        job_name='MT to Parquet',
     )
 
     parquet_to_arrow_src = open(PARQUET_TO_ARROW_PY).read()
     for shard_index in range(PARQUET_TO_ARROW_SHARD_COUNT):
-        parquet_to_arrow_job = batch.new_job()
+        parquet_to_arrow_job = batch.new_job(
+            f'Parquet to Arrow {shard_index + 1}/{PARQUET_TO_ARROW_SHARD_COUNT}'
+        )
 
         parquet_to_arrow_job.image(os.getenv('DRIVER_IMAGE'))
         parquet_to_arrow_job.depends_on(mt_to_parquet_job)
