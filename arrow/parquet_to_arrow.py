@@ -38,15 +38,19 @@ def parquet_to_arrow(input, output, shard_index, shard_count):
         pq_file = pq.ParquetFile(buffer_reader)
         table = pq_file.read()
 
+        print('Converting to Arrow format...')
+        output_buffer_stream = pa.BufferOutputStream()
+        ipc_options = pa.ipc.IpcWriteOptions(compression='zstd')
+        with pa.ipc.RecordBatchFileWriter(
+            output_buffer_stream, table.schema, options=ipc_options
+        ) as ipc_writer:
+            ipc_writer.write_table(table)
+        buffer = output_buffer_stream.getvalue()
+
         output_name = input_blob.name.split('/')[-1].replace('.parquet', '.arrow')
         output_blob = gcs.Blob(f'{output_dir}/{output_name}', output_bucket)
-        print(f'Writing {output_blob.name}')
-        with output_blob.open('wb') as blob_writer:
-            ipc_options = pa.ipc.IpcWriteOptions(compression='zstd')
-            with pa.ipc.RecordBatchFileWriter(
-                blob_writer, table.schema, options=ipc_options
-            ) as ipc_writer:
-                ipc_writer.write_table(table)
+        print(f'Writing {output_blob.name}...')
+        output_blob.upload_from_string(buffer)
 
 
 if __name__ == '__main__':
