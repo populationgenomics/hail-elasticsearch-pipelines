@@ -5,7 +5,7 @@
 import click
 import os
 import hailtop.batch as hb
-from analysis_runner import dataproc
+from analysis_runner import dataproc, output_path
 
 PARQUET_TO_ARROW_SCATTER_COUNT = 10
 MT_TO_PARQUET_PY = 'mt_to_parquet.py'
