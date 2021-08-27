@@ -125,7 +125,7 @@ def add_tiny():
     another with fastq
     """
     s1 = _add_fq_sample(
-        'NA12878-fastq-2',
+        'NA12878-fastq',
         [
             'gs://cpg-seqr-test/batches/NA12878-trio-tiny/NA12878_L001_R1.fq',
             'gs://cpg-seqr-test/batches/NA12878-trio-tiny/NA12878_L002_R1.fq',

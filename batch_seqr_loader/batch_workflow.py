@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from os.path import join, dirname, abspath, splitext, basename
 from typing import Optional, List, Tuple, Set, Dict
 from dataclasses import dataclass
@@ -66,13 +67,6 @@ aapi = AnalysisApi()
     help='Only read samples that belong to the project(s). Can be set multiple times.',
 )
 @click.option(
-    '--output-version',
-    'output_version',
-    type=str,
-    required=True,
-    help='Suffix the ES index with this version tag',
-)
-@click.option(
     '--output-projects',
     'output_projects',
     multiple=True,
@@ -84,6 +78,8 @@ aapi = AnalysisApi()
     '--start-from-stage',
     'start_from_stage',
     type=click.Choice(['cram', 'gvcf', 'joint_calling', 'annotate', 'load_to_es']),
+    help='Only pick results from the previous stages if they exist. '
+    'If not, skip samples',
 )
 @click.option(
     '--skip-sample',
@@ -91,6 +87,13 @@ aapi = AnalysisApi()
     'skip_samples',
     multiple=True,
     help='Don\'t process specified samples. Can be set multiple times.',
+)
+@click.option(
+    '--output-version',
+    'output_version',
+    type=str,
+    default='v0',
+    help='Suffix the outputs with this version tag. Useful for testing',
 )
 @click.option('--keep-scratch', 'keep_scratch', is_flag=True)
 @click.option(
@@ -130,10 +133,10 @@ def main(
     output_namespace: str,
     analysis_project: str,
     input_projects: List[str],
-    output_version: str,
     output_projects: Optional[List[str]],
     start_from_stage: str,
     skip_samples: List[str],
+    output_version: str,
     keep_scratch: bool,
     overwrite: bool,
     dry_run: bool,
@@ -157,8 +160,12 @@ def main(
         output_suffix = 'test-tmp'
         web_bucket_suffix = 'test-tmp'
 
-    tmp_bucket = f'gs://cpg-seqr-{tmp_bucket_suffix}/{analysis_project}'
-    web_bucket = f'gs://cpg-seqr-{web_bucket_suffix}/{analysis_project}'
+    tmp_bucket = (
+        f'gs://cpg-seqr-{tmp_bucket_suffix}/{analysis_project}/{output_version}'
+    )
+    web_bucket = (
+        f'gs://cpg-seqr-{web_bucket_suffix}/{analysis_project}/{output_version}'
+    )
 
     assert input_projects
     if output_projects:
@@ -389,7 +396,9 @@ def _add_jobs(
     use_as_vqsr: bool,
 ) -> Optional[hb.Batch]:
 
-    analysis_bucket = f'gs://cpg-seqr-{output_suffix}/{analysis_project}'
+    analysis_bucket = (
+        f'gs://cpg-seqr-{output_suffix}/{analysis_project}/{output_version}'
+    )
     # pylint: disable=unused-variable
     fingerprints_bucket = f'{analysis_bucket}/fingerprints'
 
@@ -418,7 +427,7 @@ def _add_jobs(
     good_samples = []
     hc_intervals_j = None
     for proj, samples in samples_by_project.items():
-        proj_bucket = f'gs://cpg-{proj}-{output_suffix}'
+        proj_bucket = f'gs://cpg-{proj}-{output_suffix}/{output_version}'
 
         for s in samples:
             logger.info(f'Project {proj}. Processing sample {s["id"]}')
@@ -592,11 +601,12 @@ def _add_jobs(
                     depends_on=[jc_job] if jc_job else [],
                 )
 
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
         dataproc.hail_dataproc_job(
             b,
             f'batch_seqr_loader/scripts/load_to_es.py '
             f'--mt-path {annotated_mt_path} '
-            f'--es-index {project}-{output_version} '
+            f'--es-index {project}-{output_version}-{timestamp} '
             f'--es-index-min-num-shards 1 '
             f'--genome-version GRCh38 '
             f'{"--prod" if prod else ""}',
