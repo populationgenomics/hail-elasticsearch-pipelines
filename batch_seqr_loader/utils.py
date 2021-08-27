@@ -5,7 +5,7 @@ Utility functions and constants for the seqr loader pipeline
 import hashlib
 import os
 from os.path import join
-from typing import Iterable, Tuple, Optional
+from typing import Iterable, Tuple, Optional, Dict
 import logging
 from google.cloud import storage
 import hailtop.batch as hb
@@ -186,3 +186,47 @@ python update.py
     """
     )
     return j
+
+
+def replace_paths_to_test(s: Dict) -> Optional[Dict]:
+    """
+    Replace paths of all files in -main namespace to -test namespsace,
+    and return None if files in -test are not found.
+    :param s:
+    :return:
+    """
+
+    def fix(fpath):
+        fpath = fpath.replace('-main-upload/', '-test-upload/')
+        if not file_exists(fpath):
+            return None
+        return fpath
+
+    try:
+        reads_type = s['meta']['reads_type']
+        if reads_type in ('bam', 'cram'):
+            fpath = s['meta']['reads'][0]['location']
+            fpath = fix(fpath)
+            if not fpath:
+                return None
+            s['meta']['reads'][0]['location'] = fpath
+
+            fpath = s['meta']['reads'][0]['secondaryFiles'][0]['location']
+            fpath = fix(fpath)
+            if not fpath:
+                return None
+            s['meta']['reads'][0]['secondaryFiles'][0]['location'] = fpath
+
+        elif reads_type == 'fastq':
+            for li in range(len(s['meta']['reads'])):
+                for rj in range(len(s['meta']['reads'][li])):
+                    fpath = s['meta']['reads'][li][rj]['location']
+                    fpath = fix(fpath)
+                    if not fpath:
+                        return None
+                    s['meta']['reads'][li][rj]['location'] = fpath
+
+        logger.info(f'Found test sample {s["id"]}')
+        return s
+    except Exception:  # pylint: disable=broad-except
+        return None

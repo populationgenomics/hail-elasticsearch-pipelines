@@ -420,7 +420,10 @@ def _add_jobs(
         for s in samples:
             if s['id'] in skip_samples:
                 logger.info(f'Skiping sample: {s["id"]}')
-            else:
+                continue
+            if output_suffix != 'main':
+                s = utils.replace_paths_to_test(s)
+            if s:
                 samples_by_project[proj].append(s)
 
     # after dropping samples with incorrect metadata, missing inputs, etc
