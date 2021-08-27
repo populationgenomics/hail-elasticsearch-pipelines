@@ -45,6 +45,10 @@ def parquet_to_arrow(input, output, shard_index, shard_count):
         pq_file = pq.ParquetFile(buffer_reader)
         table = pq_file.read()
 
+        table = table.rename_columns(
+            name.replace('.', '_') for name in table.column_names
+        )
+
         print('Converting to Arrow format...')
         output_buffer_stream = pa.BufferOutputStream()
         ipc_options = pa.ipc.IpcWriteOptions(
