@@ -41,6 +41,9 @@ logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
 logger.setLevel(logging.INFO)
 
 
+STAGES = ['input', 'cram', 'gvcf', 'joint_calling', 'annotate', 'load_to_es']
+
+
 sapi = SampleApi()
 aapi = AnalysisApi()
 
@@ -77,9 +80,15 @@ aapi = AnalysisApi()
 @click.option(
     '--start-from-stage',
     'start_from_stage',
-    type=click.Choice(['cram', 'gvcf', 'joint_calling', 'annotate', 'load_to_es']),
+    type=click.Choice(STAGES),
     help='Only pick results from the previous stages if they exist. '
-    'If not, skip samples',
+    'If not, skip such samples',
+)
+@click.option(
+    '--end-with-stage',
+    'end_with_stage',
+    type=click.Choice(STAGES),
+    help='Finish the pipeline after this stage',
 )
 @click.option(
     '--skip-sample',
@@ -135,6 +144,7 @@ def main(
     input_projects: List[str],
     output_projects: Optional[List[str]],
     start_from_stage: str,
+    end_with_stage: str,
     skip_samples: List[str],
     output_version: str,
     keep_scratch: bool,
@@ -212,6 +222,7 @@ def main(
         vep_block_size=vep_block_size,
         analysis_project=analysis_project,
         start_from_stage=start_from_stage,
+        end_with_stage=end_with_stage,
         skip_samples=skip_samples,
         use_gnarly=use_gnarly,
         use_as_vqsr=use_as_vqsr,
@@ -391,6 +402,7 @@ def _add_jobs(
     vep_block_size,
     analysis_project: str,
     start_from_stage: Optional[str],
+    end_with_stage: Optional[str],
     skip_samples: List[str],
     use_gnarly: bool,
     use_as_vqsr: bool,
@@ -425,6 +437,10 @@ def _add_jobs(
                 s = utils.replace_paths_to_test(s)
             if s:
                 samples_by_project[proj].append(s)
+
+    if end_with_stage == 'input':
+        logger.info(f'Latest stage is {end_with_stage}, stopping the pipeline here.')
+        return None
 
     # after dropping samples with incorrect metadata, missing inputs, etc
     good_samples = []
@@ -466,6 +482,12 @@ def _add_jobs(
                     analysis_project=analysis_project,
                 )
                 found_cram_path = expected_cram_path
+
+            if end_with_stage == 'cram':
+                logger.info(
+                    f'Latest stage is {end_with_stage}, stopping the pipeline here.'
+                )
+                continue
 
             expected_gvcf_path = f'{proj_bucket}/gvcf/{s["id"]}.g.vcf.gz'
             skip_gvcf_stage = start_from_stage is not None and start_from_stage not in [
@@ -510,6 +532,10 @@ def _add_jobs(
             if found_gvcf_path:
                 gvcf_by_sid[s['id']] = found_gvcf_path
             good_samples.append(s)
+
+    if end_with_stage == 'gvcf':
+        logger.info(f'Latest stage is {end_with_stage}, stopping the pipeline here.')
+        return None
 
     if not good_samples:
         logger.info('No samples left to joint-call')
@@ -557,6 +583,10 @@ def _add_jobs(
         )
         found_jc_path = expected_jc_path
 
+    if end_with_stage == 'joint_calling':
+        logger.info(f'Latest stage is {end_with_stage}, stopping the pipeline here.')
+        return None
+
     for project in output_projects:
         annotated_mt_path = f'{analysis_bucket}/{project}.mt'
 
@@ -603,6 +633,12 @@ def _add_jobs(
                     vep='GRCh38',
                     depends_on=[jc_job] if jc_job else [],
                 )
+
+        if end_with_stage == 'annotate':
+            logger.info(
+                f'Latest stage is {end_with_stage}, stopping the pipeline here.'
+            )
+            continue
 
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         dataproc.hail_dataproc_job(
@@ -770,7 +806,7 @@ def _make_realign_jobs(
         f'Parsing the "reads" metadata field and submitting the alignmentment'
     )
     j = b.new_job(job_name)
-    j.image(utils.BAZAM_IMAGE)
+    j.image(utils.ALIGNMENT_IMAGE)
     total_cpu = 32
 
     if alignment_input.bam_or_cram_path:
@@ -824,7 +860,7 @@ set -ex
 
 (while true; do df -h; pwd; du -sh $(dirname {j.output_cram.cram}); sleep 600; done) &
 
-bwa mem -K 100000000 {'-p' if use_bazam else ''} -t{bwa_cpu} -Y \\
+bwa-mem2 mem -K 100000000 {'-p' if use_bazam else ''} -t{bwa_cpu} -Y \\
     -R '{rg_line}' {reference.base} {r1_param} {r2_param} | \\
 bamsormadup inputformat=sam threads={bamsormadup_cpu} SO=coordinate \\
     M={j.duplicate_metrics} outputformat=sam \\
