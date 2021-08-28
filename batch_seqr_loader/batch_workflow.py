@@ -70,7 +70,7 @@ aapi = AnalysisApi()
     help='Only read samples that belong to the project(s). Can be set multiple times.',
 )
 @click.option(
-    '--output-projects',
+    '--output-project',
     'output_projects',
     multiple=True,
     help='Only create ES indicies for the project(s). Can be set multiple times. '
