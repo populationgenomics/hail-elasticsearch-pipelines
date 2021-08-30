@@ -21,5 +21,5 @@ samples = sapi.get_samples(
 
 for s in samples:
     print(s)
-    if s['external_id'] == 'NA12878-fastq':
-        sapi.update_sample(s['id'], sample_update_model=SampleUpdateModel(active=False))
+    # if s['external_id'] == 'NA12878-fastq':
+    #     sapi.update_sample(s['id'], sample_update_model=SampleUpdateModel(active=False))

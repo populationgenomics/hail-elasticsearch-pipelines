@@ -44,7 +44,7 @@ run_seqr_loader_test:
 	--output-version $(TEST_VERSION) \
 	--reuse \
 	--keep-scratch \
-	--end-with-stasge input
+	--end-with-stage input
 
 .PHONY: run_seqr_loader_prod
 run_seqr_loader_prod:
