@@ -9,7 +9,6 @@ Driver for loading data into SEQR for the CPG. See the README for more informati
 import json
 import logging
 import os
-import re
 import shutil
 import subprocess
 import tempfile
@@ -843,7 +842,7 @@ def _make_realign_jobs(
     j.declare_resource_group(
         output_cram={
             'cram': '{root}.cram',
-            'crai': '{root}.crai',
+            'crai': '{root}.cram.crai',
         }
     )
 
@@ -962,7 +961,7 @@ def _make_produce_gvcf_jobs(
                 cram=b.read_input_group(
                     **{
                         'cram': cram_path,
-                        'crai': re.sub('.cram$', '.crai', cram_path),
+                        'crai': cram_path + '.crai',
                     }
                 ),
                 interval=intervals_j.intervals[f'interval_{idx}'],
