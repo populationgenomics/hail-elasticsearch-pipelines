@@ -116,11 +116,11 @@ def get_refs(b: hb.Batch) -> Tuple:
         fai=REF_FASTA + '.fai',
         dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
         + '.dict',
-        sa=REF_FASTA + '.sa',
         amb=REF_FASTA + '.amb',
-        bwt=REF_FASTA + '.bwt',
         ann=REF_FASTA + '.ann',
         pac=REF_FASTA + '.pac',
+        o123=REF_FASTA + '.0123',
+        bwa2bit64=REF_FASTA + '.bwt.2bit.64',
     )
     noalt_regions = b.read_input(join(REF_BUCKET, 'noalt.bed'))
     return reference, bwa_reference, noalt_regions
