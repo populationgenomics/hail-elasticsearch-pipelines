@@ -382,7 +382,7 @@ def _process_existing_analysis(
     # proceeding with the standard pipeline (creating status=queued, submitting jobs)
     else:
         logger.info(
-            f'Expected output file {expected_output_fpath} doesn\'t exists, '
+            f'Expected output file {expected_output_fpath} does not exist, '
             f'so queueing analysis {label}'
         )
         return None
