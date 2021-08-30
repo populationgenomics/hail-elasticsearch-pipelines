@@ -43,8 +43,7 @@ run_seqr_loader_test:
 	--input-project acute-care \
 	--output-version $(TEST_VERSION) \
 	--reuse \
-	--keep-scratch \
-	--end-with-stage input
+	--keep-scratch
 
 .PHONY: run_seqr_loader_prod
 run_seqr_loader_prod:
