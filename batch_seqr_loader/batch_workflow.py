@@ -445,11 +445,11 @@ def _add_jobs(
     good_samples = []
     hc_intervals_j = None
     for proj, samples in samples_by_project.items():
-        proj_bucket = f'gs://cpg-{proj}-{output_suffix}/{output_version}'
+        proj_bucket = f'gs://cpg-{proj}-{output_suffix}'
 
         for s in samples:
             logger.info(f'Project {proj}. Processing sample {s["id"]}')
-            expected_cram_path = f'{proj_bucket}/cram/{s["id"]}.cram'
+            expected_cram_path = f'{proj_bucket}/cram/{output_version}/{s["id"]}.cram'
             skip_cram_stage = start_from_stage is not None and start_from_stage not in [
                 'cram'
             ]
@@ -488,7 +488,9 @@ def _add_jobs(
                 )
                 continue
 
-            expected_gvcf_path = f'{proj_bucket}/gvcf/{s["id"]}.g.vcf.gz'
+            expected_gvcf_path = (
+                f'{proj_bucket}/gvcf/{output_version}/{s["id"]}.g.vcf.gz'
+            )
             skip_gvcf_stage = start_from_stage is not None and start_from_stage not in [
                 'cram',
                 'gvcf',
@@ -874,7 +876,11 @@ df -h; pwd; du -sh $(dirname {j.output_cram.cram})
     b.write_output(j.output_cram, splitext(output_path)[0])
     b.write_output(
         j.duplicate_metrics,
-        join(dirname(output_path), f'{sample_name}-duplicate-metrics.csv'),
+        join(
+            dirname(output_path),
+            'duplicate-metrics',
+            f'{sample_name}-duplicate-metrics.csv',
+        ),
     )
 
     if analysis_project:
