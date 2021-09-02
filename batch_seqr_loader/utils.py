@@ -4,6 +4,7 @@ Utility functions and constants for the seqr loader pipeline
 
 import hashlib
 import os
+import subprocess
 from os.path import join
 from typing import Iterable, Tuple, Optional, Dict
 import logging
@@ -230,3 +231,41 @@ def replace_paths_to_test(s: Dict) -> Optional[Dict]:
         return s
     except Exception:  # pylint: disable=broad-except
         return None
+
+
+def gsutil_cp(
+    src_path: str,
+    dst_path: str,
+    disable_check_hashes: bool = False,
+    recursive: bool = False,
+    quiet: bool = False,
+):
+    """
+    Wrapper around `gsutil cp`
+
+    :param src_path: path to a file to copy from
+    :param dst_path: path to copy to
+    :param disable_check_hashes:
+        Uses the gsutil option `-o GSUtil:check_hashes=never` which is required to
+        get around the gsutil integrity checking error, as conda gsutil doesn't use
+        CRC32c:
+        > Downloading this composite object requires integrity checking with CRC32c,
+          but your crcmod installation isn't using the module's C extension, so the
+          hash computation will likely throttle download performance.
+
+          To download regardless of crcmod performance or to skip slow integrity
+          checks, see the "check_hashes" option in your boto config file.
+    :param recursive: to copy a directory
+    :param quiet: disable logging of commands and copied files
+    """
+    cmd = (
+        'gsutil '
+        + ('-q ' if quiet else '')
+        + ('-o GSUtil:check_hashes=never ' if disable_check_hashes else '')
+        + 'cp '
+        + ('-r ' if recursive else '')
+        + f'{src_path} {dst_path}'
+    )
+    if not quiet:
+        logger.info(cmd)
+    subprocess.run(cmd, check=False, shell=True)

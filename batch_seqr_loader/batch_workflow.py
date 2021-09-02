@@ -10,7 +10,6 @@ import json
 import logging
 import os
 import shutil
-import subprocess
 import tempfile
 import time
 from os.path import join, dirname, abspath, splitext, basename
@@ -612,11 +611,7 @@ def _add_jobs(
                     f.write('\t'.join(['s', 'seqr_id']) + '\n')
                     for s in good_samples:
                         f.write('\t'.join([s['id'], s['external_id']]) + '\n')
-                subprocess.run(
-                    f'gsutil cp {sample_map_local_fpath} {sample_map_bucket_path}',
-                    check=False,
-                    shell=True,
-                )
+                utils.gsutil_cp(sample_map_local_fpath, sample_map_bucket_path)
                 annotate_job = dataproc.hail_dataproc_job(
                     b,
                     f'batch_seqr_loader/scripts/make_annotated_mt.py '
@@ -1515,21 +1510,11 @@ def _samples_to_add_to_db(
     if utils.file_exists(join(genomicsdb_gcs_path, 'callset.json')):
         # Checking if samples exists in the DB already
         genomicsdb_metadata = join(local_tmp_dir, f'callset-{interval_idx}.json')
-        # The `-o GSUtil:check_hashes=never` flag is required to get around the gsutil
-        # integrity checking error, as conda gsutil doesn't use CRC32c:
-        # > Downloading this composite object requires integrity checking with CRC32c,
-        #   but your crcmod installation isn't using the module's C extension, so the
-        #   hash computation will likely throttle download performance.
-        #
-        #   To download regardless of crcmod performance or to skip slow integrity
-        #   checks, see the "check_hashes" option in your boto config file.
-        cmd = (
-            f'gsutil -o GSUtil:check_hashes=never cp '
-            f'{join(genomicsdb_gcs_path, "callset.json")} {genomicsdb_metadata}'
+        utils.gsutil_cp(
+            src_path=join(genomicsdb_gcs_path, 'callset.json'),
+            dst_path=genomicsdb_metadata,
+            disable_check_hashes=True,
         )
-        logger.info(cmd)
-        subprocess.run(cmd, check=False, shell=True)
-
         with open(genomicsdb_metadata) as f:
             db_metadata = json.load(f)
         sample_names_in_db = set(s['sample_name'] for s in db_metadata['callsets'])
@@ -1591,11 +1576,7 @@ def _samples_to_add_to_db(
     with open(sample_map_local_fpath, 'w') as f:
         for sid in sample_names_to_add:
             f.write('\t'.join([sid, gvcf_by_sid[sid]]) + '\n')
-    subprocess.run(
-        f'gsutil cp {sample_map_local_fpath} {sample_map_bucket_path}',
-        check=False,
-        shell=True,
-    )
+    utils.gsutil_cp(sample_map_local_fpath, sample_map_bucket_path)
 
     return (
         sample_names_to_add,
