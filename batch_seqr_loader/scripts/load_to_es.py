@@ -14,7 +14,7 @@ import hail as hl
 from lib.model.seqr_mt_schema import SeqrVariantsAndGenotypesSchema
 from hail_scripts.v02.utils.elasticsearch_client import ElasticsearchClient
 
-logger = logging.getLogger('load_to_es')
+logger = logging.getLogger(__file__)
 logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
 logger.setLevel(logging.INFO)
 
@@ -64,7 +64,7 @@ def main(
     es_index: str,
     es_index_min_num_shards: int,
     genome_version: str,
-    prod: bool,
+    prod: bool,  # pylint: disable=unused-argument
 ):  # pylint: disable=missing-function-docstring
     hl.init(default_reference=genome_version)
 
@@ -77,7 +77,7 @@ def main(
             )
         es_host = 'elasticsearch.es.australia-southeast1.gcp.elastic-cloud.com'
         es_port = '9243'
-        es_username = 'seqr' if prod else 'seqr-test'
+        es_username = 'seqr'
         es_password = _read_es_password()
 
     es = ElasticsearchClient(

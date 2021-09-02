@@ -1,4 +1,4 @@
-TEST_VERSION := v2-1
+TEST_VERSION := v2-2
 PROD_VERSION := v2-0
 
 .PHONY: package
@@ -40,7 +40,7 @@ run_seqr_loader_test:
 	batch_seqr_loader/batch_workflow.py \
 	--namespace test \
 	--analysis-project seqr-test \
-	--input-project seqr-test \
+	--input-project acute-care \
 	--output-version $(TEST_VERSION) \
 	--reuse \
 	--keep-scratch
@@ -57,5 +57,23 @@ run_seqr_loader_prod:
 	--analysis-project seqr \
 	--input-project acute-care \
 	--output-version $(PROD_VERSION) \
+    -S CPG11783 \
+	--reuse \
+	--keep-scratch
+
+.PHONY: run_seqr_loader_prod_test
+run_seqr_loader_prod_test:
+	analysis-runner \
+	--dataset seqr \
+	--access-level test \
+	--output-dir   "seqr_loader" \
+	--description  "seqr loader $(PROD_VERSION)" \
+	batch_seqr_loader/batch_workflow.py \
+	--namespace test \
+	--analysis-project seqr \
+	--input-project acute-care \
+	--output-version $(PROD_VERSION) \
+	-S CPG11783 \
+    --start-from-stage joint_calling \
 	--reuse \
 	--keep-scratch

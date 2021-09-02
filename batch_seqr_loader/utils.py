@@ -1,10 +1,12 @@
 """
-Utility functions for the seqr loader
+Utility functions and constants for the seqr loader pipeline
 """
+
 import hashlib
 import os
+import subprocess
 from os.path import join
-from typing import Iterable, Tuple, Optional
+from typing import Iterable, Tuple, Optional, Dict
 import logging
 from google.cloud import storage
 import hailtop.batch as hb
@@ -17,10 +19,10 @@ logger.setLevel(logging.INFO)
 
 
 AR_REPO = 'australia-southeast1-docker.pkg.dev/cpg-common/images'
-GATK_VERSION = '4.2.0.0'
+GATK_VERSION = '4.2.1.0'
 GATK_IMAGE = f'{AR_REPO}/gatk:{GATK_VERSION}'
 PICARD_IMAGE = f'{AR_REPO}/picard-cloud:2.23.8'
-BAZAM_IMAGE = f'{AR_REPO}/bazam:v2'
+ALIGNMENT_IMAGE = f'{AR_REPO}/alignment:v4'
 SOMALIER_IMAGE = f'{AR_REPO}/somalier:latest'
 PEDDY_IMAGE = f'{AR_REPO}/peddy:0.4.8--pyh5e36f6f_0'
 GNARLY_IMAGE = f'{AR_REPO}/gnarly_genotyper:hail_ukbb_300K'
@@ -28,8 +30,8 @@ BCFTOOLS_IMAGE = f'{AR_REPO}/bcftools:1.10.2--h4f4756c_2'
 SM_IMAGE = f'{AR_REPO}/sm-api:2.0.5'
 
 NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS = 50
+NUMBER_OF_GENOMICS_DB_INTERVALS = 50
 NUMBER_OF_DATAPROC_WORKERS = 50
-NUMBER_OF_GENOMICS_DB_INTERVALS = 10
 
 REF_BUCKET = 'gs://cpg-reference/hg38/v1'
 REF_FASTA = join(REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
@@ -87,7 +89,7 @@ def can_reuse(fpath: str, overwrite: bool) -> bool:
         return True
 
 
-def hash_sample_names(sample_names: Iterable[str]) -> str:
+def hash_sample_ids(sample_names: Iterable[str]) -> str:
     """
     Return a unique hash string from a set of strings
     :param sample_names: set of strings
@@ -95,7 +97,7 @@ def hash_sample_names(sample_names: Iterable[str]) -> str:
     """
     for sn in sample_names:
         assert ' ' not in sn, sn
-    return hashlib.sha224(' '.join(sorted(sample_names)).encode()).hexdigest()
+    return hashlib.sha256(' '.join(sorted(sample_names)).encode()).hexdigest()[:32]
 
 
 def get_refs(b: hb.Batch) -> Tuple:
@@ -115,68 +117,40 @@ def get_refs(b: hb.Batch) -> Tuple:
         fai=REF_FASTA + '.fai',
         dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
         + '.dict',
-        sa=REF_FASTA + '.sa',
         amb=REF_FASTA + '.amb',
-        bwt=REF_FASTA + '.bwt',
         ann=REF_FASTA + '.ann',
         pac=REF_FASTA + '.pac',
+        o123=REF_FASTA + '.0123',
+        bwa2bit64=REF_FASTA + '.bwt.2bit.64',
     )
     noalt_regions = b.read_input(join(REF_BUCKET, 'noalt.bed'))
     return reference, bwa_reference, noalt_regions
 
 
-def make_sm_in_progress_job(
-    b: Batch,
-    analysis_type: str,
-    analysis_project: str,
-    analysis_id: str,
-    sample_name: Optional[str] = None,
-    project_name: Optional[str] = None,
-) -> Job:
+def make_sm_in_progress_job(*args, **kwargs) -> Job:
     """
     Creates a job that updates the sample metadata server entry analysis status
-    to in-progress
+    to "in-progress"
     """
-    return make_sm_update_status_job(
-        b,
-        analysis_type,
-        'in-progress',
-        analysis_project,
-        analysis_id,
-        sample_name=sample_name,
-        project_name=project_name,
-    )
+    kwargs['status'] = 'in-progress'
+    return make_sm_update_status_job(*args, **kwargs)
 
 
-def make_sm_completed_job(
-    b: Batch,
-    analysis_type: str,
-    sm_db_name: str,
-    analysis_id: str,
-    sample_name: Optional[str] = None,
-    project_name: Optional[str] = None,
-) -> Job:
+def make_sm_completed_job(*args, **kwargs) -> Job:
     """
     Creates a job that updates the sample metadata server entry analysis status
-    to completed
+    to "completed"
     """
-    return make_sm_update_status_job(
-        b,
-        analysis_type,
-        'completed',
-        sm_db_name,
-        analysis_id,
-        sample_name=sample_name,
-        project_name=project_name,
-    )
+    kwargs['status'] = 'completed'
+    return make_sm_update_status_job(*args, **kwargs)
 
 
 def make_sm_update_status_job(
     b: Batch,
-    analysis_type: str,
-    status: str,
     project: str,
     analysis_id: str,
+    analysis_type: str,
+    status: str,
     sample_name: Optional[str] = None,
     project_name: Optional[str] = None,
 ) -> Job:
@@ -213,3 +187,85 @@ python update.py
     """
     )
     return j
+
+
+def replace_paths_to_test(s: Dict) -> Optional[Dict]:
+    """
+    Replace paths of all files in -main namespace to -test namespsace,
+    and return None if files in -test are not found.
+    :param s:
+    :return:
+    """
+
+    def fix(fpath):
+        fpath = fpath.replace('-main-upload/', '-test-upload/')
+        if not file_exists(fpath):
+            return None
+        return fpath
+
+    try:
+        reads_type = s['meta']['reads_type']
+        if reads_type in ('bam', 'cram'):
+            fpath = s['meta']['reads'][0]['location']
+            fpath = fix(fpath)
+            if not fpath:
+                return None
+            s['meta']['reads'][0]['location'] = fpath
+
+            fpath = s['meta']['reads'][0]['secondaryFiles'][0]['location']
+            fpath = fix(fpath)
+            if not fpath:
+                return None
+            s['meta']['reads'][0]['secondaryFiles'][0]['location'] = fpath
+
+        elif reads_type == 'fastq':
+            for li in range(len(s['meta']['reads'])):
+                for rj in range(len(s['meta']['reads'][li])):
+                    fpath = s['meta']['reads'][li][rj]['location']
+                    fpath = fix(fpath)
+                    if not fpath:
+                        return None
+                    s['meta']['reads'][li][rj]['location'] = fpath
+
+        logger.info(f'Found test sample {s["id"]}')
+        return s
+    except Exception:  # pylint: disable=broad-except
+        return None
+
+
+def gsutil_cp(
+    src_path: str,
+    dst_path: str,
+    disable_check_hashes: bool = False,
+    recursive: bool = False,
+    quiet: bool = False,
+):
+    """
+    Wrapper around `gsutil cp`
+
+    :param src_path: path to a file to copy from
+    :param dst_path: path to copy to
+    :param disable_check_hashes:
+        Uses the gsutil option `-o GSUtil:check_hashes=never` which is required to
+        get around the gsutil integrity checking error, as conda gsutil doesn't use
+        CRC32c:
+        > Downloading this composite object requires integrity checking with CRC32c,
+          but your crcmod installation isn't using the module's C extension, so the
+          hash computation will likely throttle download performance.
+
+          To download regardless of crcmod performance or to skip slow integrity
+          checks, see the "check_hashes" option in your boto config file.
+    :param recursive: to copy a directory
+    :param quiet: disable logging of commands and copied files
+    """
+    cmd = (
+        'gsutil '
+        + ('-q ' if quiet else '')
+        + ('-o GSUtil:check_hashes=never ' if disable_check_hashes else '')
+        + 'cp '
+        + ('-r ' if recursive else '')
+        + f'{src_path} {dst_path}'
+    )
+    if not quiet:
+        logger.info(cmd)
+    subprocess.run(cmd, check=False, shell=True)

@@ -14,7 +14,7 @@ from sample_metadata.models.new_sample import NewSample
 from sample_metadata.models.analysis_model import AnalysisModel
 
 
-PROJ = os.environ.get('SM_DEV_DB_PROJECT', 'vladdev')
+PROJ = 'seqr-test'
 
 
 def main():
@@ -58,7 +58,10 @@ def list_samples():
             'active': True,
         }
     )
-    print(samples)
+    for s in samples:
+        print(s['id'])
+        print('   ', s)
+        print()
 
 
 def get_incomplete_analysis():

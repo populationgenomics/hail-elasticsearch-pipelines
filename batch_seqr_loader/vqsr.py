@@ -31,6 +31,15 @@ SNP_RECALIBRATION_TRANCHE_VALUES = [
 ]
 SNP_HARD_FILTER_LEVEL = 99.7
 SNP_RECALIBRATION_ANNOTATION_VALUES = [
+    'QD',
+    'MQRankSum',
+    'ReadPosRankSum',
+    'FS',
+    'MQ',
+    'SOR',
+    'DP',
+]
+SNP_RECALIBRATION_ANNOTATION_VALUES_AS = [
     'AS_QD',
     'AS_MQRankSum',
     'AS_ReadPosRankSum',
@@ -56,6 +65,14 @@ INDEL_RECALIBRATION_TRANCHE_VALUES = [
 ]
 INDEL_HARD_FILTER_LEVEL = 99.7
 INDEL_RECALIBRATION_ANNOTATION_VALUES = [
+    'FS',
+    'ReadPosRankSum',
+    'MQRankSum',
+    'QD',
+    'SOR',
+    'DP',
+]
+INDEL_RECALIBRATION_ANNOTATION_VALUES_AS = [
     'AS_FS',
     'AS_SOR',
     'AS_ReadPosRankSum',
@@ -76,6 +93,7 @@ def make_vqsr_jobs(
     intervals: Dict,
     scatter_count: int,
     output_vcf_path: str,
+    use_as_annotations: bool,
 ) -> Job:
     """
     Add jobs that perform the allele-specific VQSR variant QC
@@ -174,6 +192,7 @@ def make_vqsr_jobs(
         axiom_poly_resource_vcf=axiom_poly_resource_vcf,
         dbsnp_resource_vcf=dbsnp_resource_vcf,
         disk_size=small_disk,
+        use_as_annotations=use_as_annotations,
         work_bucket=web_bucket,
     )
     indels_recalibration = indels_variant_recalibrator_job.recalibration
@@ -195,6 +214,7 @@ def make_vqsr_jobs(
             one_thousand_genomes_resource_vcf=one_thousand_genomes_resource_vcf,
             dbsnp_resource_vcf=dbsnp_resource_vcf,
             disk_size=small_disk,
+            use_as_annotations=use_as_annotations,
             web_bucket=web_bucket,
             work_bucket=work_bucket,
             is_small_callset=is_small_callset,
@@ -213,6 +233,7 @@ def make_vqsr_jobs(
                 one_thousand_genomes_resource_vcf=one_thousand_genomes_resource_vcf,
                 dbsnp_resource_vcf=dbsnp_resource_vcf,
                 disk_size=small_disk,
+                use_as_annotations=use_as_annotations,
                 max_gaussians=snp_max_gaussians,
             )
             for idx in range(scatter_count)
@@ -234,7 +255,8 @@ def make_vqsr_jobs(
                 indels_tranches=indels_tranches,
                 snps_recalibration=snps_recalibrations[idx],
                 snps_tranches=snps_gathered_tranches,
-                disk_size=medium_disk,
+                disk_size=huge_disk,
+                use_as_annotations=use_as_annotations,
                 snp_filter_level=SNP_HARD_FILTER_LEVEL,
                 indel_filter_level=INDEL_HARD_FILTER_LEVEL,
             ).recalibrated_vcf
@@ -256,6 +278,7 @@ def make_vqsr_jobs(
             one_thousand_genomes_resource_vcf=one_thousand_genomes_resource_vcf,
             dbsnp_resource_vcf=dbsnp_resource_vcf,
             disk_size=small_disk,
+            use_as_annotations=use_as_annotations,
             max_gaussians=snp_max_gaussians,
             web_bucket=web_bucket,
             work_bucket=work_bucket,
@@ -270,7 +293,8 @@ def make_vqsr_jobs(
             indels_tranches=indels_tranches,
             snps_recalibration=snps_recalibration,
             snps_tranches=snps_tranches,
-            disk_size=medium_disk,
+            disk_size=huge_disk,
+            use_as_annotations=use_as_annotations,
             indel_filter_level=SNP_HARD_FILTER_LEVEL,
             snp_filter_level=INDEL_HARD_FILTER_LEVEL,
         )
@@ -407,6 +431,7 @@ def add_indels_variant_recalibrator_job(
     axiom_poly_resource_vcf: hb.ResourceGroup,
     dbsnp_resource_vcf: hb.ResourceGroup,
     disk_size: int,
+    use_as_annotations: bool,
     work_bucket: str = None,
     max_gaussians: int = 4,
 ) -> Job:
@@ -424,9 +449,10 @@ def add_indels_variant_recalibrator_job(
     """
     j = b.new_job('VQSR: IndelsVariantRecalibrator')
     j.image(utils.GATK_IMAGE)
-    mem_gb = 32
-    j.memory(f'{mem_gb}G')
-    j.cpu(2)
+    j.memory('highmem')
+    ncpu = 4  # ~ 8G/core ~ 32G
+    j.cpu(ncpu)
+    java_mem = ncpu * 8 - 4
     j.storage(f'{disk_size}G')
 
     j.declare_resource_group(recalibration={'index': '{root}.idx', 'base': '{root}'})
@@ -434,11 +460,20 @@ def add_indels_variant_recalibrator_job(
     tranche_cmdl = ' '.join(
         [f'-tranche {v}' for v in INDEL_RECALIBRATION_TRANCHE_VALUES]
     )
-    an_cmdl = ' '.join([f'-an {v}' for v in INDEL_RECALIBRATION_ANNOTATION_VALUES])
+    an_cmdl = ' '.join(
+        [
+            f'-an {v}'
+            for v in (
+                INDEL_RECALIBRATION_ANNOTATION_VALUES_AS
+                if use_as_annotations
+                else INDEL_RECALIBRATION_ANNOTATION_VALUES
+            )
+        ]
+    )
     j.command(
         f"""set -euo pipefail
 
-    gatk --java-options -Xms{mem_gb - 1}g \\
+    gatk --java-options -Xms{java_mem}g \\
       VariantRecalibrator \\
       -V {sites_only_variant_filtered_vcf['vcf.gz']} \\
       -O {j.recalibration} \\
@@ -447,7 +482,7 @@ def add_indels_variant_recalibrator_job(
       {tranche_cmdl} \\
       {an_cmdl} \\
       -mode INDEL \\
-      --use-allele-specific-annotations \\
+      {"--use-allele-specific-annotations " if use_as_annotations else ""} \\
       --max-gaussians {max_gaussians} \\
       -resource:mills,known=false,training=true,truth=true,prior=12 {mills_resource_vcf.base} \\
       -resource:axiomPoly,known=false,training=true,truth=false,prior=10 {axiom_poly_resource_vcf.base} \\
@@ -473,6 +508,7 @@ def add_snps_variant_recalibrator_create_model_step(
     one_thousand_genomes_resource_vcf: hb.ResourceGroup,
     dbsnp_resource_vcf: hb.ResourceGroup,
     disk_size: int,
+    use_as_annotations: bool,
     web_bucket: str = None,
     work_bucket: str = None,
     is_small_callset: bool = False,
@@ -502,19 +538,32 @@ def add_snps_variant_recalibrator_create_model_step(
     """
     j = b.new_job('VQSR: SNPsVariantRecalibratorCreateModel')
     j.image(utils.GATK_IMAGE)
-    mem_gb = 64 if not is_small_callset else 128
-    j.memory(f'{mem_gb}G')
-    j.cpu(2)
+    j.memory('highmem')
+    if is_small_callset:
+        ncpu = 8  # ~ 8G/core ~ 64G
+    else:
+        ncpu = 16  # ~ 8G/core ~ 128G
+    j.cpu(ncpu)
+    java_mem = ncpu * 8 - 10
     j.storage(f'{disk_size}G')
 
     downsample_factor = 75 if is_huge_callset else 10
 
     tranche_cmdl = ' '.join([f'-tranche {v}' for v in SNP_RECALIBRATION_TRANCHE_VALUES])
-    an_cmdl = ' '.join([f'-an {v}' for v in SNP_RECALIBRATION_ANNOTATION_VALUES])
+    an_cmdl = ' '.join(
+        [
+            f'-an {v}'
+            for v in (
+                SNP_RECALIBRATION_ANNOTATION_VALUES_AS
+                if use_as_annotations
+                else SNP_RECALIBRATION_ANNOTATION_VALUES
+            )
+        ]
+    )
     j.command(
         f"""set -euo pipefail
 
-    gatk --java-options -Xms{mem_gb - 2}g \\
+    gatk --java-options -Xms{java_mem}g \\
       VariantRecalibrator \\
       -V {sites_only_variant_filtered_vcf['vcf.gz']} \\
       -O {j.recalibration} \\
@@ -523,7 +572,7 @@ def add_snps_variant_recalibrator_create_model_step(
       {tranche_cmdl} \\
       {an_cmdl} \\
       -mode SNP \\
-      --use-allele-specific-annotations \\
+      {"--use-allele-specific-annotations " if use_as_annotations else ""} \\
       --sample-every-Nth-variant {downsample_factor} \\
       --output-model {j.model_file} \\
       --max-gaussians {max_gaussians} \\
@@ -565,6 +614,7 @@ def add_snps_variant_recalibrator_scattered_step(
     one_thousand_genomes_resource_vcf: hb.ResourceGroup,
     dbsnp_resource_vcf: hb.ResourceGroup,
     disk_size: int,
+    use_as_annotations: bool,
     interval: Optional[hb.ResourceGroup] = None,
     max_gaussians: int = 4,
 ) -> Job:
@@ -599,7 +649,16 @@ def add_snps_variant_recalibrator_scattered_step(
     j.declare_resource_group(recalibration={'index': '{root}.idx', 'base': '{root}'})
 
     tranche_cmdl = ' '.join([f'-tranche {v}' for v in SNP_RECALIBRATION_TRANCHE_VALUES])
-    an_cmdl = ' '.join([f'-an {v}' for v in SNP_RECALIBRATION_ANNOTATION_VALUES])
+    an_cmdl = ' '.join(
+        [
+            f'-an {v}'
+            for v in (
+                SNP_RECALIBRATION_ANNOTATION_VALUES_AS
+                if use_as_annotations
+                else SNP_RECALIBRATION_ANNOTATION_VALUES
+            )
+        ]
+    )
     j.command(
         f"""set -euo pipefail
 
@@ -615,7 +674,7 @@ def add_snps_variant_recalibrator_scattered_step(
       {an_cmdl} \\
       -mode SNP \\
       {f'-L {interval} ' if interval else ''} \\
-      --use-allele-specific-annotations \\
+      {"--use-allele-specific-annotations " if use_as_annotations else ""} \\
       --input-model {model_file} --output-tranches-for-scatter \\
       --max-gaussians {max_gaussians} \\
       -resource:hapmap,known=false,training=true,truth=true,prior=15 {hapmap_resource_vcf.base} \\
@@ -636,6 +695,7 @@ def add_snps_variant_recalibrator_step(
     web_bucket: str,
     work_bucket: str,
     disk_size: int,
+    use_as_annotations: bool,
     max_gaussians: int = 4,
 ) -> Job:
     """
@@ -644,19 +704,29 @@ def add_snps_variant_recalibrator_step(
     j = b.new_job('VQSR: SNPsVariantRecalibrator')
 
     j.image(utils.GATK_IMAGE)
-    mem_gb = 64  # ~ twice the sum of all input resources and input VCF sizes
-    j.memory(f'{mem_gb}G')
-    j.cpu(2)
+    j.memory('highmem')
+    ncpu = 8  # ~ 8G/core ~ 64G
+    j.cpu(ncpu)
+    java_mem = ncpu * 8 - 8
     j.storage(f'{disk_size}G')
 
     j.declare_resource_group(recalibration={'index': '{root}.idx', 'base': '{root}'})
 
     tranche_cmdl = ' '.join([f'-tranche {v}' for v in SNP_RECALIBRATION_TRANCHE_VALUES])
-    an_cmdl = ' '.join([f'-an {v}' for v in SNP_RECALIBRATION_ANNOTATION_VALUES])
+    an_cmdl = ' '.join(
+        [
+            f'-an {v}'
+            for v in (
+                SNP_RECALIBRATION_ANNOTATION_VALUES_AS
+                if use_as_annotations
+                else SNP_RECALIBRATION_ANNOTATION_VALUES
+            )
+        ]
+    )
     j.command(
         f"""set -euo pipefail
 
-    gatk --java-options -Xms{mem_gb - 1}g \\
+    gatk --java-options -Xms{java_mem}g \\
       VariantRecalibrator \\
       -V {sites_only_variant_filtered_vcf['vcf.gz']} \\
       -O {j.recalibration} \\
@@ -665,7 +735,7 @@ def add_snps_variant_recalibrator_step(
       {tranche_cmdl} \\
       {an_cmdl} \\
       -mode SNP \\
-      --use-allele-specific-annotations \\
+      {"--use-allele-specific-annotations " if use_as_annotations else ""} \\
       --max-gaussians {max_gaussians} \\
       -resource:hapmap,known=false,training=true,truth=true,prior=15 {hapmap_resource_vcf.base} \\
       -resource:omni,known=false,training=true,truth=true,prior=12 {omni_resource_vcf.base} \\
@@ -742,6 +812,7 @@ def add_apply_recalibration_step(
     snps_recalibration: hb.ResourceGroup,
     snps_tranches: hb.ResourceFile,
     disk_size: int,
+    use_as_annotations: bool,
     indel_filter_level: float,
     snp_filter_level: float,
     interval: Optional[hb.ResourceGroup] = None,
@@ -777,6 +848,8 @@ def add_apply_recalibration_step(
     j.command(
         f"""set -euo pipefail
 
+    df -h; pwd; du -sh $(dirname {j.recalibrated_vcf['vcf.gz']})
+
     gatk --java-options -Xms5g \\
       ApplyVQSR \\
       -O tmp.indel.recalibrated.vcf \\
@@ -785,9 +858,15 @@ def add_apply_recalibration_step(
       --tranches-file {indels_tranches} \\
       --truth-sensitivity-filter-level {indel_filter_level} \\
       --create-output-variant-index true \\
-      -mode INDEL \\
       {f'-L {interval} ' if interval else ''} \\
-      --use-allele-specific-annotations
+      {'--use-allele-specific-annotations ' if use_as_annotations else ''} \\
+      -mode INDEL
+      
+    df -h; pwd; du -sh $(dirname {j.recalibrated_vcf['vcf.gz']})
+
+    rm {input_vcf['vcf.gz']} {indels_recalibration} {indels_tranches}
+
+    df -h; pwd; du -sh $(dirname {j.recalibrated_vcf['vcf.gz']})
 
     gatk --java-options -Xms5g \\
       ApplyVQSR \\
@@ -797,9 +876,12 @@ def add_apply_recalibration_step(
       --tranches-file {snps_tranches} \\
       --truth-sensitivity-filter-level {snp_filter_level} \\
       --create-output-variant-index true \\
-      -mode SNP \\
       {f'-L {interval} ' if interval else ''} \\
-      --use-allele-specific-annotations"""
+      {'--use-allele-specific-annotations ' if use_as_annotations else ''} \\
+      -mode SNP
+
+    df -h; pwd; du -sh $(dirname {j.recalibrated_vcf['vcf.gz']})
+      """
     )
 
     if output_vcf_path:
@@ -907,15 +989,19 @@ def _add_final_filter_job(
     j = b.new_job('VQSR: final filter')
     j.image(utils.BCFTOOLS_IMAGE)
     j.memory(f'8G')
-    j.storage(f'10G')
+    j.storage(f'100G')
     j.declare_resource_group(
         output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
     )
 
     j.command(
         f"""
+    df -h; pwd; free -m
+
     bcftools view -f.,PASS {input_vcf['vcf.gz']} -Oz -o {j.output_vcf['vcf.gz']} && \\
     tabix {j.output_vcf['vcf.gz']}
+
+    df -h; pwd; free -m
     """
     )
     if output_vcf_path:

@@ -7,7 +7,6 @@ and returns a non-zero code if either sex or pedigree mismatches the data in a p
 
 import contextlib
 import logging
-import subprocess
 import sys
 import tempfile
 from os.path import join, basename
@@ -16,6 +15,8 @@ from typing import Dict, List
 import pandas as pd
 import click
 from peddy import Ped
+
+import utils
 
 logger = logging.getLogger('check-pedigree')
 logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
@@ -47,11 +48,7 @@ def main(
 ):  # pylint: disable=missing-function-docstring
     if somalier_samples_fpath.startswith('gs://'):
         local_tmp_dir = tempfile.mkdtemp()
-        subprocess.run(
-            f'gsutil cp {somalier_samples_fpath} {somalier_pairs_fpath} {local_tmp_dir}/',
-            check=False,
-            shell=True,
-        )
+        utils.gsutil_cp(somalier_samples_fpath, somalier_pairs_fpath)
         local_somalier_pairs_fpath = join(local_tmp_dir, basename(somalier_pairs_fpath))
         local_somalier_samples_fpath = join(
             local_tmp_dir, basename(somalier_samples_fpath)
