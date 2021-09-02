@@ -270,7 +270,7 @@ def _get_latest_complete_analysis(
     """
     latest_by_type_and_sids = dict()
     for a_type in ['cram', 'gvcf', 'joint-calling']:
-        for a_data in aapi.get_latest_complete_analyses_by_type(
+        for a_data in aapi.get_latest_complete_analysis_for_type(
             project=analysis_project,
             analysis_type=a_type,
         ):
@@ -545,7 +545,7 @@ def _add_jobs(
     # Is there a complete joint-calling analysis for the requested set of samples?
     sample_ids = [s['id'] for s in good_samples]
     samples_hash = utils.hash_sample_ids(sample_ids)
-    expected_jc_path = f'{analysis_bucket}/joint_calling/{samples_hash}.vcf.gz'
+    expected_jc_path = f'{tmp_bucket}/joint_calling/{samples_hash}.vcf.gz'
     skip_jc_stage = start_from_stage is not None and start_from_stage not in [
         'cram',
         'gvcf',
@@ -570,7 +570,7 @@ def _add_jobs(
             b=b,
             output_path=expected_jc_path,
             samples=good_samples,
-            analysis_bucket=analysis_bucket,
+            genomicsdb_bucket=f'{analysis_bucket}/genomicsdbs',
             tmp_bucket=tmp_bucket,
             gvcf_by_sid=gvcf_by_sid,
             reference=reference,
@@ -589,7 +589,7 @@ def _add_jobs(
         return None
 
     for project in output_projects:
-        annotated_mt_path = f'{analysis_bucket}/{project}.mt'
+        annotated_mt_path = f'{analysis_bucket}/mt/{project}.mt'
 
         skip_anno_stage = start_from_stage is not None and start_from_stage not in [
             'cram',
@@ -1168,7 +1168,7 @@ def _make_joint_genotype_jobs(
     b: hb.Batch,
     output_path: str,
     samples: List,
-    analysis_bucket: str,
+    genomicsdb_bucket: str,
     tmp_bucket: str,
     gvcf_by_sid: Dict[str, str],
     reference: hb.ResourceGroup,
@@ -1201,7 +1201,6 @@ def _make_joint_genotype_jobs(
     is_huge_callset = len(samples) >= 100000
     # For huge callsets, we allocate more memory for the SNPs Create Model step
 
-    genomicsdb_bucket = f'{analysis_bucket}/genomicsdbs'
     genomicsdb_path_per_interval = dict()
     for idx in range(utils.NUMBER_OF_GENOMICS_DB_INTERVALS):
         genomicsdb_path_per_interval[idx] = join(
