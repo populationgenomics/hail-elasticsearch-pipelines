@@ -13,7 +13,7 @@ import shutil
 import tempfile
 import time
 from os.path import join, dirname, abspath, splitext, basename
-from typing import Optional, List, Tuple, Set, Dict
+from typing import Optional, List, Tuple, Set, Dict, Collection
 from dataclasses import dataclass
 import pandas as pd
 import click
@@ -139,11 +139,11 @@ aapi = AnalysisApi()
 def main(
     output_namespace: str,
     analysis_project: str,
-    input_projects: List[str],
-    output_projects: Optional[List[str]],
+    input_projects: Collection[str],
+    output_projects: Optional[Collection[str]],
     start_from_stage: str,
     end_with_stage: str,
-    skip_samples: List[str],
+    skip_samples: Collection[str],
     output_version: str,
     keep_scratch: bool,
     overwrite: bool,
@@ -239,50 +239,52 @@ class Analysis:
     id: str
     type: AnalysisType
     status: AnalysisStatus
+    sample_ids: Set[str]
     output: Optional[str]
-    sample_ids: List[str]
 
     @staticmethod
-    def from_db(**kwargs):
+    def query(
+        analysis_project: str, analysis_type: str, sample_ids: Collection[str]
+    ) -> Optional['Analysis']:
         """
-        Convert from db keys, mainly converting id to id_
+        Query the DB to find last completed analysis for these type and samples
         """
-        analysis_type = kwargs.pop('type', None)
-        status = kwargs.pop('status', None)
-        sample_ids = kwargs['sample_ids']
-        output = kwargs.pop('output', [])
-        return Analysis(
-            id=kwargs.pop('id'),
-            type=AnalysisType(analysis_type),
-            status=AnalysisStatus(status),
-            sample_ids=list(set(sorted(sample_ids))),
-            output=output,
+        data: Optional[Dict] = None
+        if analysis_type == 'joint-calling':
+            data = aapi.get_latest_complete_analysis_for_type(
+                project=analysis_project,
+                analysis_type=analysis_type,
+            )
+        else:
+            data = aapi.get_latest_analysis_for_samples_and_type(
+                project=analysis_project,
+                analysis_type=analysis_type,
+                request_body=sample_ids,
+            )
+        if not data:
+            return None
+        a = Analysis(
+            id=data.pop('id'),
+            type=AnalysisType(data.pop('type', None)),
+            status=AnalysisStatus(data.pop('status', None)),
+            sample_ids=set(data.get('sample_ids', [])),
+            output=data.pop('output', None),
         )
+        assert a.type == analysis_type, data
+        assert a.status == 'completed', data
+        if len(sample_ids) == 1:
+            assert a.sample_ids == set(sample_ids), data
 
-
-def _get_latest_complete_analysis(
-    analysis_project: str,
-) -> Dict[Tuple[str, Tuple], Analysis]:
-    """
-    Returns a dictionary that maps a tuple (analysis type, sample ids) to the
-    lastest complete analysis record (represented by a AnalysisModel object)
-    """
-    latest_by_type_and_sids = dict()
-    for a_type in ['cram', 'gvcf', 'joint-calling']:
-        for a_data in aapi.get_latest_complete_analysis_for_type(
-            project=analysis_project,
-            analysis_type=a_type,
-        ):
-            a: Analysis = Analysis.from_db(**a_data)
-            latest_by_type_and_sids[(a_type, tuple(a.sample_ids))] = a
-    return latest_by_type_and_sids
+        if a.sample_ids != set(sample_ids):
+            return None
+        return a
 
 
 def _process_existing_analysis(
-    completed_analysis: Optional[Analysis],
+    sample_ids: Collection[str],
     analysis_type: str,
     analysis_project: str,
-    analysis_sample_ids: List[str],
+    analysis_sample_ids: Collection[str],
     expected_output_fpath: str,
     skip_stage: bool,
 ) -> Optional[str]:
@@ -293,7 +295,7 @@ def _process_existing_analysis(
 
     Returns the path to the output if it can be reused, otherwise None.
 
-    :param completed_analysis: found analysis DB entry
+    :param sample_ids: sample IDs to pull the analysis for
     :param analysis_type: cram, gvcf, joint_calling
     :param analysis_project: analysis project name (e.g. seqr)
     :param analysis_sample_ids: sample IDs that analysis refers to
@@ -307,10 +309,14 @@ def _process_existing_analysis(
     if len(analysis_sample_ids) > 1:
         label += f' for {", ".join(analysis_sample_ids)}'
 
+    completed_analysis = Analysis.query(analysis_project, analysis_type, sample_ids)
+
     found_output_fpath = None
     if not completed_analysis:
-        logger.warning(f'Not found completed analysis {label}')
-
+        logger.warning(
+            f'Not found completed analysis {label} for '
+            f'{f"sample {sample_ids}" if len(sample_ids) == 1 else f"{len(sample_ids)} samples" }'
+        )
     elif not completed_analysis.output:
         logger.error(
             f'Found a completed analysis {label}, '
@@ -395,13 +401,13 @@ def _add_jobs(
     output_version: str,
     overwrite: bool,
     prod: bool,
-    input_projects: List[str],
-    output_projects: List[str],
+    input_projects: Collection[str],
+    output_projects: Collection[str],
     vep_block_size,
     analysis_project: str,
     start_from_stage: Optional[str],
     end_with_stage: Optional[str],
-    skip_samples: List[str],
+    skip_samples: Collection[str],
     use_gnarly: bool,
     use_as_vqsr: bool,
 ) -> Optional[hb.Batch]:
@@ -412,7 +418,6 @@ def _add_jobs(
     # pylint: disable=unused-variable
     fingerprints_bucket = f'{analysis_bucket}/fingerprints'
 
-    latest_by_type_and_sids = _get_latest_complete_analysis(analysis_project)
     reference, bwa_reference, noalt_regions = utils.get_refs(b)
 
     gvcf_jobs = []
@@ -441,7 +446,7 @@ def _add_jobs(
         return None
 
     # after dropping samples with incorrect metadata, missing inputs, etc
-    good_samples = []
+    good_samples: List[Dict] = []
     hc_intervals_j = None
     for proj, samples in samples_by_project.items():
         proj_bucket = f'gs://cpg-{proj}-{output_suffix}'
@@ -453,7 +458,7 @@ def _add_jobs(
                 'cram'
             ]
             found_cram_path = _process_existing_analysis(
-                completed_analysis=latest_by_type_and_sids.get(('cram', (s['id'],))),
+                sample_ids=[s['id']],
                 analysis_type='cram',
                 analysis_project=analysis_project,
                 analysis_sample_ids=[s['id']],
@@ -495,7 +500,7 @@ def _add_jobs(
                 'gvcf',
             ]
             found_gvcf_path = _process_existing_analysis(
-                completed_analysis=latest_by_type_and_sids.get(('gvcf', (s['id'],))),
+                sample_ids=[s['id']],
                 analysis_type='gvcf',
                 analysis_project=analysis_project,
                 analysis_sample_ids=[s['id']],
@@ -542,7 +547,7 @@ def _add_jobs(
         return None
 
     # Is there a complete joint-calling analysis for the requested set of samples?
-    sample_ids = [s['id'] for s in good_samples]
+    sample_ids = set(s['id'] for s in good_samples)
     samples_hash = utils.hash_sample_ids(sample_ids)
     expected_jc_path = f'{tmp_bucket}/joint_calling/{samples_hash}.vcf.gz'
     skip_jc_stage = start_from_stage is not None and start_from_stage not in [
@@ -551,9 +556,7 @@ def _add_jobs(
         'joint_calling',
     ]
     found_jc_path = _process_existing_analysis(
-        completed_analysis=latest_by_type_and_sids.get(
-            ('joint-calling', tuple(set(sample_ids)))
-        ),
+        sample_ids=sample_ids,
         analysis_type='joint-calling',
         analysis_project=analysis_project,
         analysis_sample_ids=sample_ids,
@@ -1162,7 +1165,7 @@ def _add_subset_noalt_step(
 def _make_joint_genotype_jobs(
     b: hb.Batch,
     output_path: str,
-    samples: List,
+    samples: Collection[Dict],
     genomicsdb_bucket: str,
     tmp_bucket: str,
     gvcf_by_sid: Dict[str, str],
