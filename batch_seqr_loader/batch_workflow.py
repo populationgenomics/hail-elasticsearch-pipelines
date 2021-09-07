@@ -549,28 +549,28 @@ def _add_jobs(
     # Is there a complete joint-calling analysis for the requested set of samples?
     sample_ids = set(s['id'] for s in good_samples)
     samples_hash = utils.hash_sample_ids(sample_ids)
-    expected_jc_path = f'{tmp_bucket}/joint_calling/{samples_hash}.vcf.gz'
+    expected_jc_vcf_path = f'{tmp_bucket}/joint_calling/{samples_hash}.vcf.gz'
     skip_jc_stage = start_from_stage is not None and start_from_stage not in [
         'cram',
         'gvcf',
         'joint_calling',
     ]
-    found_jc_path = _process_existing_analysis(
+    found_jc_vcf_path = _process_existing_analysis(
         sample_ids=sample_ids,
         analysis_type='joint-calling',
         analysis_project=analysis_project,
         analysis_sample_ids=sample_ids,
-        expected_output_fpath=expected_jc_path,
+        expected_output_fpath=expected_jc_vcf_path,
         skip_stage=skip_jc_stage,
     )
     if skip_jc_stage:
-        if not found_jc_path:
+        if not found_jc_vcf_path:
             return None
         jc_job = None
     else:
         jc_job = _make_joint_genotype_jobs(
             b=b,
-            output_path=expected_jc_path,
+            output_path=expected_jc_vcf_path,
             samples=good_samples,
             genomicsdb_bucket=f'{analysis_bucket}/genomicsdbs',
             tmp_bucket=tmp_bucket,
@@ -584,7 +584,7 @@ def _add_jobs(
             use_gnarly=use_gnarly,
             use_as_vqsr=use_as_vqsr,
         )
-        found_jc_path = expected_jc_path
+        found_jc_vcf_path = expected_jc_vcf_path
 
     if end_with_stage == 'joint_calling':
         logger.info(f'Latest stage is {end_with_stage}, stopping the pipeline here.')
@@ -618,7 +618,7 @@ def _add_jobs(
                 annotate_job = dataproc.hail_dataproc_job(
                     b,
                     f'batch_seqr_loader/scripts/make_annotated_mt.py '
-                    f'--source-path {found_jc_path} '
+                    f'--source-path {found_jc_vcf_path} '
                     f'--dest-mt-path {annotated_mt_path} '
                     f'--bucket {anno_tmp_bucket} '
                     '--disable-validation '
