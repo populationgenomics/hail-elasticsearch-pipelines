@@ -14,7 +14,6 @@ import tempfile
 import time
 from os.path import join, dirname, abspath, splitext, basename
 from typing import Optional, List, Tuple, Set, Dict, Collection
-from dataclasses import dataclass
 import pandas as pd
 import click
 import hailtop.batch as hb
@@ -24,14 +23,12 @@ from sample_metadata import (
     SampleApi,
     AnalysisApi,
     AnalysisModel,
-    AnalysisUpdateModel,
-    AnalysisType,
-    AnalysisStatus,
 )
 
 from find_inputs import sm_verify_reads_data, AlignmentInput
 from vqsr import make_vqsr_jobs
 import utils
+import sm_utils
 
 
 logger = logging.getLogger(__file__)
@@ -125,14 +122,16 @@ aapi = AnalysisApi()
 )
 @click.option('--vep-block-size', 'vep_block_size')
 @click.option(
-    '--use-gnarly',
+    '--use-gnarly/--no-use-gnarly',
     'use_gnarly',
+    default=True,
     is_flag=True,
     help='Use GnarlyGenotyper instead of GenotypeGVCFs',
 )
 @click.option(
-    '--use-as-vqsr',
+    '--use-as-vqsr/--no-use-as-vqsr',
     'use_as_vqsr',
+    default=True,
     is_flag=True,
     help='Use allele-specific annotations for VQSR',
 )
@@ -230,168 +229,6 @@ def main(
     shutil.rmtree(local_tmp_dir)
 
 
-@dataclass
-class Analysis:
-    """
-    Represents the analysis DB entry
-    """
-
-    id: str
-    type: AnalysisType
-    status: AnalysisStatus
-    sample_ids: Set[str]
-    output: Optional[str]
-
-    @staticmethod
-    def query(
-        analysis_project: str, analysis_type: str, sample_ids: Collection[str]
-    ) -> Optional['Analysis']:
-        """
-        Query the DB to find last completed analysis for these type and samples
-        """
-        data: Optional[Dict] = None
-        if analysis_type == 'joint-calling':
-            data = aapi.get_latest_complete_analysis_for_type(
-                project=analysis_project,
-                analysis_type=analysis_type,
-            )
-        else:
-            data = aapi.get_latest_analysis_for_samples_and_type(
-                project=analysis_project,
-                analysis_type=analysis_type,
-                request_body=sample_ids,
-            )
-        if not data:
-            return None
-        a = Analysis(
-            id=data.pop('id'),
-            type=AnalysisType(data.pop('type', None)),
-            status=AnalysisStatus(data.pop('status', None)),
-            sample_ids=set(data.get('sample_ids', [])),
-            output=data.pop('output', None),
-        )
-        assert a.type == analysis_type, data
-        assert a.status == 'completed', data
-        if len(sample_ids) == 1:
-            assert a.sample_ids == set(sample_ids), data
-
-        if a.sample_ids != set(sample_ids):
-            return None
-        return a
-
-
-def _process_existing_analysis(
-    sample_ids: Collection[str],
-    analysis_type: str,
-    analysis_project: str,
-    analysis_sample_ids: Collection[str],
-    expected_output_fpath: str,
-    skip_stage: bool,
-) -> Optional[str]:
-    """
-    Checks whether existing analysis exists, and output matches the expected output
-    file. Invalidates bad analysis by setting status=failure, and submits a
-    status=completed analysis if the expected output already exists.
-
-    Returns the path to the output if it can be reused, otherwise None.
-
-    :param sample_ids: sample IDs to pull the analysis for
-    :param analysis_type: cram, gvcf, joint_calling
-    :param analysis_project: analysis project name (e.g. seqr)
-    :param analysis_sample_ids: sample IDs that analysis refers to
-    :param expected_output_fpath: where the pipeline expects the analysis output file
-        to sit on the bucket (will invalidate the analysis if it doesn't match)
-    :param skip_stage: if not skip_stage and analysis output is not as expected,
-        we invalidate the analysis and set its status to failure
-    :return: path to the output if it can be reused, otherwise None
-    """
-    label = f'type={analysis_type}'
-    if len(analysis_sample_ids) > 1:
-        label += f' for {", ".join(analysis_sample_ids)}'
-
-    completed_analysis = Analysis.query(analysis_project, analysis_type, sample_ids)
-
-    found_output_fpath = None
-    if not completed_analysis:
-        logger.warning(
-            f'Not found completed analysis {label} for '
-            f'{f"sample {sample_ids}" if len(sample_ids) == 1 else f"{len(sample_ids)} samples" }'
-        )
-    elif not completed_analysis.output:
-        logger.error(
-            f'Found a completed analysis {label}, '
-            f'but the "output" field does not exist or empty'
-        )
-    else:
-        found_output_fpath = str(completed_analysis.output)
-        if found_output_fpath != expected_output_fpath:
-            logger.error(
-                f'Found a completed analysis {label}, but the "output" path '
-                f'{found_output_fpath} does not match the expected path '
-                f'{expected_output_fpath}'
-            )
-            found_output_fpath = None
-        elif not utils.file_exists(found_output_fpath):
-            logger.error(
-                f'Found a completed analysis {label}, '
-                f'but the "output" file {found_output_fpath} does not exist'
-            )
-            found_output_fpath = None
-
-    # skipping stage
-    if skip_stage:
-        if found_output_fpath:
-            logger.info(f'Skipping stage, picking existing {found_output_fpath}')
-            return found_output_fpath
-        else:
-            logger.info(
-                f'Skipping stage, and expected {expected_output_fpath} not found, '
-                f'so skipping {label}'
-            )
-            return None
-
-    # completed and good exists, can reuse
-    if found_output_fpath:
-        logger.info(
-            f'Completed analysis {label} exists, '
-            f'reusing the result {found_output_fpath}'
-        )
-        return found_output_fpath
-
-    # can't reuse, need to invalidate
-    if completed_analysis:
-        logger.warning(
-            f'Invalidating the analysis {label} by setting the status to "failure", '
-            f'and resubmitting the analysis.'
-        )
-        aapi.update_analysis_status(
-            completed_analysis.id, AnalysisUpdateModel(status='failed')
-        )
-
-    # can reuse, need to create a completed one?
-    if utils.file_exists(expected_output_fpath):
-        logger.info(
-            f'Output file {expected_output_fpath} already exists, so creating '
-            f'an analysis {label} with status=completed'
-        )
-        am = AnalysisModel(
-            type=analysis_type,
-            output=expected_output_fpath,
-            status='completed',
-            sample_ids=analysis_sample_ids,
-        )
-        aapi.create_new_analysis(project=analysis_project, analysis_model=am)
-        return expected_output_fpath
-
-    # proceeding with the standard pipeline (creating status=queued, submitting jobs)
-    else:
-        logger.info(
-            f'Expected output file {expected_output_fpath} does not exist, '
-            f'so queueing analysis {label}'
-        )
-        return None
-
-
 def _add_jobs(
     b: hb.Batch,
     tmp_bucket,
@@ -425,6 +262,7 @@ def _add_jobs(
 
     samples_by_project: Dict[str, List[Dict]] = dict()
     for proj in input_projects:
+        logger.info(f'Processing project {proj}')
         samples = sapi.get_samples(
             body_get_samples_by_criteria_api_v1_sample_post={
                 'project_ids': [proj],
@@ -433,7 +271,7 @@ def _add_jobs(
         )
         samples_by_project[proj] = []
         for s in samples:
-            if s['id'] in skip_samples:
+            if skip_samples and s['id'] in skip_samples:
                 logger.info(f'Skiping sample: {s["id"]}')
                 continue
             if output_suffix != 'main':
@@ -445,11 +283,26 @@ def _add_jobs(
         logger.info(f'Latest stage is {end_with_stage}, stopping the pipeline here.')
         return None
 
+    all_samples = []
+    for proj, samples in samples_by_project.items():
+        all_samples.extend(samples)
+
     # after dropping samples with incorrect metadata, missing inputs, etc
     good_samples: List[Dict] = []
     hc_intervals_j = None
     for proj, samples in samples_by_project.items():
         proj_bucket = f'gs://cpg-{proj}-{output_suffix}'
+
+        cram_analysis_per_sid = sm_utils.find_analyses_by_sid(
+            sample_ids=[s['id'] for s in samples],
+            analysis_type='cram',
+            analysis_project=analysis_project,
+        )
+        gvcf_analysis_per_sid = sm_utils.find_analyses_by_sid(
+            sample_ids=[s['id'] for s in samples],
+            analysis_type='gvcf',
+            analysis_project=analysis_project,
+        )
 
         for s in samples:
             logger.info(f'Project {proj}. Processing sample {s["id"]}')
@@ -457,8 +310,9 @@ def _add_jobs(
             skip_cram_stage = start_from_stage is not None and start_from_stage not in [
                 'cram'
             ]
-            found_cram_path = _process_existing_analysis(
+            found_cram_path = sm_utils.process_existing_analysis(
                 sample_ids=[s['id']],
+                completed_analysis=cram_analysis_per_sid.get(s['id']),
                 analysis_type='cram',
                 analysis_project=analysis_project,
                 analysis_sample_ids=[s['id']],
@@ -499,8 +353,9 @@ def _add_jobs(
                 'cram',
                 'gvcf',
             ]
-            found_gvcf_path = _process_existing_analysis(
+            found_gvcf_path = sm_utils.process_existing_analysis(
                 sample_ids=[s['id']],
+                completed_analysis=gvcf_analysis_per_sid.get(s['id']),
                 analysis_type='gvcf',
                 analysis_project=analysis_project,
                 analysis_sample_ids=[s['id']],
@@ -555,8 +410,12 @@ def _add_jobs(
         'gvcf',
         'joint_calling',
     ]
-    found_jc_vcf_path = _process_existing_analysis(
+    found_jc_vcf_path = sm_utils.process_existing_analysis(
         sample_ids=sample_ids,
+        completed_analysis=sm_utils.find_joint_calling_analysis(
+            analysis_project=analysis_project,
+            sample_ids=sample_ids,
+        ),
         analysis_type='joint-calling',
         analysis_project=analysis_project,
         analysis_sample_ids=sample_ids,
@@ -801,27 +660,54 @@ def _make_realign_jobs(
         return b.new_job(f'{job_name} [reuse]')
 
     logger.info(
-        f'Not found expected result {output_path} for {sample_name}. '
-        f'Parsing the "reads" metadata field and submitting the alignmentment'
+        f'Parsing the "reads" metadata field and submitting the alignment '
+        f'to write {output_path} for {sample_name}. '
     )
     j = b.new_job(job_name)
     j.image(utils.ALIGNMENT_IMAGE)
     total_cpu = 32
+    j.cpu(total_cpu)
+    j.memory('standard')
+    j.declare_resource_group(
+        output_cram={
+            'cram': '{root}.cram',
+            'cram.crai': '{root}.cram.crai',
+        }
+    )
+
+    pull_inputs_cmd = ''
 
     if alignment_input.bam_or_cram_path:
         use_bazam = True
         bazam_cpu = 10
         bwa_cpu = 32
         bamsormadup_cpu = 10
-
         assert alignment_input.index_path
         assert not alignment_input.fqs1 and not alignment_input.fqs2
-        cram = b.read_input_group(
-            base=alignment_input.bam_or_cram_path, index=alignment_input.index_path
+        j.storage(
+            '400G' if alignment_input.bam_or_cram_path.endswith('.cram') else '1000G'
         )
+
+        if alignment_input.bam_or_cram_path.startswith('gs://'):
+            cram = b.read_input_group(
+                base=alignment_input.bam_or_cram_path, index=alignment_input.index_path
+            )
+            cram_localized_path = cram.base
+        else:
+            # Can't use on Batch localization mechanism with `b.read_input_group`,
+            # but have to manually localize with `wget`
+            cram_name = basename(alignment_input.bam_or_cram_path)
+            work_dir = dirname(j.output_cram.cram)
+            cram_localized_path = join(work_dir, cram_name)
+            index_ext = '.crai' if cram_name.endswith('.cram') else '.bai'
+            crai_localized_path = join(work_dir, cram_name + index_ext)
+            pull_inputs_cmd = (
+                f'wget {alignment_input.bam_or_cram_path} -O {cram_localized_path}\n'
+                f'wget {alignment_input.index_path} -O {crai_localized_path}'
+            )
         r1_param = (
             f'<(bazam -Xmx16g -Dsamjdk.reference_fasta={reference.base}'
-            f' -n{bazam_cpu} -bam {cram.base})'
+            f' -n{bazam_cpu} -bam {cram_localized_path})'
         )
         r2_param = '-'
     else:
@@ -829,22 +715,14 @@ def _make_realign_jobs(
         use_bazam = False
         bwa_cpu = 32
         bamsormadup_cpu = 10
+        j.storage('600G')
+
         files1 = [b.read_input(f1) for f1 in alignment_input.fqs1]
         files2 = [b.read_input(f1) for f1 in alignment_input.fqs2]
         r1_param = f'<(cat {" ".join(files1)})'
         r2_param = f'<(cat {" ".join(files2)})'
         logger.info(f'r1_param: {r1_param}')
         logger.info(f'r2_param: {r2_param}')
-
-    j.cpu(total_cpu)
-    j.memory('standard')
-    j.storage('350G')
-    j.declare_resource_group(
-        output_cram={
-            'cram': '{root}.cram',
-            'crai': '{root}.cram.crai',
-        }
-    )
 
     rg_line = f'@RG\\tID:{sample_name}\\tSM:{sample_name}'
     # BWA command options:
@@ -859,6 +737,8 @@ set -ex
 
 (while true; do df -h; pwd; du -sh $(dirname {j.output_cram.cram}); sleep 600; done) &
 
+{pull_inputs_cmd}
+
 bwa-mem2 mem -K 100000000 {'-p' if use_bazam else ''} -t{bwa_cpu} -Y \\
     -R '{rg_line}' {reference.base} {r1_param} {r2_param} | \\
 bamsormadup inputformat=sam threads={bamsormadup_cpu} SO=coordinate \\
@@ -866,7 +746,7 @@ bamsormadup inputformat=sam threads={bamsormadup_cpu} SO=coordinate \\
     tmpfile=$(dirname {j.output_cram.cram})/bamsormadup-tmp | \\
 samtools view -T {reference.base} -O cram -o {j.output_cram.cram}
 
-samtools index -@{total_cpu} {j.output_cram.cram} {j.output_cram.crai}
+samtools index -@{total_cpu} {j.output_cram.cram} {j.output_cram['cram.crai']}
 
 df -h; pwd; du -sh $(dirname {j.output_cram.cram})
     """

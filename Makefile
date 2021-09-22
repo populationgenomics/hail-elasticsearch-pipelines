@@ -40,7 +40,7 @@ run_seqr_loader_test:
 	batch_seqr_loader/batch_workflow.py \
 	--namespace test \
 	--analysis-project seqr-test \
-	--input-project acute-care \
+	--input-project perth-neuro \
 	--output-version $(TEST_VERSION) \
 	--reuse \
 	--keep-scratch
