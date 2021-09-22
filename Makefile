@@ -1,5 +1,5 @@
-TEST_VERSION := v2-2
-PROD_VERSION := v2-0
+TEST_VERSION := v2-3
+PROD_VERSION := v3-0
 
 .PHONY: package
 package:
@@ -40,7 +40,7 @@ run_seqr_loader_test:
 	batch_seqr_loader/batch_workflow.py \
 	--namespace test \
 	--analysis-project seqr-test \
-	--input-project perth-neuro \
+	--input-project perth-neuro-test \
 	--output-version $(TEST_VERSION) \
 	--reuse \
 	--keep-scratch
