@@ -1146,7 +1146,7 @@ def _make_joint_genotype_jobs(
         intervals_j.depends_on(sm_in_progress_j)
         if depends_on:
             sm_in_progress_j.depends_on(*depends_on)
-        logger.info(f'Queueing {am.type} with analysis ID: {aid}')
+        logger.info(f'Queueing joint-calling with analysis ID: {aid}')
     else:
         if depends_on:
             intervals_j.depends_on(*depends_on)
@@ -1154,6 +1154,7 @@ def _make_joint_genotype_jobs(
 
     import_gvcfs_job_per_interval = dict()
     if sample_names_to_add:
+        logger.info(f'Queueing genomics-db-import jobs')
         for idx in range(utils.NUMBER_OF_GENOMICS_DB_INTERVALS):
             import_gvcfs_job, _ = _add_import_gvcfs_job(
                 b=b,
@@ -1189,6 +1190,7 @@ def _make_joint_genotype_jobs(
             genotype_fn = (
                 _add_gnarly_genotyper_job if use_gnarly else _add_genotype_gvcfs_job
             )
+            logger.info(f'Queueing genotyping job')
             genotype_vcf_job = genotype_fn(
                 b,
                 genomicsdb_path=genomicsdb_path_per_interval[idx],
@@ -1204,6 +1206,7 @@ def _make_joint_genotype_jobs(
                 genotype_vcf_job.depends_on(import_gvcfs_job_per_interval.get(idx))
 
             if not is_small_callset:
+                logger.info(f'Queueing exccess het filter job')
                 exccess_filter_job = _add_exccess_het_filter(
                     b,
                     input_vcf=genotype_vcf_job.output_vcf,
@@ -1217,6 +1220,7 @@ def _make_joint_genotype_jobs(
             scattered_vcf_by_interval[idx] = last_job.output_vcf
 
     pre_vqsr_vcf_path = f'{joint_calling_tmp_bucket}/gathered.vcf.gz'
+    logger.info(f'Queueing gather-VCF job')
     final_gathered_vcf_job = _add_final_gather_vcf_job(
         b,
         input_vcfs=list(scattered_vcf_by_interval.values()),
@@ -1224,6 +1228,7 @@ def _make_joint_genotype_jobs(
         output_vcf_path=pre_vqsr_vcf_path,
     )
     tmp_vqsr_bucket = f'{joint_calling_tmp_bucket}/vqsr'
+    logger.info(f'Queueing VQSR job')
     vqsr_job = make_vqsr_jobs(
         b,
         input_vcf_gathered=pre_vqsr_vcf_path,
