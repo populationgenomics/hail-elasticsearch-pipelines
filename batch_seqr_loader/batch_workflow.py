@@ -23,6 +23,7 @@ from sample_metadata import (
     SampleApi,
     AnalysisApi,
     AnalysisModel,
+    SequenceApi,
 )
 
 from find_inputs import sm_verify_reads_data, AlignmentInput
@@ -41,6 +42,7 @@ STAGES = ['input', 'cram', 'gvcf', 'joint_calling', 'annotate', 'load_to_es']
 
 sapi = SampleApi()
 aapi = AnalysisApi()
+seqapi = SequenceApi()
 
 
 @click.command()
@@ -263,9 +265,12 @@ def _add_jobs(
     samples_by_project: Dict[str, List[Dict]] = dict()
     for proj in input_projects:
         logger.info(f'Processing project {proj}')
+        input_proj = proj
+        if output_suffix != 'main':
+            input_proj += '-test'
         samples = sapi.get_samples(
             body_get_samples_by_criteria_api_v1_sample_post={
-                'project_ids': [proj],
+                'project_ids': [input_proj],
                 'active': True,
             }
         )
@@ -274,10 +279,7 @@ def _add_jobs(
             if skip_samples and s['id'] in skip_samples:
                 logger.info(f'Skiping sample: {s["id"]}')
                 continue
-            if output_suffix != 'main':
-                s = utils.replace_paths_to_test(s)
-            if s:
-                samples_by_project[proj].append(s)
+            samples_by_project[proj].append(s)
 
     if end_with_stage == 'input':
         logger.info(f'Latest stage is {end_with_stage}, stopping the pipeline here.')
@@ -292,17 +294,20 @@ def _add_jobs(
     hc_intervals_j = None
     for proj, samples in samples_by_project.items():
         proj_bucket = f'gs://cpg-{proj}-{output_suffix}'
+        sample_ids = [s['id'] for s in samples]
 
         cram_analysis_per_sid = sm_utils.find_analyses_by_sid(
-            sample_ids=[s['id'] for s in samples],
+            sample_ids=sample_ids,
             analysis_type='cram',
             analysis_project=analysis_project,
         )
         gvcf_analysis_per_sid = sm_utils.find_analyses_by_sid(
-            sample_ids=[s['id'] for s in samples],
+            sample_ids=sample_ids,
             analysis_type='gvcf',
             analysis_project=analysis_project,
         )
+        seq_infos: List[Dict] = seqapi.get_sequences_by_sample_ids(sample_ids)
+        seq_info_by_s_id = dict(zip(sample_ids, seq_infos))
 
         for s in samples:
             logger.info(f'Project {proj}. Processing sample {s["id"]}')
@@ -324,8 +329,9 @@ def _add_jobs(
                     continue
                 cram_job = None
             else:
+                seq_info = seq_info_by_s_id[s['id']]
                 alignment_input = sm_verify_reads_data(
-                    s['meta'].get('reads'), s['meta'].get('reads_type')
+                    seq_info['meta'].get('reads'), seq_info['meta'].get('reads_type')
                 )
                 if not alignment_input:
                     continue
@@ -402,7 +408,7 @@ def _add_jobs(
         return None
 
     # Is there a complete joint-calling analysis for the requested set of samples?
-    sample_ids = set(s['id'] for s in good_samples)
+    sample_ids = list(set(s['id'] for s in good_samples))
     samples_hash = utils.hash_sample_ids(sample_ids)
     expected_jc_vcf_path = f'{tmp_bucket}/joint_calling/{samples_hash}.vcf.gz'
     skip_jc_stage = start_from_stage is not None and start_from_stage not in [

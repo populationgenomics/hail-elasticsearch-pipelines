@@ -208,12 +208,12 @@ def find_analyses_by_sid(
     sample (e.g. cram, gvcf)
     """
     analysis_per_sid: Dict[str, Analysis] = dict()
-    for s_id in sample_ids:
-        data = aapi.get_latest_analysis_for_samples_and_type(
-            project=analysis_project,
-            analysis_type=analysis_type,
-            request_body=[s_id],
-        )
+    datas = aapi.get_latest_analysis_for_samples_and_type(
+        project=analysis_project,
+        analysis_type=analysis_type,
+        request_body=sample_ids,
+    )
+    for data in datas:
         a = _parse_analysis(data)
         if not a:
             continue
