@@ -126,7 +126,7 @@ seqapi = SequenceApi()
 @click.option(
     '--use-gnarly/--no-use-gnarly',
     'use_gnarly',
-    default=True,
+    default=False,
     is_flag=True,
     help='Use GnarlyGenotyper instead of GenotypeGVCFs',
 )
