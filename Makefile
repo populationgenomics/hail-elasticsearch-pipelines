@@ -56,10 +56,9 @@ run_seqr_loader_prod:
 	--namespace main \
 	--analysis-project seqr \
 	--input-project acute-care \
+	--input-project perth-neuro \
 	--output-version $(PROD_VERSION) \
-    -S CPG11783 \
-	--reuse \
-	--keep-scratch
+	--reuse
 
 .PHONY: run_seqr_loader_prod_test
 run_seqr_loader_prod_test:
