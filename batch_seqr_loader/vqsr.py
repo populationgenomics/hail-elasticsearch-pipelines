@@ -8,12 +8,11 @@ import logging
 import hailtop.batch as hb
 from hailtop.batch.job import Job
 import utils
+from utils import GATK_REF_BUCKET
 
 logger = logging.getLogger('VQSR')
 logger.setLevel('INFO')
 
-
-REF_BUCKET = 'gs://cpg-reference/hg38/v1'
 
 SNP_RECALIBRATION_TRANCHE_VALUES = [
     100.0,
@@ -110,54 +109,43 @@ def make_vqsr_jobs(
     :param intervals: ResourceGroup object with intervals to scatter
     :param scatter_count: number of interavals
     :param output_vcf_path: path to write final recalibrated VCF to
+    :param use_as_annotations: use allele-specific annotation for VQSR
     :return: a final Job, and a path to the VCF with VQSR annotations
     """
 
     # Reference files. All options have defaults.
-    ref_fasta = os.path.join(REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
-    ref_fasta_index = os.path.join(REF_BUCKET, 'Homo_sapiens_assembly38.fasta.fai')
-    ref_dict = os.path.join(REF_BUCKET, 'Homo_sapiens_assembly38.dict')
-    dbsnp_vcf = os.path.join(REF_BUCKET, 'Homo_sapiens_assembly38.dbsnp138.vcf')
+    dbsnp_vcf = os.path.join(GATK_REF_BUCKET, 'Homo_sapiens_assembly38.dbsnp138.vcf')
     dbsnp_vcf_index = os.path.join(
-        REF_BUCKET, 'Homo_sapiens_assembly38.dbsnp138.vcf.idx'
+        GATK_REF_BUCKET, 'Homo_sapiens_assembly38.dbsnp138.vcf.idx'
     )
-    eval_interval_list = os.path.join(
-        REF_BUCKET, 'wgs_evaluation_regions.hg38.interval_list'
+    hapmap_resource_vcf = os.path.join(GATK_REF_BUCKET, 'hapmap_3.3.hg38.vcf.gz')
+    hapmap_resource_vcf_index = os.path.join(
+        GATK_REF_BUCKET, 'hapmap_3.3.hg38.vcf.gz.tbi'
     )
-    hapmap_resource_vcf = os.path.join(REF_BUCKET, 'hapmap_3.3.hg38.vcf.gz')
-    hapmap_resource_vcf_index = os.path.join(REF_BUCKET, 'hapmap_3.3.hg38.vcf.gz.tbi')
-    omni_resource_vcf = os.path.join(REF_BUCKET, '1000G_omni2.5.hg38.vcf.gz')
-    omni_resource_vcf_index = os.path.join(REF_BUCKET, '1000G_omni2.5.hg38.vcf.gz.tbi')
+    omni_resource_vcf = os.path.join(GATK_REF_BUCKET, '1000G_omni2.5.hg38.vcf.gz')
+    omni_resource_vcf_index = os.path.join(
+        GATK_REF_BUCKET, '1000G_omni2.5.hg38.vcf.gz.tbi'
+    )
     one_thousand_genomes_resource_vcf = os.path.join(
-        REF_BUCKET, '1000G_phase1.snps.high_confidence.hg38.vcf.gz'
+        GATK_REF_BUCKET, '1000G_phase1.snps.high_confidence.hg38.vcf.gz'
     )
     one_thousand_genomes_resource_vcf_index = os.path.join(
-        REF_BUCKET, '1000G_phase1.snps.high_confidence.hg38.vcf.gz.tbi'
+        GATK_REF_BUCKET, '1000G_phase1.snps.high_confidence.hg38.vcf.gz.tbi'
     )
     mills_resource_vcf = os.path.join(
-        REF_BUCKET, 'Mills_and_1000G_gold_standard.indels.hg38.vcf.gz'
+        GATK_REF_BUCKET, 'Mills_and_1000G_gold_standard.indels.hg38.vcf.gz'
     )
     mills_resource_vcf_index = os.path.join(
-        REF_BUCKET, 'Mills_and_1000G_gold_standard.indels.hg38.vcf.gz.tbi'
+        GATK_REF_BUCKET, 'Mills_and_1000G_gold_standard.indels.hg38.vcf.gz.tbi'
     )
     axiom_poly_resource_vcf = os.path.join(
-        REF_BUCKET, 'Axiom_Exome_Plus.genotypes.all_populations.poly.hg38.vcf.gz'
+        GATK_REF_BUCKET, 'Axiom_Exome_Plus.genotypes.all_populations.poly.hg38.vcf.gz'
     )
     axiom_poly_resource_vcf_index = os.path.join(
-        REF_BUCKET,
+        GATK_REF_BUCKET,
         'Axiom_Exome_Plus.genotypes.all_populations.poly.hg38.vcf.gz.tbi',
     )
-    ref_fasta = b.read_input_group(
-        base=ref_fasta,
-        dict=ref_dict
-        or (
-            ref_fasta.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
-            + '.dict'
-        ),
-        fai=ref_fasta_index or (ref_fasta + '.fai'),
-    )
     dbsnp_vcf = b.read_input_group(base=dbsnp_vcf, index=dbsnp_vcf_index)
-    eval_interval_list = b.read_input(eval_interval_list)
     hapmap_resource_vcf = b.read_input_group(
         base=hapmap_resource_vcf, index=hapmap_resource_vcf_index
     )
@@ -266,8 +254,8 @@ def make_vqsr_jobs(
             b,
             input_vcfs=scattered_vcfs,
             disk_size=huge_disk,
+            output_vcf_path=output_vcf_path,
         )
-        recalibrated_gathered_vcf = recalibrated_gathered_vcf_job.output_vcf
 
     else:
         snps_recalibrator_job = add_snps_variant_recalibrator_step(
@@ -297,25 +285,10 @@ def make_vqsr_jobs(
             use_as_annotations=use_as_annotations,
             indel_filter_level=SNP_HARD_FILTER_LEVEL,
             snp_filter_level=INDEL_HARD_FILTER_LEVEL,
+            output_vcf_path=output_vcf_path,
         )
-        recalibrated_gathered_vcf = recalibrated_gathered_vcf_job.recalibrated_vcf
 
-    final_gathered_vcf_job = _add_final_filter_job(
-        b,
-        input_vcf=recalibrated_gathered_vcf,
-        output_vcf_path=output_vcf_path,
-    )
-
-    _add_variant_eval_step(
-        b,
-        input_vcf=final_gathered_vcf_job.output_vcf,
-        ref_fasta=ref_fasta,
-        dbsnp_vcf=dbsnp_vcf,
-        output_path=os.path.join(web_bucket, 'variant-eval.txt'),
-        disk_size=huge_disk,
-    )
-
-    return final_gathered_vcf_job
+    return recalibrated_gathered_vcf_job
 
 
 def add_tabix_step(
@@ -834,7 +807,7 @@ def add_apply_recalibration_step(
     desired level but retains the information necessary to increase sensitivity
     if needed.
 
-    Returns: a Job object with one ResourceGroup output j.recalibrated_vcf, correponding
+    Returns: a Job object with one ResourceGroup output j.output_vcf, correponding
     to a VCF with tranche annotated in the FILTER field
     """
     j = b.new_job('VQSR: ApplyRecalibration')
@@ -842,13 +815,13 @@ def add_apply_recalibration_step(
     j.memory('8G')
     j.storage(f'{disk_size}G')
     j.declare_resource_group(
-        recalibrated_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
+        output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
     )
 
     j.command(
         f"""set -euo pipefail
 
-    df -h; pwd; du -sh $(dirname {j.recalibrated_vcf['vcf.gz']})
+    df -h; pwd; du -sh $(dirname {j.output_vcf['vcf.gz']})
 
     gatk --java-options -Xms5g \\
       ApplyVQSR \\
@@ -862,15 +835,15 @@ def add_apply_recalibration_step(
       {'--use-allele-specific-annotations ' if use_as_annotations else ''} \\
       -mode INDEL
       
-    df -h; pwd; du -sh $(dirname {j.recalibrated_vcf['vcf.gz']})
+    df -h; pwd; du -sh $(dirname {j.output_vcf['vcf.gz']})
 
     rm {input_vcf['vcf.gz']} {indels_recalibration} {indels_tranches}
 
-    df -h; pwd; du -sh $(dirname {j.recalibrated_vcf['vcf.gz']})
+    df -h; pwd; du -sh $(dirname {j.output_vcf['vcf.gz']})
 
     gatk --java-options -Xms5g \\
       ApplyVQSR \\
-      -O {j.recalibrated_vcf['vcf.gz']} \\
+      -O {j.output_vcf['vcf.gz']} \\
       -V tmp.indel.recalibrated.vcf \\
       --recal-file {snps_recalibration} \\
       --tranches-file {snps_tranches} \\
@@ -880,12 +853,12 @@ def add_apply_recalibration_step(
       {'--use-allele-specific-annotations ' if use_as_annotations else ''} \\
       -mode SNP
 
-    df -h; pwd; du -sh $(dirname {j.recalibrated_vcf['vcf.gz']})
+    df -h; pwd; du -sh $(dirname {j.output_vcf['vcf.gz']})
       """
     )
 
     if output_vcf_path:
-        b.write_output(j.recalibrated_vcf, output_vcf_path.replace('.vcf.gz', ''))
+        b.write_output(j.output_vcf, output_vcf_path.replace('.vcf.gz', ''))
     return j
 
 

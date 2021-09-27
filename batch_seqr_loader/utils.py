@@ -19,7 +19,8 @@ logger.setLevel(logging.INFO)
 
 
 AR_REPO = 'australia-southeast1-docker.pkg.dev/cpg-common/images'
-GATK_VERSION = '4.2.1.0'
+GATK_VERSION = '4.2.2.0-cpgfix00'  # Our fork with a couple of fixes:
+# https://github.com/populationgenomics/production-pipelines/tree/initial/dockers/gatk
 GATK_IMAGE = f'{AR_REPO}/gatk:{GATK_VERSION}'
 PICARD_IMAGE = f'{AR_REPO}/picard-cloud:2.23.8'
 ALIGNMENT_IMAGE = f'{AR_REPO}/alignment:v4'
@@ -33,11 +34,14 @@ NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS = 50
 NUMBER_OF_GENOMICS_DB_INTERVALS = 50
 NUMBER_OF_DATAPROC_WORKERS = 50
 
-REF_BUCKET = 'gs://cpg-reference/hg38/v1'
-REF_FASTA = join(REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
-DBSNP_VCF = join(REF_BUCKET, 'Homo_sapiens_assembly38.dbsnp138.vcf')
-UNPADDED_INTERVALS = join(REF_BUCKET, 'hg38.even.handcurated.20k.intervals')
-SOMALIER_SITES = join(REF_BUCKET, 'sites.hg38.vcf.gz')
+REF_BUCKET = 'gs://cpg-reference/hg38'
+NOALT_REGIONS = join(REF_BUCKET, 'noalt.bed')
+SOMALIER_SITES = join(REF_BUCKET, 'somalier/v0/sites.hg38.vcf.gz')
+
+GATK_REF_BUCKET = f'{REF_BUCKET}/v1'
+REF_FASTA = join(GATK_REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
+DBSNP_VCF = join(GATK_REF_BUCKET, 'Homo_sapiens_assembly38.dbsnp138.vcf')
+UNPADDED_INTERVALS = join(GATK_REF_BUCKET, 'hg38.even.handcurated.20k.intervals')
 
 DATAPROC_PACKAGES = [
     'seqr-loader',
@@ -123,7 +127,7 @@ def get_refs(b: hb.Batch) -> Tuple:
         o123=REF_FASTA + '.0123',
         bwa2bit64=REF_FASTA + '.bwt.2bit.64',
     )
-    noalt_regions = b.read_input(join(REF_BUCKET, 'noalt.bed'))
+    noalt_regions = b.read_input(NOALT_REGIONS)
     return reference, bwa_reference, noalt_regions
 
 

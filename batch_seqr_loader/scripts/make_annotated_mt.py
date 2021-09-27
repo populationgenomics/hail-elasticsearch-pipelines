@@ -293,7 +293,8 @@ def validate_mt(mt, sample_type):
 
 def remap_sample_ids(mt, remap_path):
     """
-    Remap the MatrixTable's sample ID, 's', field to the sample ID used within seqr, 'seqr_id'
+    Remap 's' (the MatrixTable's sample ID field) to 'seqr_id'
+    (the sample ID used within seqr).
     If the sample 's' does not have a 'seqr_id' in the remap file, 's' becomes 'seqr_id'
     :param mt: MatrixTable from VCF
     :param remap_path: Path to a file with two columns 's' and 'seqr_id'
