@@ -8,12 +8,11 @@ import logging
 import hailtop.batch as hb
 from hailtop.batch.job import Job
 import utils
+from utils import GATK_REF_BUCKET
 
 logger = logging.getLogger('VQSR')
 logger.setLevel('INFO')
 
-
-REF_BUCKET = 'gs://cpg-reference/hg38/v1'
 
 SNP_RECALIBRATION_TRANCHE_VALUES = [
     100.0,
@@ -115,31 +114,35 @@ def make_vqsr_jobs(
     """
 
     # Reference files. All options have defaults.
-    dbsnp_vcf = os.path.join(REF_BUCKET, 'Homo_sapiens_assembly38.dbsnp138.vcf')
+    dbsnp_vcf = os.path.join(GATK_REF_BUCKET, 'Homo_sapiens_assembly38.dbsnp138.vcf')
     dbsnp_vcf_index = os.path.join(
-        REF_BUCKET, 'Homo_sapiens_assembly38.dbsnp138.vcf.idx'
+        GATK_REF_BUCKET, 'Homo_sapiens_assembly38.dbsnp138.vcf.idx'
     )
-    hapmap_resource_vcf = os.path.join(REF_BUCKET, 'hapmap_3.3.hg38.vcf.gz')
-    hapmap_resource_vcf_index = os.path.join(REF_BUCKET, 'hapmap_3.3.hg38.vcf.gz.tbi')
-    omni_resource_vcf = os.path.join(REF_BUCKET, '1000G_omni2.5.hg38.vcf.gz')
-    omni_resource_vcf_index = os.path.join(REF_BUCKET, '1000G_omni2.5.hg38.vcf.gz.tbi')
+    hapmap_resource_vcf = os.path.join(GATK_REF_BUCKET, 'hapmap_3.3.hg38.vcf.gz')
+    hapmap_resource_vcf_index = os.path.join(
+        GATK_REF_BUCKET, 'hapmap_3.3.hg38.vcf.gz.tbi'
+    )
+    omni_resource_vcf = os.path.join(GATK_REF_BUCKET, '1000G_omni2.5.hg38.vcf.gz')
+    omni_resource_vcf_index = os.path.join(
+        GATK_REF_BUCKET, '1000G_omni2.5.hg38.vcf.gz.tbi'
+    )
     one_thousand_genomes_resource_vcf = os.path.join(
-        REF_BUCKET, '1000G_phase1.snps.high_confidence.hg38.vcf.gz'
+        GATK_REF_BUCKET, '1000G_phase1.snps.high_confidence.hg38.vcf.gz'
     )
     one_thousand_genomes_resource_vcf_index = os.path.join(
-        REF_BUCKET, '1000G_phase1.snps.high_confidence.hg38.vcf.gz.tbi'
+        GATK_REF_BUCKET, '1000G_phase1.snps.high_confidence.hg38.vcf.gz.tbi'
     )
     mills_resource_vcf = os.path.join(
-        REF_BUCKET, 'Mills_and_1000G_gold_standard.indels.hg38.vcf.gz'
+        GATK_REF_BUCKET, 'Mills_and_1000G_gold_standard.indels.hg38.vcf.gz'
     )
     mills_resource_vcf_index = os.path.join(
-        REF_BUCKET, 'Mills_and_1000G_gold_standard.indels.hg38.vcf.gz.tbi'
+        GATK_REF_BUCKET, 'Mills_and_1000G_gold_standard.indels.hg38.vcf.gz.tbi'
     )
     axiom_poly_resource_vcf = os.path.join(
-        REF_BUCKET, 'Axiom_Exome_Plus.genotypes.all_populations.poly.hg38.vcf.gz'
+        GATK_REF_BUCKET, 'Axiom_Exome_Plus.genotypes.all_populations.poly.hg38.vcf.gz'
     )
     axiom_poly_resource_vcf_index = os.path.join(
-        REF_BUCKET,
+        GATK_REF_BUCKET,
         'Axiom_Exome_Plus.genotypes.all_populations.poly.hg38.vcf.gz.tbi',
     )
     dbsnp_vcf = b.read_input_group(base=dbsnp_vcf, index=dbsnp_vcf_index)

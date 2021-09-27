@@ -1610,10 +1610,11 @@ gatk --java-options -Xms8g \\
   -R {reference.base} \\
   -O {j.output_vcf['vcf.gz']} \\
   -D {dbsnp} \\
-  --only-output-calls-starting-in-intervals \\
   -V gendb.{genomicsdb_path} \\
   {f'-L {interval} ' if interval else ''} \\
-  --merge-input-intervals
+  --only-output-calls-starting-in-intervals \\
+  --merge-input-intervals \\
+  -G AS_StandardAnnotation
 
 df -h; pwd; free -m
     """
