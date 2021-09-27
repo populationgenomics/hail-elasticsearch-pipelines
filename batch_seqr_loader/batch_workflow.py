@@ -1174,52 +1174,53 @@ def _make_joint_genotype_jobs(
     scattered_vcf_by_interval: Dict[int, hb.ResourceGroup] = dict()
 
     joint_calling_tmp_bucket = f'{tmp_bucket}/joint_calling/{samples_hash}'
-    for idx in range(utils.NUMBER_OF_GENOMICS_DB_INTERVALS):
-        joint_called_vcf_path = (
-            f'{joint_calling_tmp_bucket}/by_interval/interval_{idx}.vcf.gz'
-        )
-        if utils.can_reuse(joint_called_vcf_path, overwrite):
-            b.new_job('Joint genotyping [reuse]')
-            scattered_vcf_by_interval[idx] = b.read_input_group(
-                **{
-                    'vcf.gz': joint_called_vcf_path,
-                    'vcf.gz.tbi': joint_called_vcf_path + '.tbi',
-                }
+    pre_vqsr_vcf_path = f'{joint_calling_tmp_bucket}/gathered.vcf.gz'
+    if not utils.can_reuse(pre_vqsr_vcf_path, overwrite):
+        for idx in range(utils.NUMBER_OF_GENOMICS_DB_INTERVALS):
+            joint_called_vcf_path = (
+                f'{joint_calling_tmp_bucket}/by_interval/interval_{idx}.vcf.gz'
             )
-        else:
-            genotype_fn = (
-                _add_gnarly_genotyper_job if use_gnarly else _add_genotype_gvcfs_job
-            )
-            logger.info(f'Queueing genotyping job')
-            genotype_vcf_job = genotype_fn(
-                b,
-                genomicsdb_path=genomicsdb_path_per_interval[idx],
-                reference=reference,
-                dbsnp=dbsnp,
-                overwrite=overwrite,
-                number_of_samples=len(sample_names_will_be_in_db),
-                interval_idx=idx,
-                number_of_intervals=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
-                interval=intervals_j.intervals[f'interval_{idx}'],
-            )
-            if import_gvcfs_job_per_interval.get(idx):
-                genotype_vcf_job.depends_on(import_gvcfs_job_per_interval.get(idx))
-
-            if not is_small_callset:
-                logger.info(f'Queueing exccess het filter job')
-                exccess_filter_job = _add_exccess_het_filter(
+            if utils.can_reuse(joint_called_vcf_path, overwrite):
+                b.new_job('Joint genotyping [reuse]')
+                scattered_vcf_by_interval[idx] = b.read_input_group(
+                    **{
+                        'vcf.gz': joint_called_vcf_path,
+                        'vcf.gz.tbi': joint_called_vcf_path + '.tbi',
+                    }
+                )
+            else:
+                genotype_fn = (
+                    _add_gnarly_genotyper_job if use_gnarly else _add_genotype_gvcfs_job
+                )
+                logger.info(f'Queueing genotyping job')
+                genotype_vcf_job = genotype_fn(
                     b,
-                    input_vcf=genotype_vcf_job.output_vcf,
+                    genomicsdb_path=genomicsdb_path_per_interval[idx],
+                    reference=reference,
+                    dbsnp=dbsnp,
                     overwrite=overwrite,
+                    number_of_samples=len(sample_names_will_be_in_db),
+                    interval_idx=idx,
+                    number_of_intervals=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
                     interval=intervals_j.intervals[f'interval_{idx}'],
                 )
-                last_job = exccess_filter_job
-            else:
-                last_job = genotype_vcf_job
+                if import_gvcfs_job_per_interval.get(idx):
+                    genotype_vcf_job.depends_on(import_gvcfs_job_per_interval.get(idx))
 
-            scattered_vcf_by_interval[idx] = last_job.output_vcf
+                if not is_small_callset:
+                    logger.info(f'Queueing exccess het filter job')
+                    exccess_filter_job = _add_exccess_het_filter(
+                        b,
+                        input_vcf=genotype_vcf_job.output_vcf,
+                        overwrite=overwrite,
+                        interval=intervals_j.intervals[f'interval_{idx}'],
+                    )
+                    last_job = exccess_filter_job
+                else:
+                    last_job = genotype_vcf_job
 
-    pre_vqsr_vcf_path = f'{joint_calling_tmp_bucket}/gathered.vcf.gz'
+                scattered_vcf_by_interval[idx] = last_job.output_vcf
+
     logger.info(f'Queueing gather-VCF job')
     final_gathered_vcf_job = _add_final_gather_vcf_job(
         b,
@@ -1227,6 +1228,7 @@ def _make_joint_genotype_jobs(
         overwrite=overwrite,
         output_vcf_path=pre_vqsr_vcf_path,
     )
+
     tmp_vqsr_bucket = f'{joint_calling_tmp_bucket}/vqsr'
     logger.info(f'Queueing VQSR job')
     vqsr_job = make_vqsr_jobs(
