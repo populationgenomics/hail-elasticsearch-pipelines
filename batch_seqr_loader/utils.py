@@ -19,7 +19,8 @@ logger.setLevel(logging.INFO)
 
 
 AR_REPO = 'australia-southeast1-docker.pkg.dev/cpg-common/images'
-GATK_VERSION = '4.2.2.0-cpgfix00'
+GATK_VERSION = '4.2.2.0-cpgfix00'  # Our fork with a couple of fixes:
+# https://github.com/populationgenomics/production-pipelines/tree/initial/dockers/gatk
 GATK_IMAGE = f'{AR_REPO}/gatk:{GATK_VERSION}'
 PICARD_IMAGE = f'{AR_REPO}/picard-cloud:2.23.8'
 ALIGNMENT_IMAGE = f'{AR_REPO}/alignment:v4'
