@@ -253,13 +253,23 @@ def make_sm_completed_job(*args, **kwargs) -> Job:
 
 
 def make_sm_update_status_job(
-    b: Batch, analysis_type: str, status: str, sm_db_name: str, analysis_id: str
+    b: Batch,
+    project: str,
+    analysis_id: str,
+    analysis_type: str,
+    status: str,
+    sample_name: Optional[str] = None,
+    project_name: Optional[str] = None,
 ) -> Job:
     """
     Creates a job that updates the sample metadata server entry analysis status.
     """
     assert status in ['in-progress', 'failed', 'completed', 'queued']
-    j = b.new_job(f'SM: update {analysis_type} to {status}')
+    job_name = ''
+    if project_name and sample_name:
+        job_name += f'{project_name}/{sample_name}: '
+    job_name += f'Update SM: {analysis_type} to {status}'
+    j = b.new_job(job_name)
     j.image(utils.SM_IMAGE)
     j.command(
         f"""
@@ -268,7 +278,7 @@ set -ex
 
 export GOOGLE_APPLICATION_CREDENTIALS=/gsa-key/key.json
 gcloud -q auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
-export SM_DEV_DB_PROJECT={sm_db_name}
+export SM_DEV_DB_PROJECT={project}
 export SM_ENVIRONMENT=PRODUCTION
 
 cat <<EOT >> update.py
