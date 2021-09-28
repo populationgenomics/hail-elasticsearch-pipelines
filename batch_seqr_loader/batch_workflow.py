@@ -22,7 +22,6 @@ from hailtop.batch.job import Job
 from sample_metadata import (
     SampleApi,
     AnalysisApi,
-    AnalysisModel,
     SequenceApi,
 )
 
@@ -273,7 +272,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
                 'project_ids': [input_proj],
                 'active': True,
             }
-        )
+        )[:2]
         samples_by_project[proj] = []
         for s in samples:
             if skip_samples and s['id'] in skip_samples:
@@ -331,13 +330,11 @@ def _add_jobs(  # pylint: disable=too-many-statements
                 cram_job = None
             else:
                 seq_info = seq_info_by_s_id[s['id']]
-                alignment_input = sm_verify_reads_data(
-                    seq_info['meta'].get('reads'), seq_info['meta'].get('reads_type')
-                )
+                logger.info('Checking sequence.meta')
+                alignment_input = sm_verify_reads_data(seq_info['meta'])
                 if not alignment_input:
-                    alignment_input = sm_verify_reads_data(
-                        s['meta'].get('reads'), s['meta'].get('reads_type')
-                    )
+                    logger.info('Checking sample.meta')
+                    alignment_input = sm_verify_reads_data(s['meta'])
                 if alignment_input:
                     cram_job = _make_realign_jobs(
                         b=b,
@@ -773,15 +770,15 @@ df -h; pwd; du -sh $(dirname {j.output_cram.cram})
     if analysis_project:
         # Interacting with the sample metadata server:
         # 1. Create a "queued" analysis
-        am = AnalysisModel(
-            type='cram',
+        aid = sm_utils.create_analysis(
+            project=analysis_project,
+            type_='cram',
             output=output_path,
             status='queued',
             sample_ids=[sample_name],
         )
-        aid = aapi.create_new_analysis(project=analysis_project, analysis_model=am)
         # 2. Queue a job that updates the status to "in-progress"
-        sm_in_progress_j = utils.make_sm_in_progress_job(
+        sm_in_progress_j = sm_utils.make_sm_in_progress_job(
             b,
             project=analysis_project,
             analysis_id=aid,
@@ -790,7 +787,7 @@ df -h; pwd; du -sh $(dirname {j.output_cram.cram})
             sample_name=sample_name,
         )
         # 2. Queue a job that updates the status to "completed"
-        sm_completed_j = utils.make_sm_completed_job(
+        sm_completed_j = sm_utils.make_sm_completed_job(
             b,
             project=analysis_project,
             analysis_id=aid,
@@ -887,15 +884,15 @@ def _make_produce_gvcf_jobs(
     if analysis_project:
         # Interacting with the sample metadata server:
         # 1. Create a "queued" analysis
-        am = AnalysisModel(
-            type='gvcf',
+        aid = sm_utils.create_analysis(
+            project=analysis_project,
+            type_='gvcf',
             output=output_path,
             status='queued',
             sample_ids=[sample_name],
         )
-        aid = aapi.create_new_analysis(project=analysis_project, analysis_model=am)
         # 2. Queue a job that updates the status to "in-progress"
-        sm_in_progress_j = utils.make_sm_in_progress_job(
+        sm_in_progress_j = sm_utils.make_sm_in_progress_job(
             b,
             project=analysis_project,
             analysis_id=aid,
@@ -904,7 +901,7 @@ def _make_produce_gvcf_jobs(
             sample_name=sample_name,
         )
         # 2. Queue a job that updates the status to "completed"
-        sm_completed_j = utils.make_sm_completed_job(
+        sm_completed_j = sm_utils.make_sm_completed_job(
             b,
             project=analysis_project,
             analysis_id=aid,
@@ -1124,22 +1121,22 @@ def _make_joint_genotype_jobs(
     if analysis_project:
         # Interacting with the sample metadata server:
         # 1. Create a "queued" analysis
-        am = AnalysisModel(
+        aid = sm_utils.create_analysis(
+            project=analysis_project,
             sample_ids=[s['id'] for s in samples],
-            type='joint-calling',
+            type_='joint-calling',
             output=output_path,
             status='queued',
         )
-        aid = aapi.create_new_analysis(project=analysis_project, analysis_model=am)
         # 2. Queue a job that updates the status to "in-progress"
-        sm_in_progress_j = utils.make_sm_in_progress_job(
+        sm_in_progress_j = sm_utils.make_sm_in_progress_job(
             b,
             project=analysis_project,
             analysis_id=aid,
             analysis_type='joint-calling',
         )
         # 2. Queue a job that updates the status to "completed"
-        sm_completed_j = utils.make_sm_completed_job(
+        sm_completed_j = sm_utils.make_sm_completed_job(
             b,
             project=analysis_project,
             analysis_id=aid,

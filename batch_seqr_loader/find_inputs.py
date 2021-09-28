@@ -292,17 +292,18 @@ class AlignmentInput:
 
 
 def sm_verify_reads_data(  # pylint: disable=too-many-return-statements
-    reads_data: Optional[List],
-    reads_type: Optional[str],
+    meta: Dict,
 ) -> Optional[AlignmentInput]:
     """
     Verify the meta.reads object in a sample db entry
     """
+    reads_data = meta.get('reads')
+    reads_type = meta.get('reads_type')
     if not reads_data:
-        logger.error(f'ERROR: no "meta/reads" field')
+        logger.error(f'No "meta/reads" field in meta')
         return None
     if not reads_type:
-        logger.error(f'ERROR: no "meta/reads_type" field')
+        logger.error(f'No "meta/reads_type" field in meta')
         return None
     supported_types = ('fastq', 'bam', 'cram')
     if reads_type not in supported_types:

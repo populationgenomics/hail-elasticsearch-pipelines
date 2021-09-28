@@ -14,6 +14,7 @@ from sample_metadata import (
     SampleApi,
     AnalysisUpdateModel,
     AnalysisModel,
+    exceptions,
 )
 
 import utils
@@ -40,6 +41,17 @@ class Analysis:
     status: str
     sample_ids: Set[str]
     output: Optional[str]
+
+    def update(self, status):
+        """
+        Tries to updating the Analysis entry
+        """
+        try:
+            aapi.update_analysis_status(self.id, AnalysisUpdateModel(status=status))
+        except exceptions.ApiException:
+            pass
+        else:
+            self.status = status
 
 
 def _parse_analysis(data: Dict) -> Optional[Analysis]:
@@ -148,9 +160,7 @@ def process_existing_analysis(
             f'Invalidating the analysis {label} by setting the status to "failure", '
             f'and resubmitting the analysis.'
         )
-        aapi.update_analysis_status(
-            completed_analysis.id, AnalysisUpdateModel(status='failed')
-        )
+        completed_analysis.update(status='failed')
 
     # can reuse, need to create a completed one?
     if utils.file_exists(expected_output_fpath):
@@ -158,13 +168,13 @@ def process_existing_analysis(
             f'Output file {expected_output_fpath} already exists, so creating '
             f'an analysis {label} with status=completed'
         )
-        am = AnalysisModel(
-            type=analysis_type,
+        create_analysis(
+            project=analysis_project,
+            type_=analysis_type,
             output=expected_output_fpath,
             status='completed',
             sample_ids=analysis_sample_ids,
         )
-        aapi.create_new_analysis(project=analysis_project, analysis_model=am)
         return expected_output_fpath
 
     # proceeding with the standard pipeline (creating status=queued, submitting jobs)
@@ -224,28 +234,22 @@ def find_analyses_by_sid(
     return analysis_per_sid
 
 
-def make_sm_in_progress_job(
-    b: Batch, analyais_type: str, analysis_project: str, analysis_id: str
-) -> Job:
+def make_sm_in_progress_job(*args, **kwargs) -> Job:
     """
     Creates a job that updates the sample metadata server entry analysis status
-    to in-progress
+    to "in-progress"
     """
-    return make_sm_update_status_job(
-        b, analyais_type, 'in-progress', analysis_project, analysis_id
-    )
+    kwargs['status'] = 'in-progress'
+    return make_sm_update_status_job(*args, **kwargs)
 
 
-def make_sm_completed_job(
-    b: Batch, analyais_type: str, sm_db_name: str, analysis_id: str
-) -> Job:
+def make_sm_completed_job(*args, **kwargs) -> Job:
     """
     Creates a job that updates the sample metadata server entry analysis status
-    to completed
+    to "completed"
     """
-    return make_sm_update_status_job(
-        b, analyais_type, 'completed', sm_db_name, analysis_id
-    )
+    kwargs['status'] = 'completed'
+    return make_sm_update_status_job(*args, **kwargs)
 
 
 def make_sm_update_status_job(
@@ -270,11 +274,16 @@ export SM_ENVIRONMENT=PRODUCTION
 cat <<EOT >> update.py
 from sample_metadata.api import AnalysisApi
 from sample_metadata import AnalysisUpdateModel
+from sample_metadata import exceptions
+import traceback
 aapi = AnalysisApi()
-aapi.update_analysis_status(
-    analysis_id='{analysis_id}',
-    analysis_update_model=AnalysisUpdateModel(status='{status}'),
-)
+try:
+    aapi.update_analysis_status(
+        analysis_id='{analysis_id}',
+        analysis_update_model=AnalysisUpdateModel(status='{status}'),
+    )
+except exceptions.ApiException:
+    traceback.print_exc()
 EOT
 python update.py
     """
@@ -336,3 +345,21 @@ class AlignmentInput:
     index_path: Optional[str] = None
     fqs1: Optional[List[str]] = None
     fqs2: Optional[List[str]] = None
+
+
+def create_analysis(
+    project: str, type_: str, output: str, status: str, sample_ids: Collection[str]
+) -> Optional[int]:
+    """
+    Tries to create an Analysis entry, returns its id if successfuly
+    """
+    try:
+        am = AnalysisModel(
+            type=type_,
+            output=output,
+            status=status,
+            sample_ids=sample_ids,
+        )
+        return aapi.create_new_analysis(project=project, analysis_model=am)
+    except exceptions.ApiException:
+        return None
