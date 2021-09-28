@@ -217,10 +217,10 @@ def find_analyses_by_sid(
         a = _parse_analysis(data)
         if not a:
             continue
-        assert a.type == analysis_type, data
-        assert a.status == 'completed', data
-        assert len(a.sample_ids) == 1, data
-        analysis_per_sid[list(a.sample_ids)[0]] = a
+        if a.status == 'completed':
+            assert a.type == analysis_type, data
+            assert len(a.sample_ids) == 1, data
+            analysis_per_sid[list(a.sample_ids)[0]] = a
     return analysis_per_sid
 
 
