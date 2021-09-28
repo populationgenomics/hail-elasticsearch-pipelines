@@ -231,7 +231,7 @@ def main(
     shutil.rmtree(local_tmp_dir)
 
 
-def _add_jobs(
+def _add_jobs(  # pylint: disable=too-many-statements
     b: hb.Batch,
     tmp_bucket,
     web_bucket,  # pylint: disable=unused-argument
@@ -335,16 +335,23 @@ def _add_jobs(
                     seq_info['meta'].get('reads'), seq_info['meta'].get('reads_type')
                 )
                 if not alignment_input:
-                    continue
-                cram_job = _make_realign_jobs(
-                    b=b,
-                    output_path=expected_cram_path,
-                    sample_name=s['id'],
-                    project_name=proj,
-                    alignment_input=alignment_input,
-                    reference=bwa_reference,
-                    analysis_project=analysis_project,
-                )
+                    alignment_input = sm_verify_reads_data(
+                        s['meta'].get('reads'), s['meta'].get('reads_type')
+                    )
+                if alignment_input:
+                    cram_job = _make_realign_jobs(
+                        b=b,
+                        output_path=expected_cram_path,
+                        sample_name=s['id'],
+                        project_name=proj,
+                        alignment_input=alignment_input,
+                        reference=bwa_reference,
+                        analysis_project=analysis_project,
+                    )
+                else:
+                    cram_job = b.new_job(
+                        'BWA [reuse: no input found, but output exists]'
+                    )
                 found_cram_path = expected_cram_path
 
             if end_with_stage == 'cram':
@@ -664,10 +671,7 @@ def _make_realign_jobs(
     if utils.file_exists(output_path):
         return b.new_job(f'{job_name} [reuse]')
 
-    logger.info(
-        f'Parsing the "reads" metadata field and submitting the alignment '
-        f'to write {output_path} for {sample_name}. '
-    )
+    logger.info(f'Submitting alignment to write {output_path} for {sample_name}. ')
     j = b.new_job(job_name)
     j.image(utils.ALIGNMENT_IMAGE)
     total_cpu = 32
