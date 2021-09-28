@@ -311,7 +311,7 @@ def _add_jobs(
 
         for s in samples:
             logger.info(f'Project {proj}. Processing sample {s["id"]}')
-            expected_cram_path = f'{proj_bucket}/cram/{output_version}/{s["id"]}.cram'
+            expected_cram_path = f'{proj_bucket}/cram/{s["id"]}.cram'
             skip_cram_stage = start_from_stage is not None and start_from_stage not in [
                 'cram'
             ]
@@ -352,9 +352,7 @@ def _add_jobs(
                 )
                 continue
 
-            expected_gvcf_path = (
-                f'{proj_bucket}/gvcf/{output_version}/{s["id"]}.g.vcf.gz'
-            )
+            expected_gvcf_path = f'{proj_bucket}/gvcf/{s["id"]}.g.vcf.gz'
             skip_gvcf_stage = start_from_stage is not None and start_from_stage not in [
                 'cram',
                 'gvcf',
