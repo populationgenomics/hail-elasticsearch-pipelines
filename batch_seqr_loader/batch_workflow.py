@@ -1074,7 +1074,7 @@ def _make_joint_genotype_jobs(
     """
     job_name = 'Joint-calling+VQSR'
     if utils.file_exists(output_path):
-        return b.new_job(f'{job_name}, [reuse]')
+        return b.new_job(f'{job_name} [reuse]')
     logger.info(
         f'Not found expected result {output_path}. '
         f'Submitting the joint-calling and VQSR jobs.'
