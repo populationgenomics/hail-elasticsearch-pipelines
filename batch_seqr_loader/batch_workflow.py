@@ -264,7 +264,7 @@ def _add_jobs(
 
     samples_by_project: Dict[str, List[Dict]] = dict()
     for proj in input_projects:
-        logger.info(f'Processing project {proj}')
+        logger.info(f'Finding samples for project {proj}')
         input_proj = proj
         if output_suffix != 'main':
             input_proj += '-test'
@@ -293,6 +293,7 @@ def _add_jobs(
     good_samples: List[Dict] = []
     hc_intervals_j = None
     for proj, samples in samples_by_project.items():
+        logger.info(f'Processing project {proj}')
         proj_bucket = f'gs://cpg-{proj}-{output_suffix}'
         sample_ids = [s['id'] for s in samples]
 
