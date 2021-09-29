@@ -218,11 +218,16 @@ def find_analyses_by_sid(
     sample (e.g. cram, gvcf)
     """
     analysis_per_sid: Dict[str, Analysis] = dict()
-    datas = aapi.get_latest_analysis_for_samples_and_type(
-        project=analysis_project,
-        analysis_type=analysis_type,
-        request_body=sample_ids,
-    )
+    try:
+        logger.info(f'Querying analysis entries for project {analysis_project}')
+        datas = aapi.get_latest_analysis_for_samples_and_type(
+            project=analysis_project,
+            analysis_type=analysis_type,
+            request_body=sample_ids,
+        )
+    except exceptions.ApiException:
+        return dict()
+
     for data in datas:
         a = _parse_analysis(data)
         if not a:

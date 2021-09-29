@@ -354,7 +354,7 @@ def sm_verify_reads_data(  # pylint: disable=too-many-return-statements
         fqs1 = []
         fqs2 = []
         for lane_data in reads_data:
-            assert len(lane_data) == 2
+            assert len(lane_data) == 2, lane_data
             if not file_exists(lane_data[0]['location']):
                 logger.error(
                     f'ERROR: read 1 file doesn\'t exist: {lane_data[0]["location"]}'
