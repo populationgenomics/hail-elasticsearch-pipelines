@@ -291,8 +291,9 @@ class AlignmentInput:
     fqs2: Optional[List[str]] = None
 
 
-def sm_verify_reads_data(  # pylint: disable=too-many-return-statements
+def sm_get_reads_data(  # pylint: disable=too-many-return-statements
     meta: Dict,
+    check_existence: bool = True,
 ) -> Optional[AlignmentInput]:
     """
     Verify the meta.reads object in a sample db entry
@@ -322,7 +323,7 @@ def sm_verify_reads_data(  # pylint: disable=too-many-return-statements
                 f'got: {bam_path}'
             )
             return None
-        if not file_exists(bam_path):
+        if check_existence and not file_exists(bam_path):
             logger.error(f'ERROR: index file doesn\'t exist: {bam_path}')
             return None
 
@@ -344,7 +345,7 @@ def sm_verify_reads_data(  # pylint: disable=too-many-return-statements
                 f'ERROR: expected the index file to have an extention '
                 f'.crai or .bai, got: {index_path}'
             )
-        if not file_exists(index_path):
+        if check_existence and not file_exists(index_path):
             logger.error(f'ERROR: index file doesn\'t exist: {index_path}')
             return None
 
@@ -355,12 +356,12 @@ def sm_verify_reads_data(  # pylint: disable=too-many-return-statements
         fqs2 = []
         for lane_data in reads_data:
             assert len(lane_data) == 2, lane_data
-            if not file_exists(lane_data[0]['location']):
+            if check_existence and not file_exists(lane_data[0]['location']):
                 logger.error(
                     f'ERROR: read 1 file doesn\'t exist: {lane_data[0]["location"]}'
                 )
                 return None
-            if not file_exists(lane_data[1]['location']):
+            if check_existence and not file_exists(lane_data[1]['location']):
                 logger.error(
                     f'ERROR: read 2 file doesn\'t exist: {lane_data[1]["location"]}'
                 )

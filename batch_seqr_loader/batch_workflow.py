@@ -25,7 +25,7 @@ from sample_metadata import (
     SequenceApi,
 )
 
-from find_inputs import sm_verify_reads_data, AlignmentInput
+from find_inputs import sm_get_reads_data, AlignmentInput
 from vqsr import make_vqsr_jobs
 import utils
 import sm_utils
@@ -136,6 +136,12 @@ seqapi = SequenceApi()
     is_flag=True,
     help='Use allele-specific annotations for VQSR',
 )
+@click.option(
+    '--check-inputs-existence/--skip-check-inputs-existence',
+    'check_inputs_existence',
+    default=True,
+    is_flag=True,
+)
 def main(
     output_namespace: str,
     analysis_project: str,
@@ -153,6 +159,7 @@ def main(
     vep_block_size: Optional[int],  # pylint: disable=unused-argument
     use_gnarly: bool,
     use_as_vqsr: bool,
+    check_inputs_existence,
 ):  # pylint: disable=missing-function-docstring
     if output_namespace in ['test', 'tmp']:
         tmp_bucket_suffix = 'test-tmp'
@@ -224,6 +231,7 @@ def main(
         skip_samples=skip_samples,
         use_gnarly=use_gnarly,
         use_as_vqsr=use_as_vqsr,
+        check_inputs_existence=check_inputs_existence,
     )
     if b:
         b.run(dry_run=dry_run, delete_scratch_on_exit=not keep_scratch, wait=False)
@@ -248,6 +256,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
     skip_samples: Collection[str],
     use_gnarly: bool,
     use_as_vqsr: bool,
+    check_inputs_existence: bool,
 ) -> Optional[hb.Batch]:
 
     analysis_bucket = (
@@ -331,10 +340,14 @@ def _add_jobs(  # pylint: disable=too-many-statements
             else:
                 seq_info = seq_info_by_s_id[s['id']]
                 logger.info('Checking sequence.meta:')
-                alignment_input = sm_verify_reads_data(seq_info['meta'])
+                alignment_input = sm_get_reads_data(
+                    seq_info['meta'], check_existence=check_inputs_existence
+                )
                 if not alignment_input:
                     logger.info('Checking sample.meta:')
-                    alignment_input = sm_verify_reads_data(s['meta'])
+                    alignment_input = sm_get_reads_data(
+                        s['meta'], check_existence=check_inputs_existence
+                    )
                 if alignment_input:
                     cram_job = _make_realign_jobs(
                         b=b,
