@@ -19,16 +19,10 @@ import click
 import hailtop.batch as hb
 from analysis_runner import dataproc
 from hailtop.batch.job import Job
-from sample_metadata import (
-    SampleApi,
-    AnalysisApi,
-    SequenceApi,
-)
-
 from find_inputs import sm_get_reads_data, AlignmentInput
 from vqsr import make_vqsr_jobs
 import utils
-import sm_utils
+from sm_utils import SMDB
 
 
 logger = logging.getLogger(__file__)
@@ -37,11 +31,6 @@ logger.setLevel(logging.INFO)
 
 
 STAGES = ['input', 'cram', 'gvcf', 'joint_calling', 'annotate', 'load_to_es']
-
-
-sapi = SampleApi()
-aapi = AnalysisApi()
-seqapi = SequenceApi()
 
 
 @click.command()
@@ -227,7 +216,7 @@ def main(
     )
     local_tmp_dir = tempfile.mkdtemp()
 
-    sm_utils.update_sm_db = update_sm_db
+    SMDB.do_update_analyses = update_sm_db
 
     b = _add_jobs(
         b=b,
@@ -288,24 +277,11 @@ def _add_jobs(  # pylint: disable=too-many-statements
     gvcf_jobs = []
     gvcf_by_sid: Dict[str, str] = dict()
 
-    samples_by_project: Dict[str, List[Dict]] = dict()
-    for proj in input_projects:
-        logger.info(f'Finding samples for project {proj}')
-        input_proj = proj
-        if output_suffix != 'main':
-            input_proj += '-test'
-        samples = sapi.get_samples(
-            body_get_samples_by_criteria_api_v1_sample_post={
-                'project_ids': [input_proj],
-                'active': True,
-            }
-        )
-        samples_by_project[proj] = []
-        for s in samples:
-            if skip_samples and s['id'] in skip_samples:
-                logger.info(f'Skiping sample: {s["id"]}')
-                continue
-            samples_by_project[proj].append(s)
+    samples_by_project = SMDB.get_samples_by_project(
+        projects=input_projects,
+        namespace=output_suffix,
+        skip_samples=skip_samples,
+    )
 
     if end_with_stage == 'input':
         logger.info(f'Latest stage is {end_with_stage}, stopping the pipeline here.')
@@ -323,18 +299,17 @@ def _add_jobs(  # pylint: disable=too-many-statements
         proj_bucket = f'gs://cpg-{proj}-{output_suffix}'
         sample_ids = [s['id'] for s in samples]
 
-        cram_analysis_per_sid = sm_utils.find_analyses_by_sid(
+        cram_analysis_per_sid = SMDB.find_analyses_by_sid(
             sample_ids=sample_ids,
             analysis_type='cram',
             analysis_project=analysis_project,
         )
-        gvcf_analysis_per_sid = sm_utils.find_analyses_by_sid(
+        gvcf_analysis_per_sid = SMDB.find_analyses_by_sid(
             sample_ids=sample_ids,
             analysis_type='gvcf',
             analysis_project=analysis_project,
         )
-        seq_infos: List[Dict] = seqapi.get_sequences_by_sample_ids(sample_ids)
-        seq_info_by_s_id = dict(zip(sample_ids, seq_infos))
+        seq_info_by_sid = SMDB.find_seq_info_by_sid(sample_ids)
 
         for s in samples:
             logger.info(f'Project {proj}. Processing sample {s["id"]}')
@@ -342,7 +317,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
             skip_cram_stage = start_from_stage is not None and start_from_stage not in [
                 'cram'
             ]
-            found_cram_path = sm_utils.process_existing_analysis(
+            found_cram_path = SMDB.process_existing_analysis(
                 sample_ids=[s['id']],
                 completed_analysis=cram_analysis_per_sid.get(s['id']),
                 analysis_type='cram',
@@ -356,7 +331,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
                     continue
                 cram_job = None
             else:
-                seq_info = seq_info_by_s_id[s['id']]
+                seq_info = seq_info_by_sid[s['id']]
                 logger.info('Checking sequence.meta:')
                 alignment_input = sm_get_reads_data(
                     seq_info['meta'], check_existence=check_inputs_existence
@@ -393,7 +368,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
                 'cram',
                 'gvcf',
             ]
-            found_gvcf_path = sm_utils.process_existing_analysis(
+            found_gvcf_path = SMDB.process_existing_analysis(
                 sample_ids=[s['id']],
                 completed_analysis=gvcf_analysis_per_sid.get(s['id']),
                 analysis_type='gvcf',
@@ -451,9 +426,9 @@ def _add_jobs(  # pylint: disable=too-many-statements
         'gvcf',
         'joint_calling',
     ]
-    found_jc_vcf_path = sm_utils.process_existing_analysis(
+    found_jc_vcf_path = SMDB.process_existing_analysis(
         sample_ids=sample_ids,
-        completed_analysis=sm_utils.find_joint_calling_analysis(
+        completed_analysis=SMDB.find_joint_calling_analysis(
             analysis_project=analysis_project,
             sample_ids=sample_ids,
         ),
@@ -793,7 +768,7 @@ set -ex
 
 (while true; do df -h; pwd; du -sh $(dirname {md_j.output_cram.cram}); sleep 600; done) &
 
-picard MarkDuplicates \\
+picard MarkDuplicates -Xms7G \\
     I={sorted_bam} O=/dev/stdout M={md_j.duplicate_metrics} \\
     TMP_DIR=$(dirname {md_j.output_cram.cram})/picard-tmp \\
     ASSUME_SORT_ORDER=coordinate | \\
@@ -817,10 +792,10 @@ df -h; pwd; du -sh $(dirname {md_j.output_cram.cram})
         ),
     )
 
-    if sm_utils.update_sm_db:
+    if SMDB.do_update_analyses:
         # Interacting with the sample metadata server:
         # 1. Create a "queued" analysis
-        aid = sm_utils.create_analysis(
+        aid = SMDB.create_analysis(
             project=analysis_project,
             type_='cram',
             output=output_path,
@@ -828,7 +803,7 @@ df -h; pwd; du -sh $(dirname {md_j.output_cram.cram})
             sample_ids=[sample_name],
         )
         # 2. Queue a job that updates the status to "in-progress"
-        sm_in_progress_j = sm_utils.make_sm_in_progress_job(
+        sm_in_progress_j = SMDB.make_sm_in_progress_job(
             b,
             project=analysis_project,
             analysis_id=aid,
@@ -837,7 +812,7 @@ df -h; pwd; du -sh $(dirname {md_j.output_cram.cram})
             sample_name=sample_name,
         )
         # 2. Queue a job that updates the status to "completed"
-        sm_completed_j = sm_utils.make_sm_completed_job(
+        sm_completed_j = SMDB.make_sm_completed_job(
             b,
             project=analysis_project,
             analysis_id=aid,
@@ -952,10 +927,10 @@ def _make_produce_gvcf_jobs(
         depends_on=[hc_j],
     )
 
-    if sm_utils.update_sm_db:
+    if SMDB.do_update_analyses:
         # Interacting with the sample metadata server:
         # 1. Create a "queued" analysis
-        aid = sm_utils.create_analysis(
+        aid = SMDB.create_analysis(
             project=analysis_project,
             type_='gvcf',
             output=output_path,
@@ -963,7 +938,7 @@ def _make_produce_gvcf_jobs(
             sample_ids=[sample_name],
         )
         # 2. Queue a job that updates the status to "in-progress"
-        sm_in_progress_j = sm_utils.make_sm_in_progress_job(
+        sm_in_progress_j = SMDB.make_sm_in_progress_job(
             b,
             project=analysis_project,
             analysis_id=aid,
@@ -972,7 +947,7 @@ def _make_produce_gvcf_jobs(
             sample_name=sample_name,
         )
         # 2. Queue a job that updates the status to "completed"
-        sm_completed_j = sm_utils.make_sm_completed_job(
+        sm_completed_j = SMDB.make_sm_completed_job(
             b,
             project=analysis_project,
             analysis_id=aid,
@@ -1193,10 +1168,10 @@ def _make_joint_genotype_jobs(
         ref_fasta=utils.REF_FASTA,
     )
 
-    if sm_utils.update_sm_db:
+    if SMDB.do_update_analyses:
         # Interacting with the sample metadata server:
         # 1. Create a "queued" analysis
-        aid = sm_utils.create_analysis(
+        aid = SMDB.create_analysis(
             project=analysis_project,
             sample_ids=[s['id'] for s in samples],
             type_='joint-calling',
@@ -1204,14 +1179,14 @@ def _make_joint_genotype_jobs(
             status='queued',
         )
         # 2. Queue a job that updates the status to "in-progress"
-        sm_in_progress_j = sm_utils.make_sm_in_progress_job(
+        sm_in_progress_j = SMDB.make_sm_in_progress_job(
             b,
             project=analysis_project,
             analysis_id=aid,
             analysis_type='joint-calling',
         )
         # 2. Queue a job that updates the status to "completed"
-        sm_completed_j = sm_utils.make_sm_completed_job(
+        sm_completed_j = SMDB.make_sm_completed_job(
             b,
             project=analysis_project,
             analysis_id=aid,
@@ -1458,8 +1433,8 @@ def _add_merge_gvcfs_job(
 
     (while true; do df -h; pwd; du -sh $(dirname {j.output_gvcf['g.vcf.gz']}); free -m; sleep 300; done) &
 
-    java -Xms{java_mem}g -jar /usr/picard/picard.jar \
-      MergeVcfs {input_cmd} OUTPUT={j.output_gvcf['g.vcf.gz']}
+    picard -Xms{java_mem}g \
+    MergeVcfs {input_cmd} OUTPUT={j.output_gvcf['g.vcf.gz']}
 
     df -h; pwd; du -sh $(dirname {j.output_gvcf['g.vcf.gz']}); free -m
       """

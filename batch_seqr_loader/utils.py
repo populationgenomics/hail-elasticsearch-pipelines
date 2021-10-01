@@ -5,8 +5,9 @@ Utility functions and constants for the seqr loader pipeline
 import hashlib
 import os
 import subprocess
+from dataclasses import dataclass
 from os.path import join
-from typing import Iterable, Tuple
+from typing import Iterable, Tuple, Optional, List
 import logging
 from google.cloud import storage
 import hailtop.batch as hb
@@ -165,3 +166,15 @@ def gsutil_cp(
     if not quiet:
         logger.info(cmd)
     subprocess.run(cmd, check=False, shell=True)
+
+
+@dataclass
+class AlignmentInput:
+    """
+    Sort of a union type for possible alignment inputs
+    """
+
+    bam_or_cram_path: Optional[str] = None
+    index_path: Optional[str] = None
+    fqs1: Optional[List[str]] = None
+    fqs2: Optional[List[str]] = None

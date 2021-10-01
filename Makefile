@@ -59,7 +59,10 @@ run_seqr_loader_prod:
 	--input-project acute-care \
 	--input-project perth-neuro \
 	--output-version $(PROD_VERSION) \
-	--reuse
+	--reuse \
+	--keep-scratch \
+	--skip-check-inputs-existence \
+	--hc-shards-num 10
 
 .PHONY: run_seqr_loader_prod_test
 run_seqr_loader_prod_test:
