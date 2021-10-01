@@ -121,7 +121,14 @@ seqapi = SequenceApi()
     is_flag=True,
     help='Skip checking provided sex and pedigree against the inferred one',
 )
-@click.option('--vep-block-size', 'vep_block_size')
+@click.option('--vep-block-size', 'vep_block_size', type=click.INT)
+@click.option(
+    '--hc-shards-num',
+    'hc_shards_num',
+    type=click.INT,
+    default=utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS,
+    help='Number of intervals to devide the genome for gatk HaplotypeCaller',
+)
 @click.option(
     '--use-gnarly/--no-use-gnarly',
     'use_gnarly',
@@ -142,6 +149,12 @@ seqapi = SequenceApi()
     default=True,
     is_flag=True,
 )
+@click.option(
+    '--update-sm-db/--skip-update-sm-db',
+    'update_sm_db',
+    default=True,
+    is_flag=True,
+)
 def main(
     output_namespace: str,
     analysis_project: str,
@@ -157,9 +170,11 @@ def main(
     make_checkpoints: bool,  # pylint: disable=unused-argument
     skip_ped_checks: bool,  # pylint: disable=unused-argument
     vep_block_size: Optional[int],  # pylint: disable=unused-argument
+    hc_shards_num: int,
     use_gnarly: bool,
     use_as_vqsr: bool,
-    check_inputs_existence,
+    check_inputs_existence: bool,
+    update_sm_db: bool,
 ):  # pylint: disable=missing-function-docstring
     if output_namespace in ['test', 'tmp']:
         tmp_bucket_suffix = 'test-tmp'
@@ -210,8 +225,9 @@ def main(
         f'namespace: "{output_namespace}"',
         backend=backend,
     )
-
     local_tmp_dir = tempfile.mkdtemp()
+
+    sm_utils.update_sm_db = update_sm_db
 
     b = _add_jobs(
         b=b,
@@ -231,6 +247,7 @@ def main(
         skip_samples=skip_samples,
         use_gnarly=use_gnarly,
         use_as_vqsr=use_as_vqsr,
+        hc_shards_num=hc_shards_num,
         check_inputs_existence=check_inputs_existence,
     )
     if b:
@@ -249,13 +266,14 @@ def _add_jobs(  # pylint: disable=too-many-statements
     prod: bool,
     input_projects: Collection[str],
     output_projects: Collection[str],
-    vep_block_size,
+    vep_block_size: Optional[int],
     analysis_project: str,
     start_from_stage: Optional[str],
     end_with_stage: Optional[str],
     skip_samples: Collection[str],
     use_gnarly: bool,
     use_as_vqsr: bool,
+    hc_shards_num: int,
     check_inputs_existence: bool,
 ) -> Optional[hb.Batch]:
 
@@ -291,7 +309,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
 
     if end_with_stage == 'input':
         logger.info(f'Latest stage is {end_with_stage}, stopping the pipeline here.')
-        return None
+        return b
 
     all_samples = []
     for proj, samples in samples_by_project.items():
@@ -388,11 +406,11 @@ def _add_jobs(  # pylint: disable=too-many-statements
                 if not found_gvcf_path:
                     continue
             else:
-                if hc_intervals_j is None:
+                if hc_intervals_j is None and hc_shards_num > 1:
                     hc_intervals_j = _add_split_intervals_job(
                         b=b,
                         interval_list=utils.UNPADDED_INTERVALS,
-                        scatter_count=utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS,
+                        scatter_count=hc_shards_num,
                         ref_fasta=utils.REF_FASTA,
                     )
                 gvcf_job = _make_produce_gvcf_jobs(
@@ -402,6 +420,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
                     project_name=proj,
                     cram_path=found_cram_path,
                     intervals_j=hc_intervals_j,
+                    number_of_intervals=hc_shards_num,
                     reference=reference,
                     noalt_regions=noalt_regions,
                     tmp_bucket=tmp_bucket,
@@ -417,7 +436,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
 
     if end_with_stage == 'gvcf':
         logger.info(f'Latest stage is {end_with_stage}, stopping the pipeline here.')
-        return None
+        return b
 
     if not good_samples:
         logger.info('No samples left to joint-call')
@@ -469,7 +488,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
 
     if end_with_stage == 'joint_calling':
         logger.info(f'Latest stage is {end_with_stage}, stopping the pipeline here.')
-        return None
+        return b
 
     for project in output_projects:
         annotated_mt_path = f'{analysis_bucket}/mt/{project}.mt'
@@ -505,7 +524,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
                     '--disable-validation '
                     '--make-checkpoints '
                     f'--remap-tsv {sample_map_bucket_path} '
-                    + (f'--vep-block-size ' if vep_block_size else ''),
+                    + (f'--vep-block-size {vep_block_size} ' if vep_block_size else ''),
                     max_age='16h',
                     packages=utils.DATAPROC_PACKAGES,
                     num_secondary_workers=utils.NUMBER_OF_DATAPROC_WORKERS,
@@ -516,7 +535,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
 
         if end_with_stage == 'annotate':
             logger.info(
-                f'Latest stage is {end_with_stage}, stopping the pipeline here.'
+                f'Latest stage is {end_with_stage}, not creating ES index for {project}'
             )
             continue
 
@@ -750,7 +769,7 @@ set -ex
 
 {pull_inputs_cmd}
 
-bwa-mem2 mem -K 100000000 {'-p' if use_bazam else ''} -t{bwa_cpu} -Y \\
+bwa mem -K 100000000 {'-p' if use_bazam else ''} -t{bwa_cpu} -Y \\
         -R '{rg_line}' {reference.base} {r1_param} {r2_param} | \\
     samtools sort -T $(dirname {j.sorted_bam})/samtools-sort-tmp \\
         -Obam -o {j.sorted_bam}
@@ -758,9 +777,10 @@ bwa-mem2 mem -K 100000000 {'-p' if use_bazam else ''} -t{bwa_cpu} -Y \\
 df -h; pwd; du -sh $(dirname {j.sorted_bam})
     """
     j.command(command)
+    sorted_bam = j.sorted_bam
 
-    md_j = b.new_job('MarkDuplicates')
-    md_j.image(utils.ALIGNMENT_IMAGE)
+    md_j = b.new_job(f'{project_name}/{sample_name}: mark duplicates')
+    md_j.image(utils.PICARD_IMAGE)
     md_j.declare_resource_group(
         output_cram={
             'cram': '{root}.cram',
@@ -774,12 +794,12 @@ set -ex
 (while true; do df -h; pwd; du -sh $(dirname {md_j.output_cram.cram}); sleep 600; done) &
 
 picard MarkDuplicates \\
-    I={j.sorted_bam} O=/dev/stdout M={md_j.duplicate_metrics} \\
+    I={sorted_bam} O=/dev/stdout M={md_j.duplicate_metrics} \\
     TMP_DIR=$(dirname {md_j.output_cram.cram})/picard-tmp \\
     ASSUME_SORT_ORDER=coordinate | \\
-samtools view -@30 -T {reference.base} -O cram -o {md_j.output_cram.cram}
+samtools view -@32 -T {reference.base} -O cram -o {md_j.output_cram.cram}
 
-samtools index -@2 {md_j.output_cram.cram} {md_j.output_cram['cram.crai']}
+samtools index -@32 {md_j.output_cram.cram} {md_j.output_cram['cram.crai']}
 
 df -h; pwd; du -sh $(dirname {md_j.output_cram.cram})
     """
@@ -797,7 +817,7 @@ df -h; pwd; du -sh $(dirname {md_j.output_cram.cram})
         ),
     )
 
-    if analysis_project:
+    if sm_utils.update_sm_db:
         # Interacting with the sample metadata server:
         # 1. Create a "queued" analysis
         aid = sm_utils.create_analysis(
@@ -826,15 +846,16 @@ df -h; pwd; du -sh $(dirname {md_j.output_cram.cram})
             sample_name=sample_name,
         )
         # Set up dependencies
-        j.depends_on(sm_in_progress_j)
-        sm_completed_j.depends_on(j)
+        if j is not None:
+            j.depends_on(sm_in_progress_j)
+        sm_completed_j.depends_on(md_j)
         if depends_on:
             sm_in_progress_j.depends_on(*depends_on)
         logger.info(f'Queueing CRAM re-alignment analysis')
     else:
         sm_completed_j = None
-        if depends_on:
-            md_j.depends_on(*depends_on)
+        if j is not None and depends_on:
+            j.depends_on(*depends_on)
 
     if sm_completed_j:
         return sm_completed_j
@@ -848,7 +869,8 @@ def _make_produce_gvcf_jobs(
     sample_name: str,
     project_name: str,
     cram_path: str,
-    intervals_j: Job,
+    intervals_j: Optional[Job],
+    number_of_intervals: int,
     reference: hb.ResourceGroup,
     noalt_regions: hb.ResourceFile,
     tmp_bucket: str,  # pylint: disable=unused-argument
@@ -871,34 +893,52 @@ def _make_produce_gvcf_jobs(
         f'Submitting the variant calling jobs.'
     )
 
-    haplotype_caller_jobs = []
-    for idx in range(utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS):
-        haplotype_caller_jobs.append(
-            _add_haplotype_caller_job(
-                b,
-                sample_name=sample_name,
-                project_name=project_name,
-                cram=b.read_input_group(
-                    **{
-                        'cram': cram_path,
-                        'crai': cram_path + '.crai',
-                    }
-                ),
-                interval=intervals_j.intervals[f'interval_{idx}'],
-                reference=reference,
-                interval_idx=idx,
-                number_of_intervals=utils.NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS,
-                depends_on=depends_on,
-            )
-        )
     hc_gvcf_path = join(tmp_bucket, 'haplotypecaller', f'{sample_name}.g.vcf.gz')
-    merge_j = _add_merge_gvcfs_job(
-        b=b,
-        sample_name=sample_name,
-        project_name=project_name,
-        gvcfs=[j.output_gvcf for j in haplotype_caller_jobs],
-        output_gvcf_path=hc_gvcf_path,
-    )
+    haplotype_caller_jobs = []
+    if intervals_j is not None:
+        # Splitting variant calling by intervals
+        for idx in range(number_of_intervals):
+            haplotype_caller_jobs.append(
+                _add_haplotype_caller_job(
+                    b,
+                    sample_name=sample_name,
+                    project_name=project_name,
+                    cram=b.read_input_group(
+                        **{
+                            'cram': cram_path,
+                            'crai': cram_path + '.crai',
+                        }
+                    ),
+                    interval=intervals_j.intervals[f'interval_{idx}'],
+                    reference=reference,
+                    interval_idx=idx,
+                    number_of_intervals=number_of_intervals,
+                    depends_on=depends_on,
+                )
+            )
+        hc_j = _add_merge_gvcfs_job(
+            b=b,
+            sample_name=sample_name,
+            project_name=project_name,
+            gvcfs=[j.output_gvcf for j in haplotype_caller_jobs],
+            output_gvcf_path=hc_gvcf_path,
+        )
+    else:
+        hc_j = _add_haplotype_caller_job(
+            b,
+            sample_name=sample_name,
+            project_name=project_name,
+            cram=b.read_input_group(
+                **{
+                    'cram': cram_path,
+                    'crai': cram_path + '.crai',
+                }
+            ),
+            reference=reference,
+            depends_on=depends_on,
+            output_gvcf_path=hc_gvcf_path,
+        )
+        haplotype_caller_jobs.append(hc_j)
 
     postproc_job = _make_postproc_gvcf_jobs(
         b=b,
@@ -906,12 +946,13 @@ def _make_produce_gvcf_jobs(
         project_name=project_name,
         input_gvcf_path=hc_gvcf_path,
         out_gvcf_path=output_path,
+        reference=reference,
         noalt_regions=noalt_regions,
         overwrite=overwrite,
-        depends_on=[merge_j],
+        depends_on=[hc_j],
     )
 
-    if analysis_project:
+    if sm_utils.update_sm_db:
         # Interacting with the sample metadata server:
         # 1. Create a "queued" analysis
         aid = sm_utils.create_analysis(
@@ -961,6 +1002,7 @@ def _make_postproc_gvcf_jobs(
     sample_name: str,
     project_name: str,
     input_gvcf_path: str,
+    reference: hb.ResourceGroup,
     out_gvcf_path: str,
     noalt_regions: hb.ResourceFile,
     overwrite: bool,  # pylint: disable=unused-argument
@@ -973,6 +1015,7 @@ def _make_postproc_gvcf_jobs(
         input_gvcf=b.read_input_group(
             **{'g.vcf.gz': input_gvcf_path, 'g.vcf.gz.tbi': input_gvcf_path + '.tbi'}
         ),
+        reference=reference,
         overwrite=overwrite,
     )
     if depends_on:
@@ -994,6 +1037,7 @@ def _add_reblock_gvcf_job(
     sample_name: str,
     project_name: str,
     input_gvcf: hb.ResourceGroup,
+    reference: hb.ResourceGroup,
     overwrite: bool,
     output_gvcf_path: Optional[str] = None,
 ) -> Job:
@@ -1021,6 +1065,7 @@ def _add_reblock_gvcf_job(
         f"""
     gatk --java-options "-Xms{mem_gb - 1}g" \\
         ReblockGVCF \\
+        --reference {reference.base} \\
         -V {input_gvcf['g.vcf.gz']} \\
         -do-qual-approx \\
         -O {j.output_gvcf['g.vcf.gz']} \\
@@ -1148,7 +1193,7 @@ def _make_joint_genotype_jobs(
         ref_fasta=utils.REF_FASTA,
     )
 
-    if analysis_project:
+    if sm_utils.update_sm_db:
         # Interacting with the sample metadata server:
         # 1. Create a "queued" analysis
         aid = sm_utils.create_analysis(
@@ -1176,7 +1221,6 @@ def _make_joint_genotype_jobs(
         intervals_j.depends_on(sm_in_progress_j)
         if depends_on:
             sm_in_progress_j.depends_on(*depends_on)
-        logger.info(f'Queueing joint-calling with analysis ID: {aid}')
     else:
         if depends_on:
             intervals_j.depends_on(*depends_on)
@@ -1328,8 +1372,8 @@ def _add_haplotype_caller_job(
     sample_name: str,
     project_name: str,
     cram: hb.ResourceGroup,
-    interval: hb.ResourceFile,
     reference: hb.ResourceGroup,
+    interval: Optional[hb.ResourceFile] = None,
     interval_idx: Optional[int] = None,
     number_of_intervals: int = 1,
     depends_on: Optional[List[Job]] = None,
@@ -1341,7 +1385,7 @@ def _add_haplotype_caller_job(
     """
     job_name = f'{project_name}/{sample_name}: HaplotypeCaller'
     if interval_idx is not None:
-        job_name += f', {sample_name} {interval_idx}/{number_of_intervals}'
+        job_name += f', {interval_idx}/{number_of_intervals}'
     if utils.can_reuse(output_gvcf_path, overwrite):
         return b.new_job(f'{job_name} [reuse]')
 
@@ -1368,7 +1412,7 @@ def _add_haplotype_caller_job(
       HaplotypeCaller \\
       -R {reference.base} \\
       -I {cram['cram']} \\
-      -L {interval} \\
+      {f"-L {interval} " if interval is not None else ""} \\
       -O {j.output_gvcf['g.vcf.gz']} \\
       -G AS_StandardAnnotation \\
       -GQB 20 \
@@ -1378,7 +1422,7 @@ def _add_haplotype_caller_job(
     """
     )
     if output_gvcf_path:
-        b.write_output(j.output_gvcf, output_gvcf_path)
+        b.write_output(j.output_gvcf, output_gvcf_path.replace('.g.vcf.gz', ''))
     return j
 
 

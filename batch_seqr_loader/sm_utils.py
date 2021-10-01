@@ -30,6 +30,9 @@ aapi = AnalysisApi()
 seqapi = SequenceApi()
 
 
+update_sm_db = False  # pylint: disable=invalid-name
+
+
 @dataclass
 class Analysis:
     """
@@ -46,12 +49,10 @@ class Analysis:
         """
         Tries to updating the Analysis entry
         """
-        try:
-            aapi.update_analysis_status(self.id, AnalysisUpdateModel(status=status))
-        except exceptions.ApiException:
-            pass
-        else:
-            self.status = status
+        if not update_sm_db:
+            return
+        aapi.update_analysis_status(self.id, AnalysisUpdateModel(status=status))
+        self.status = status
 
 
 def _parse_analysis(data: Dict) -> Optional[Analysis]:
@@ -368,13 +369,14 @@ def create_analysis(
     """
     Tries to create an Analysis entry, returns its id if successfuly
     """
-    try:
-        am = AnalysisModel(
-            type=type_,
-            output=output,
-            status=status,
-            sample_ids=sample_ids,
-        )
-        return aapi.create_new_analysis(project=project, analysis_model=am)
-    except exceptions.ApiException:
+    if not update_sm_db:
         return None
+    am = AnalysisModel(
+        type=type_,
+        output=output,
+        status=status,
+        sample_ids=sample_ids,
+    )
+    aid = aapi.create_new_analysis(project=project, analysis_model=am)
+    logger.info(f'Queueing joint-calling with analysis ID: {aid}')
+    return aid
