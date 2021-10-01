@@ -770,9 +770,9 @@ set -ex
 {pull_inputs_cmd}
 
 bwa mem -K 100000000 {'-p' if use_bazam else ''} -t{bwa_cpu} -Y \\
-        -R '{rg_line}' {reference.base} {r1_param} {r2_param} | \\
-    samtools sort -T $(dirname {j.sorted_bam})/samtools-sort-tmp \\
-        -Obam -o {j.sorted_bam}
+    -R '{rg_line}' {reference.base} {r1_param} {r2_param} | \\
+samtools sort -T $(dirname {j.sorted_bam})/samtools-sort-tmp \\
+    -Obam -o {j.sorted_bam}
 
 df -h; pwd; du -sh $(dirname {j.sorted_bam})
     """
