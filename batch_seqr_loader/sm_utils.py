@@ -14,6 +14,7 @@ from sample_metadata import (
     SampleApi,
     AnalysisUpdateModel,
     AnalysisModel,
+    exceptions,
 )
 
 import utils
@@ -29,6 +30,9 @@ aapi = AnalysisApi()
 seqapi = SequenceApi()
 
 
+update_sm_db = False  # pylint: disable=invalid-name
+
+
 @dataclass
 class Analysis:
     """
@@ -40,6 +44,15 @@ class Analysis:
     status: str
     sample_ids: Set[str]
     output: Optional[str]
+
+    def update(self, status):
+        """
+        Tries to updating the Analysis entry
+        """
+        if not update_sm_db:
+            return
+        aapi.update_analysis_status(self.id, AnalysisUpdateModel(status=status))
+        self.status = status
 
 
 def _parse_analysis(data: Dict) -> Optional[Analysis]:
@@ -148,9 +161,7 @@ def process_existing_analysis(
             f'Invalidating the analysis {label} by setting the status to "failure", '
             f'and resubmitting the analysis.'
         )
-        aapi.update_analysis_status(
-            completed_analysis.id, AnalysisUpdateModel(status='failed')
-        )
+        completed_analysis.update(status='failed')
 
     # can reuse, need to create a completed one?
     if utils.file_exists(expected_output_fpath):
@@ -158,13 +169,13 @@ def process_existing_analysis(
             f'Output file {expected_output_fpath} already exists, so creating '
             f'an analysis {label} with status=completed'
         )
-        am = AnalysisModel(
-            type=analysis_type,
+        create_analysis(
+            project=analysis_project,
+            type_=analysis_type,
             output=expected_output_fpath,
             status='completed',
             sample_ids=analysis_sample_ids,
         )
-        aapi.create_new_analysis(project=analysis_project, analysis_model=am)
         return expected_output_fpath
 
     # proceeding with the standard pipeline (creating status=queued, submitting jobs)
@@ -208,11 +219,16 @@ def find_analyses_by_sid(
     sample (e.g. cram, gvcf)
     """
     analysis_per_sid: Dict[str, Analysis] = dict()
-    datas = aapi.get_latest_analysis_for_samples_and_type(
-        project=analysis_project,
-        analysis_type=analysis_type,
-        request_body=sample_ids,
-    )
+    try:
+        logger.info(f'Querying analysis entries for project {analysis_project}')
+        datas = aapi.get_latest_analysis_for_samples_and_type(
+            project=analysis_project,
+            analysis_type=analysis_type,
+            request_body=sample_ids,
+        )
+    except exceptions.ApiException:
+        return dict()
+
     for data in datas:
         a = _parse_analysis(data)
         if not a:
@@ -224,38 +240,42 @@ def find_analyses_by_sid(
     return analysis_per_sid
 
 
-def make_sm_in_progress_job(
-    b: Batch, analyais_type: str, analysis_project: str, analysis_id: str
-) -> Job:
+def make_sm_in_progress_job(*args, **kwargs) -> Job:
     """
     Creates a job that updates the sample metadata server entry analysis status
-    to in-progress
+    to "in-progress"
     """
-    return make_sm_update_status_job(
-        b, analyais_type, 'in-progress', analysis_project, analysis_id
-    )
+    kwargs['status'] = 'in-progress'
+    return make_sm_update_status_job(*args, **kwargs)
 
 
-def make_sm_completed_job(
-    b: Batch, analyais_type: str, sm_db_name: str, analysis_id: str
-) -> Job:
+def make_sm_completed_job(*args, **kwargs) -> Job:
     """
     Creates a job that updates the sample metadata server entry analysis status
-    to completed
+    to "completed"
     """
-    return make_sm_update_status_job(
-        b, analyais_type, 'completed', sm_db_name, analysis_id
-    )
+    kwargs['status'] = 'completed'
+    return make_sm_update_status_job(*args, **kwargs)
 
 
 def make_sm_update_status_job(
-    b: Batch, analysis_type: str, status: str, sm_db_name: str, analysis_id: str
+    b: Batch,
+    project: str,
+    analysis_id: str,
+    analysis_type: str,
+    status: str,
+    sample_name: Optional[str] = None,
+    project_name: Optional[str] = None,
 ) -> Job:
     """
     Creates a job that updates the sample metadata server entry analysis status.
     """
     assert status in ['in-progress', 'failed', 'completed', 'queued']
-    j = b.new_job(f'SM: update {analysis_type} to {status}')
+    job_name = ''
+    if project_name and sample_name:
+        job_name += f'{project_name}/{sample_name}: '
+    job_name += f'Update SM: {analysis_type} to {status}'
+    j = b.new_job(job_name)
     j.image(utils.SM_IMAGE)
     j.command(
         f"""
@@ -264,17 +284,22 @@ set -ex
 
 export GOOGLE_APPLICATION_CREDENTIALS=/gsa-key/key.json
 gcloud -q auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
-export SM_DEV_DB_PROJECT={sm_db_name}
+export SM_DEV_DB_PROJECT={project}
 export SM_ENVIRONMENT=PRODUCTION
 
 cat <<EOT >> update.py
 from sample_metadata.api import AnalysisApi
 from sample_metadata import AnalysisUpdateModel
+from sample_metadata import exceptions
+import traceback
 aapi = AnalysisApi()
-aapi.update_analysis_status(
-    analysis_id='{analysis_id}',
-    analysis_update_model=AnalysisUpdateModel(status='{status}'),
-)
+try:
+    aapi.update_analysis_status(
+        analysis_id='{analysis_id}',
+        analysis_update_model=AnalysisUpdateModel(status='{status}'),
+    )
+except exceptions.ApiException:
+    traceback.print_exc()
 EOT
 python update.py
     """
@@ -336,3 +361,22 @@ class AlignmentInput:
     index_path: Optional[str] = None
     fqs1: Optional[List[str]] = None
     fqs2: Optional[List[str]] = None
+
+
+def create_analysis(
+    project: str, type_: str, output: str, status: str, sample_ids: Collection[str]
+) -> Optional[int]:
+    """
+    Tries to create an Analysis entry, returns its id if successfuly
+    """
+    if not update_sm_db:
+        return None
+    am = AnalysisModel(
+        type=type_,
+        output=output,
+        status=status,
+        sample_ids=sample_ids,
+    )
+    aid = aapi.create_new_analysis(project=project, analysis_model=am)
+    logger.info(f'Queueing joint-calling with analysis ID: {aid}')
+    return aid

@@ -6,12 +6,10 @@ import hashlib
 import os
 import subprocess
 from os.path import join
-from typing import Iterable, Tuple, Optional, Dict
+from typing import Iterable, Tuple
 import logging
 from google.cloud import storage
 import hailtop.batch as hb
-from hailtop.batch import Batch
-from hailtop.batch.job import Job
 
 logger = logging.getLogger(__file__)
 logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
@@ -22,8 +20,8 @@ AR_REPO = 'australia-southeast1-docker.pkg.dev/cpg-common/images'
 GATK_VERSION = '4.2.2.0-cpgfix00'  # Our fork with a couple of fixes:
 # https://github.com/populationgenomics/production-pipelines/tree/initial/dockers/gatk
 GATK_IMAGE = f'{AR_REPO}/gatk:{GATK_VERSION}'
-PICARD_IMAGE = f'{AR_REPO}/picard-cloud:2.23.8'
-ALIGNMENT_IMAGE = f'{AR_REPO}/alignment:v4'
+PICARD_IMAGE = f'{AR_REPO}/picard_samtools:v0'
+ALIGNMENT_IMAGE = f'{AR_REPO}/alignment:v3'
 SOMALIER_IMAGE = f'{AR_REPO}/somalier:latest'
 PEDDY_IMAGE = f'{AR_REPO}/peddy:0.4.8--pyh5e36f6f_0'
 GNARLY_IMAGE = f'{AR_REPO}/gnarly_genotyper:hail_ukbb_300K'
@@ -34,14 +32,14 @@ NUMBER_OF_HAPLOTYPE_CALLER_INTERVALS = 50
 NUMBER_OF_GENOMICS_DB_INTERVALS = 50
 NUMBER_OF_DATAPROC_WORKERS = 50
 
-REF_BUCKET = 'gs://cpg-reference/hg38'
+REF_BUCKET = 'gs://cpg-reference'
 NOALT_REGIONS = join(REF_BUCKET, 'noalt.bed')
 SOMALIER_SITES = join(REF_BUCKET, 'somalier/v0/sites.hg38.vcf.gz')
 
-GATK_REF_BUCKET = f'{REF_BUCKET}/v1'
-REF_FASTA = join(GATK_REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
-DBSNP_VCF = join(GATK_REF_BUCKET, 'Homo_sapiens_assembly38.dbsnp138.vcf')
-UNPADDED_INTERVALS = join(GATK_REF_BUCKET, 'hg38.even.handcurated.20k.intervals')
+BROAD_REF_BUCKET = f'{REF_BUCKET}/hg38/v1'
+REF_FASTA = join(BROAD_REF_BUCKET, 'Homo_sapiens_assembly38.fasta')
+DBSNP_VCF = join(BROAD_REF_BUCKET, 'Homo_sapiens_assembly38.dbsnp138.vcf')
+UNPADDED_INTERVALS = join(BROAD_REF_BUCKET, 'hg38.even.handcurated.20k.intervals')
 
 DATAPROC_PACKAGES = [
     'seqr-loader',
@@ -121,120 +119,14 @@ def get_refs(b: hb.Batch) -> Tuple:
         fai=REF_FASTA + '.fai',
         dict=REF_FASTA.replace('.fasta', '').replace('.fna', '').replace('.fa', '')
         + '.dict',
+        sa=REF_FASTA + '.sa',
         amb=REF_FASTA + '.amb',
         ann=REF_FASTA + '.ann',
         pac=REF_FASTA + '.pac',
-        o123=REF_FASTA + '.0123',
-        bwa2bit64=REF_FASTA + '.bwt.2bit.64',
+        bwt=REF_FASTA + '.bwt',
     )
     noalt_regions = b.read_input(NOALT_REGIONS)
     return reference, bwa_reference, noalt_regions
-
-
-def make_sm_in_progress_job(*args, **kwargs) -> Job:
-    """
-    Creates a job that updates the sample metadata server entry analysis status
-    to "in-progress"
-    """
-    kwargs['status'] = 'in-progress'
-    return make_sm_update_status_job(*args, **kwargs)
-
-
-def make_sm_completed_job(*args, **kwargs) -> Job:
-    """
-    Creates a job that updates the sample metadata server entry analysis status
-    to "completed"
-    """
-    kwargs['status'] = 'completed'
-    return make_sm_update_status_job(*args, **kwargs)
-
-
-def make_sm_update_status_job(
-    b: Batch,
-    project: str,
-    analysis_id: str,
-    analysis_type: str,
-    status: str,
-    sample_name: Optional[str] = None,
-    project_name: Optional[str] = None,
-) -> Job:
-    """
-    Creates a job that updates the sample metadata server entry analysis status.
-    """
-    assert status in ['in-progress', 'failed', 'completed', 'queued']
-    job_name = ''
-    if project_name and sample_name:
-        job_name += f'{project_name}/{sample_name}: '
-    job_name += f'Update SM: {analysis_type} to {status}'
-    j = b.new_job(job_name)
-    j.image(SM_IMAGE)
-    j.command(
-        f"""
-set -o pipefail
-set -ex
-
-export GOOGLE_APPLICATION_CREDENTIALS=/gsa-key/key.json
-gcloud -q auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
-export SM_DEV_DB_PROJECT={project}
-export SM_ENVIRONMENT=PRODUCTION
-
-cat <<EOT >> update.py
-from sample_metadata.api import AnalysisApi
-from sample_metadata import AnalysisUpdateModel
-aapi = AnalysisApi()
-aapi.update_analysis_status(
-    analysis_id='{analysis_id}',
-    analysis_update_model=AnalysisUpdateModel(status='{status}'),
-)
-EOT
-python update.py
-    """
-    )
-    return j
-
-
-def replace_paths_to_test(s: Dict) -> Optional[Dict]:
-    """
-    Replace paths of all files in -main namespace to -test namespsace,
-    and return None if files in -test are not found.
-    :param s:
-    :return:
-    """
-
-    def fix(fpath):
-        fpath = fpath.replace('-main-upload/', '-test-upload/')
-        if not file_exists(fpath):
-            return None
-        return fpath
-
-    try:
-        reads_type = s['meta']['reads_type']
-        if reads_type in ('bam', 'cram'):
-            fpath = s['meta']['reads'][0]['location']
-            fpath = fix(fpath)
-            if not fpath:
-                return None
-            s['meta']['reads'][0]['location'] = fpath
-
-            fpath = s['meta']['reads'][0]['secondaryFiles'][0]['location']
-            fpath = fix(fpath)
-            if not fpath:
-                return None
-            s['meta']['reads'][0]['secondaryFiles'][0]['location'] = fpath
-
-        elif reads_type == 'fastq':
-            for li in range(len(s['meta']['reads'])):
-                for rj in range(len(s['meta']['reads'][li])):
-                    fpath = s['meta']['reads'][li][rj]['location']
-                    fpath = fix(fpath)
-                    if not fpath:
-                        return None
-                    s['meta']['reads'][li][rj]['location'] = fpath
-
-        logger.info(f'Found test sample {s["id"]}')
-        return s
-    except Exception:  # pylint: disable=broad-except
-        return None
 
 
 def gsutil_cp(

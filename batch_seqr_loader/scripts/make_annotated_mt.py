@@ -17,7 +17,8 @@ logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
 logger.setLevel(logging.INFO)
 
 GENOME_VERSION = 'GRCh38'
-REF_BUCKET = 'gs://cpg-reference/hg38/v1'
+REF_BUCKET = 'gs://cpg-reference'
+BROAD_REF_BUCKET = f'{REF_BUCKET}/hg38/v1'
 SEQR_REF_BUCKET = 'gs://cpg-seqr-reference-data'
 REF_HT = f'{SEQR_REF_BUCKET}/GRCh38/all_reference_data/v2/combined_reference_data_grch38-2.0.3.ht'
 CLINVAR_HT = f'{SEQR_REF_BUCKET}/GRCh38/clinvar/clinvar.GRCh38.2020-06-15.ht'
@@ -360,7 +361,7 @@ def add_37_coordinates(mt):
     """
     rg37 = hl.get_reference('GRCh37')
     rg38 = hl.get_reference('GRCh38')
-    rg38.add_liftover(join(REF_BUCKET, 'grch38_to_grch37.over.chain.gz'), rg37)
+    rg38.add_liftover(join(REF_BUCKET, 'liftover/grch38_to_grch37.over.chain.gz'), rg37)
     mt = mt.annotate_rows(rg37_locus=hl.liftover(mt.locus, 'GRCh37'))
     return mt
 
