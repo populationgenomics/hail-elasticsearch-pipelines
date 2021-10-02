@@ -1431,12 +1431,12 @@ def _add_merge_gvcfs_job(
     j.command(
         f"""set -e
 
-    (while true; do df -h; pwd; du -sh $(dirname {j.output_gvcf['g.vcf.gz']}); free -m; sleep 300; done) &
+    (while true; do df -h; pwd; du -sh $(dirname {j.output_gvcf['g.vcf.gz']}); sleep 300; done) &
 
     picard -Xms{java_mem}g \
     MergeVcfs {input_cmd} OUTPUT={j.output_gvcf['g.vcf.gz']}
 
-    df -h; pwd; du -sh $(dirname {j.output_gvcf['g.vcf.gz']}); free -m
+    df -h; pwd; du -sh $(dirname {j.output_gvcf['g.vcf.gz']})
       """
     )
     if output_gvcf_path:
