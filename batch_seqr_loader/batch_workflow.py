@@ -293,128 +293,121 @@ def _add_jobs(  # pylint: disable=too-many-statements
 
     # after dropping samples with incorrect metadata, missing inputs, etc
     good_samples: List[Dict] = []
-    if not (start_from_stage and start_from_stage not in ['input', 'cram', 'gvcf']):
-        good_samples = all_samples
-    else:
-        hc_intervals_j = None
-        for proj, samples in samples_by_project.items():
-            logger.info(f'Processing project {proj}')
-            proj_bucket = f'gs://cpg-{proj}-{output_suffix}'
-            sample_ids = [s['id'] for s in samples]
+    hc_intervals_j = None
+    for proj, samples in samples_by_project.items():
+        logger.info(f'Processing project {proj}')
+        proj_bucket = f'gs://cpg-{proj}-{output_suffix}'
+        sample_ids = [s['id'] for s in samples]
 
-            cram_analysis_per_sid = SMDB.find_analyses_by_sid(
-                sample_ids=sample_ids,
+        cram_analysis_per_sid = SMDB.find_analyses_by_sid(
+            sample_ids=sample_ids,
+            analysis_type='cram',
+            analysis_project=analysis_project,
+        )
+        gvcf_analysis_per_sid = SMDB.find_analyses_by_sid(
+            sample_ids=sample_ids,
+            analysis_type='gvcf',
+            analysis_project=analysis_project,
+        )
+        seq_info_by_sid = SMDB.find_seq_info_by_sid(sample_ids)
+
+        for s in samples:
+            logger.info(f'Project {proj}. Processing sample {s["id"]}')
+            expected_cram_path = f'{proj_bucket}/cram/{s["id"]}.cram'
+            skip_cram_stage = start_from_stage is not None and start_from_stage not in [
+                'cram'
+            ]
+            found_cram_path = SMDB.process_existing_analysis(
+                sample_ids=[s['id']],
+                completed_analysis=cram_analysis_per_sid.get(s['id']),
                 analysis_type='cram',
                 analysis_project=analysis_project,
+                analysis_sample_ids=[s['id']],
+                expected_output_fpath=expected_cram_path,
+                skip_stage=skip_cram_stage,
             )
-            gvcf_analysis_per_sid = SMDB.find_analyses_by_sid(
-                sample_ids=sample_ids,
-                analysis_type='gvcf',
-                analysis_project=analysis_project,
-            )
-            seq_info_by_sid = SMDB.find_seq_info_by_sid(sample_ids)
-
-            for s in samples:
-                logger.info(f'Project {proj}. Processing sample {s["id"]}')
-                expected_cram_path = f'{proj_bucket}/cram/{s["id"]}.cram'
-                skip_cram_stage = (
-                    start_from_stage is not None and start_from_stage not in ['cram']
-                )
-                found_cram_path = SMDB.process_existing_analysis(
-                    sample_ids=[s['id']],
-                    completed_analysis=cram_analysis_per_sid.get(s['id']),
-                    analysis_type='cram',
-                    analysis_project=analysis_project,
-                    analysis_sample_ids=[s['id']],
-                    expected_output_fpath=expected_cram_path,
-                    skip_stage=skip_cram_stage,
-                )
-                if skip_cram_stage:
-                    if not found_cram_path:
-                        continue
-                    cram_job = None
-                else:
-                    seq_info = seq_info_by_sid[s['id']]
-                    logger.info('Checking sequence.meta:')
-                    alignment_input = sm_get_reads_data(
-                        seq_info['meta'], check_existence=check_inputs_existence
-                    )
-                    if not alignment_input:
-                        logger.info('Checking sample.meta:')
-                        alignment_input = sm_get_reads_data(
-                            s['meta'], check_existence=check_inputs_existence
-                        )
-                    if alignment_input:
-                        cram_job = _make_realign_jobs(
-                            b=b,
-                            output_path=expected_cram_path,
-                            sample_name=s['id'],
-                            project_name=proj,
-                            alignment_input=alignment_input,
-                            reference=bwa_reference,
-                            analysis_project=analysis_project,
-                        )
-                    else:
-                        cram_job = b.new_job(
-                            'BWA [reuse: no input found, but output exists]'
-                        )
-                    found_cram_path = expected_cram_path
-
-                if end_with_stage == 'cram':
-                    logger.info(
-                        f'Latest stage is {end_with_stage}, stopping the pipeline here.'
-                    )
+            if skip_cram_stage:
+                if not found_cram_path:
                     continue
-
-                expected_gvcf_path = f'{proj_bucket}/gvcf/{s["id"]}.g.vcf.gz'
-                skip_gvcf_stage = (
-                    start_from_stage is not None
-                    and start_from_stage
-                    not in [
-                        'cram',
-                        'gvcf',
-                    ]
+                cram_job = None
+            else:
+                seq_info = seq_info_by_sid[s['id']]
+                logger.info('Checking sequence.meta:')
+                alignment_input = sm_get_reads_data(
+                    seq_info['meta'], check_existence=check_inputs_existence
                 )
-                found_gvcf_path = SMDB.process_existing_analysis(
-                    sample_ids=[s['id']],
-                    completed_analysis=gvcf_analysis_per_sid.get(s['id']),
-                    analysis_type='gvcf',
-                    analysis_project=analysis_project,
-                    analysis_sample_ids=[s['id']],
-                    expected_output_fpath=expected_gvcf_path,
-                    skip_stage=skip_gvcf_stage,
-                )
-                if skip_gvcf_stage:
-                    if not found_gvcf_path:
-                        continue
-                else:
-                    if hc_intervals_j is None and hc_shards_num > 1:
-                        hc_intervals_j = _add_split_intervals_job(
-                            b=b,
-                            interval_list=utils.UNPADDED_INTERVALS,
-                            scatter_count=hc_shards_num,
-                            ref_fasta=utils.REF_FASTA,
-                        )
-                    gvcf_job = _make_produce_gvcf_jobs(
+                if not alignment_input:
+                    logger.info('Checking sample.meta:')
+                    alignment_input = sm_get_reads_data(
+                        s['meta'], check_existence=check_inputs_existence
+                    )
+                if alignment_input:
+                    cram_job = _make_realign_jobs(
                         b=b,
-                        output_path=expected_gvcf_path,
+                        output_path=expected_cram_path,
                         sample_name=s['id'],
                         project_name=proj,
-                        cram_path=found_cram_path,
-                        intervals_j=hc_intervals_j,
-                        number_of_intervals=hc_shards_num,
-                        reference=reference,
-                        noalt_regions=noalt_regions,
-                        tmp_bucket=tmp_bucket,
-                        overwrite=overwrite,
-                        depends_on=[cram_job] if cram_job else [],
+                        alignment_input=alignment_input,
+                        reference=bwa_reference,
                         analysis_project=analysis_project,
                     )
-                    gvcf_jobs.append(gvcf_job)
-                    found_gvcf_path = expected_gvcf_path
-                if found_gvcf_path:
-                    gvcf_by_sid[s['id']] = found_gvcf_path
-                good_samples.append(s)
+                else:
+                    cram_job = b.new_job(
+                        'BWA [reuse: no input found, but output exists]'
+                    )
+                found_cram_path = expected_cram_path
+
+            if end_with_stage == 'cram':
+                logger.info(
+                    f'Latest stage is {end_with_stage}, stopping the pipeline here.'
+                )
+                continue
+
+            expected_gvcf_path = f'{proj_bucket}/gvcf/{s["id"]}.g.vcf.gz'
+            skip_gvcf_stage = start_from_stage is not None and start_from_stage not in [
+                'cram',
+                'gvcf',
+            ]
+            found_gvcf_path = SMDB.process_existing_analysis(
+                sample_ids=[s['id']],
+                completed_analysis=gvcf_analysis_per_sid.get(s['id']),
+                analysis_type='gvcf',
+                analysis_project=analysis_project,
+                analysis_sample_ids=[s['id']],
+                expected_output_fpath=expected_gvcf_path,
+                skip_stage=skip_gvcf_stage,
+            )
+            if skip_gvcf_stage:
+                if not found_gvcf_path:
+                    continue
+            else:
+                if hc_intervals_j is None and hc_shards_num > 1:
+                    hc_intervals_j = _add_split_intervals_job(
+                        b=b,
+                        interval_list=utils.UNPADDED_INTERVALS,
+                        scatter_count=hc_shards_num,
+                        ref_fasta=utils.REF_FASTA,
+                    )
+                gvcf_job = _make_produce_gvcf_jobs(
+                    b=b,
+                    output_path=expected_gvcf_path,
+                    sample_name=s['id'],
+                    project_name=proj,
+                    cram_path=found_cram_path,
+                    intervals_j=hc_intervals_j,
+                    number_of_intervals=hc_shards_num,
+                    reference=reference,
+                    noalt_regions=noalt_regions,
+                    tmp_bucket=tmp_bucket,
+                    overwrite=overwrite,
+                    depends_on=[cram_job] if cram_job else [],
+                    analysis_project=analysis_project,
+                )
+                gvcf_jobs.append(gvcf_job)
+                found_gvcf_path = expected_gvcf_path
+            if found_gvcf_path:
+                gvcf_by_sid[s['id']] = found_gvcf_path
+            good_samples.append(s)
 
     if end_with_stage == 'gvcf':
         logger.info(f'Latest stage is {end_with_stage}, stopping the pipeline here.')
