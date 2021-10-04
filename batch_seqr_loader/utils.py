@@ -44,6 +44,7 @@ UNPADDED_INTERVALS = join(BROAD_REF_BUCKET, 'hg38.even.handcurated.20k.intervals
 
 DATAPROC_PACKAGES = [
     'seqr-loader',
+    'cpg-gnomad',
     'click',
     'google',
     'slackclient',
