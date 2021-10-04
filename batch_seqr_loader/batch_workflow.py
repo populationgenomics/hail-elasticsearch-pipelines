@@ -465,6 +465,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
             local_tmp_dir=local_tmp_dir,
             overwrite=overwrite,
             use_gnarly=use_gnarly,
+            depends_on=[intervals_j],
         )
     joint_calling_tmp_bucket = f'{tmp_bucket}/vqsr/{samples_hash}'
     vqsr_job = _make_vqsr_jobs(
@@ -1130,6 +1131,7 @@ def _make_joint_genotype_jobs(
     local_tmp_dir: str,
     overwrite: bool,
     use_gnarly: bool = False,
+    depends_on: Optional[List[Job]] = None,
 ) -> Job:
     """
     Assumes all samples have a 'file' of 'type'='gvcf' in `samples_df`.
@@ -1185,6 +1187,7 @@ def _make_joint_genotype_jobs(
                 interval=intervals[f'interval_{idx}'],
                 interval_idx=idx,
                 number_of_intervals=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
+                depends_on=depends_on,
             )
             import_gvcfs_job_per_interval[idx] = import_gvcfs_job
 
