@@ -465,7 +465,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
             local_tmp_dir=local_tmp_dir,
             overwrite=overwrite,
             use_gnarly=use_gnarly,
-            depends_on=[intervals_j],
+            depends_on=[intervals_j] + gvcf_jobs,
         )
     joint_calling_tmp_bucket = f'{tmp_bucket}/vqsr/{samples_hash}'
     vqsr_job = _make_vqsr_jobs(
