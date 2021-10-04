@@ -62,7 +62,10 @@ run_seqr_loader_prod:
 	--reuse \
 	--keep-scratch \
 	--skip-check-inputs-existence \
-	--hc-shards-num 10
+	--hc-shards-num 10 \
+	--skip-update-sm-db \
+	--start-from-stage annotate \
+	-S CPG13326
 
 .PHONY: run_seqr_loader_prod_test
 run_seqr_loader_prod_test:
