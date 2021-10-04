@@ -110,9 +110,6 @@ def main(
     clinvar = hl.read_table(CLINVAR_HT)
 
     mt = compute_annotated_vcf(mt, ref_data=ref_data, clinvar=clinvar)
-    if make_checkpoints:
-        mt.write(join(work_bucket, 'compute_annotated_vcf.mt'), overwrite=True)
-
     mt = mt.annotate_globals(
         sourceFilePath=','.join(vcf_path),
         genomeVersion=GENOME_VERSION.replace('GRCh', ''),
@@ -121,7 +118,7 @@ def main(
     )
 
     mt.describe()
-    mt.write(dest_path, stage_locally=True, overwrite=True)
+    mt.write(dest_path, overwrite=True)
 
 
 def annotate_vqsr(mt, vqsr_ht):

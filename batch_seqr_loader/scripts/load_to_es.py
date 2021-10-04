@@ -52,6 +52,11 @@ logger.setLevel(logging.INFO)
     'and a calculated value based on the matrix.',
 )
 @click.option(
+    '--sample-list',
+    'sample_list_fpath',
+    help='File with a comma-separated list of samples to subset the input matrix table to',
+)
+@click.option(
     '--prod', is_flag=True, help='Run under the production ES credentials instead'
 )
 @click.option('--genome-version', 'genome_version', default='GRCh38')
@@ -64,6 +69,7 @@ def main(
     es_index: str,
     es_index_min_num_shards: int,
     genome_version: str,
+    sample_list_fpath: str,
     prod: bool,  # pylint: disable=unused-argument
 ):  # pylint: disable=missing-function-docstring
     hl.init(default_reference=genome_version)
@@ -89,6 +95,12 @@ def main(
     )
 
     mt = hl.read_matrix_table(mt_path)
+
+    # Subsetting to requested samples
+    with hl.hadoop_open(sample_list_fpath, 'r') as f:
+        sample_list = f.read().strip().split(',')
+    mt = mt.filter_cols(hl.set(sample_list).contains(mt.s))
+
     row_table = SeqrVariantsAndGenotypesSchema.elasticsearch_row(mt)
     es_shards = _mt_num_shards(mt, es_index_min_num_shards)
     es.export_table_to_elasticsearch(

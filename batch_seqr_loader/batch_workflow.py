@@ -484,69 +484,76 @@ def _add_jobs(  # pylint: disable=too-many-statements
         logger.info(f'Latest stage is {end_with_stage}, stopping the pipeline here.')
         return b
 
-    for project in output_projects:
-        annotated_mt_path = f'{analysis_bucket}/mt/{project}.mt'
-
-        skip_anno_stage = start_from_stage is not None and start_from_stage not in [
-            'cram',
-            'gvcf',
-            'joint_calling',
-            'annotate',
-        ]
-        if skip_anno_stage:
-            annotate_job = None
+    annotated_mt_path = f'{analysis_bucket}/mt/seqr.mt'
+    skip_anno_stage = start_from_stage is not None and start_from_stage not in [
+        'cram',
+        'gvcf',
+        'joint_calling',
+        'annotate',
+    ]
+    if skip_anno_stage:
+        annotate_job = None
+    else:
+        anno_tmp_bucket = f'{tmp_bucket}/annotation'
+        if utils.can_reuse(annotated_mt_path, overwrite):
+            annotate_job = b.new_job(f'Make MT and annotate [reuse]')
         else:
-            anno_tmp_bucket = f'{tmp_bucket}/annotation/{project}'
-            if utils.can_reuse(annotated_mt_path, overwrite):
-                annotate_job = b.new_job(f'{project}: annotate [reuse]')
-            else:
-                sample_map_bucket_path = f'{anno_tmp_bucket}/external_id_map.tsv'
-                sample_map_local_fpath = join(
-                    local_tmp_dir, basename(sample_map_bucket_path)
-                )
-                with open(sample_map_local_fpath, 'w') as f:
-                    f.write('\t'.join(['s', 'seqr_id']) + '\n')
-                    for s in good_samples:
-                        f.write('\t'.join([s['id'], s['external_id']]) + '\n')
-                utils.gsutil_cp(sample_map_local_fpath, sample_map_bucket_path)
-                annotate_job = dataproc.hail_dataproc_job(
-                    b,
-                    f'batch_seqr_loader/scripts/make_annotated_mt.py '
-                    f'--vcf-path {expected_jc_vcf_path} '
-                    f'--site-only-vqsr-vcf-path {expected_vqsr_site_only_vcf_path} '
-                    f'--dest-mt-path {annotated_mt_path} '
-                    f'--bucket {anno_tmp_bucket} '
-                    '--disable-validation '
-                    '--make-checkpoints '
-                    f'--remap-tsv {sample_map_bucket_path} '
-                    + (f'--vep-block-size {vep_block_size} ' if vep_block_size else ''),
-                    max_age='16h',
-                    packages=utils.DATAPROC_PACKAGES,
-                    num_secondary_workers=utils.NUMBER_OF_DATAPROC_WORKERS,
-                    job_name=f'Annotate {project}',
-                    vep='GRCh38',
-                    depends_on=[vqsr_job] if vqsr_job else [],
-                )
-
-        if end_with_stage == 'annotate':
-            logger.info(
-                f'Latest stage is {end_with_stage}, not creating ES index for {project}'
+            sample_map_bucket_path = f'{anno_tmp_bucket}/external_id_map.tsv'
+            sample_map_local_fpath = join(
+                local_tmp_dir, basename(sample_map_bucket_path)
             )
-            continue
+            with open(sample_map_local_fpath, 'w') as f:
+                f.write('\t'.join(['s', 'seqr_id']) + '\n')
+                for s in good_samples:
+                    f.write('\t'.join([s['id'], s['external_id']]) + '\n')
+            utils.gsutil_cp(sample_map_local_fpath, sample_map_bucket_path)
+            annotate_job = dataproc.hail_dataproc_job(
+                b,
+                f'batch_seqr_loader/scripts/make_annotated_mt.py '
+                f'--vcf-path {expected_jc_vcf_path} '
+                f'--site-only-vqsr-vcf-path {expected_vqsr_site_only_vcf_path} '
+                f'--dest-mt-path {annotated_mt_path} '
+                f'--bucket {anno_tmp_bucket} '
+                '--disable-validation '
+                '--make-checkpoints '
+                f'--remap-tsv {sample_map_bucket_path} '
+                + (f'--vep-block-size {vep_block_size} ' if vep_block_size else ''),
+                max_age='16h',
+                packages=utils.DATAPROC_PACKAGES,
+                num_secondary_workers=utils.NUMBER_OF_DATAPROC_WORKERS,
+                job_name=f'Annotating',
+                vep='GRCh38',
+                depends_on=[vqsr_job] if vqsr_job else [],
+            )
+
+    if end_with_stage == 'annotate':
+        logger.info(f'Latest stage is {end_with_stage}, not creating ES indices')
+        return b
+
+    for proj in output_projects:
+        # Make a list of project samples to subset from the entire matrix table
+        samples = samples_by_project.get(proj)
+        sample_ids = [s['id'] for s in samples]
+        sample_list_path = join(tmp_bucket, f'{proj}_samples.txt')
+        sample_list_local_fpath = join(local_tmp_dir, basename(sample_list_path))
+        with open(sample_list_path, 'w') as f:
+            f.write(','.join(sample_ids))
+        utils.gsutil_cp(sample_list_path, sample_list_local_fpath)
 
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         dataproc.hail_dataproc_job(
             b,
             f'batch_seqr_loader/scripts/load_to_es.py '
             f'--mt-path {annotated_mt_path} '
-            f'--es-index {project}-{output_version}-{timestamp} '
+            f'--es-index {proj}-{output_version}-{timestamp} '
             f'--es-index-min-num-shards 1 '
+            f'--sample-list {sample_list_local_fpath} '
             f'--genome-version GRCh38 '
             f'{"--prod" if prod else ""}',
             max_age='16h',
             packages=utils.DATAPROC_PACKAGES,
             num_secondary_workers=10,
-            job_name=f'{project}: add to the ES index',
+            job_name=f'{proj}: add to the ES index',
             depends_on=[annotate_job],
             scopes=['cloud-platform'],
         )
