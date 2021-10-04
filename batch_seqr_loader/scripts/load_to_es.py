@@ -90,12 +90,14 @@ def main(
 
     mt = hl.read_matrix_table(mt_path)
     row_table = SeqrVariantsAndGenotypesSchema.elasticsearch_row(mt)
+    es_shards = _mt_num_shards(mt, es_index_min_num_shards)
     es.export_table_to_elasticsearch(
         row_table,
         index_name=es_index.lower(),
-        num_shards=_mt_num_shards(mt, es_index_min_num_shards),
+        num_shards=es_shards,
         write_null_values=True,
     )
+    _cleanup(es, es_index, es_shards)
 
 
 def _read_es_password(
@@ -119,6 +121,13 @@ def _mt_num_shards(mt, es_index_min_num_shards):
     denominator = 1.4 * 10 ** 9
     calculated_num_shards = math.ceil((mt.count_rows() * mt.count_cols()) / denominator)
     return max(es_index_min_num_shards, calculated_num_shards)
+
+
+def _cleanup(es, es_index, es_shards):
+    es.route_index_off_temp_es_cluster(es_index)
+    # Current disk configuration requires the previous index to be deleted prior to large indices, ~1TB, transferring off loading nodes
+    if es_shards < 25:
+        es.wait_for_shard_transfer(es_index)
 
 
 if __name__ == '__main__':
