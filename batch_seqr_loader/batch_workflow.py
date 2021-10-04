@@ -1577,6 +1577,9 @@ def _add_import_gvcfs_job(
 
     (while true; do df -h; pwd; free -m; sleep 300; done) &
 
+    export GOOGLE_APPLICATION_CREDENTIALS=/gsa-key/key.json
+    gcloud -q auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
+
     echo "Adding {len(sample_names_to_add)} samples: {', '.join(sample_names_to_add)}"
     {f'echo "Skipping adding {len(sample_names_to_skip)} samples that are already in the DB: '
      f'{", ".join(sample_names_to_skip)}"' if sample_names_to_skip else ''}
