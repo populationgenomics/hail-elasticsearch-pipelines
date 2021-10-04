@@ -672,7 +672,7 @@ def _make_realign_jobs(
     When the input is CRAM/BAM, uses Bazam to stream reads to BWA.
     """
     job_name = f'{project_name}/{sample_name}: BWA align'
-    if utils.file_exists(output_path):
+    if utils.file_exists(output_path) and utils.file_exists(output_path + '.crai'):
         return b.new_job(f'{job_name} [reuse]')
 
     logger.info(f'Submitting alignment to write {output_path} for {sample_name}. ')
@@ -780,7 +780,7 @@ df -h; pwd; du -sh $(dirname {md_j.output_cram.cram})
     """
     md_j.command(command)
     md_j.cpu(2)
-    md_j.memory('standard')
+    md_j.memory('highmem')
     md_j.storage('150G')
     b.write_output(md_j.output_cram, splitext(output_path)[0])
     b.write_output(
@@ -1221,7 +1221,6 @@ def _make_joint_genotype_jobs(
             import_gvcfs_job_per_interval[idx] = import_gvcfs_job
 
     scattered_vcf_by_interval: Dict[int, hb.ResourceGroup] = dict()
-
     joint_calling_tmp_bucket = f'{tmp_bucket}/joint_calling/{samples_hash}'
     pre_vqsr_vcf_path = f'{joint_calling_tmp_bucket}/gathered.vcf.gz'
     if not utils.can_reuse(pre_vqsr_vcf_path, overwrite):
@@ -1252,6 +1251,7 @@ def _make_joint_genotype_jobs(
                     interval_idx=idx,
                     number_of_intervals=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
                     interval=intervals_j.intervals[f'interval_{idx}'],
+                    output_vcf_path=joint_called_vcf_path,
                 )
                 if import_gvcfs_job_per_interval.get(idx):
                     genotype_vcf_job.depends_on(import_gvcfs_job_per_interval.get(idx))
@@ -1268,14 +1268,21 @@ def _make_joint_genotype_jobs(
                 else:
                     last_job = genotype_vcf_job
 
+                last_job = _add_make_sites_only_job(
+                    b=b,
+                    input_vcf=last_job.output_vcf,
+                    overwrite=overwrite,
+                )
                 scattered_vcf_by_interval[idx] = last_job.output_vcf
 
+    scattered_vcfs = list(scattered_vcf_by_interval.values())
     logger.info(f'Queueing gather-VCF job')
     final_gathered_vcf_job = _add_final_gather_vcf_job(
         b,
-        input_vcfs=list(scattered_vcf_by_interval.values()),
+        input_vcfs=scattered_vcfs,
         overwrite=overwrite,
         output_vcf_path=pre_vqsr_vcf_path,
+        is_allele_specific=use_as_vqsr,
     )
 
     tmp_vqsr_bucket = f'{joint_calling_tmp_bucket}/vqsr'
@@ -1283,7 +1290,7 @@ def _make_joint_genotype_jobs(
     vqsr_job = make_vqsr_jobs(
         b,
         input_vcf_gathered=pre_vqsr_vcf_path,
-        input_vcfs_scattered=list(scattered_vcf_by_interval.values()),
+        input_vcfs_scattered=scattered_vcfs,
         is_small_callset=is_small_callset,
         is_huge_callset=is_huge_callset,
         work_bucket=tmp_vqsr_bucket,
@@ -1851,6 +1858,7 @@ def _add_final_gather_vcf_job(
     input_vcfs: List[hb.ResourceGroup],
     overwrite: bool,
     output_vcf_path: str = None,
+    is_allele_specific: bool = True,
 ) -> Job:
     """
     Combines per-interval scattered VCFs into a single VCF.
@@ -1865,7 +1873,7 @@ def _add_final_gather_vcf_job(
     j.cpu(2)
     java_mem = 7
     j.memory('standard')  # ~ 4G/core ~ 7.5G
-    j.storage(f'{1 + len(input_vcfs) * 1}G')
+    j.storage(f'{1 + len(input_vcfs) * (0.1 if is_allele_specific else 2)}G')
     j.declare_resource_group(
         output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
     )
