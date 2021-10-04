@@ -11,6 +11,7 @@ from os.path import join
 import click
 import hail as hl
 from lib.model.seqr_mt_schema import SeqrVariantsAndGenotypesSchema
+from lib.model.base_mt_schema import row_annotation
 from gnomad.utils.sparse_mt import split_info_annotation
 from gnomad.utils.filtering import add_filters_expr
 
@@ -257,8 +258,26 @@ def annotate_old_and_split_multi_hts(mt):
     )
 
 
+class SeqrVariantsAndGenotypesSchemaAS(SeqrVariantsAndGenotypesSchema):
+    """
+    Split VQSR AC/AF/AN fields are pure integers, not arrays
+    """
+
+    @row_annotation(name='AC')
+    def ac(self):
+        return self.mt.info.AC
+
+    @row_annotation(name='AF')
+    def af(self):
+        return self.mt.info.AF
+
+    @row_annotation(name='AN')
+    def an(self):
+        return self.mt.info.AN
+
+
 def compute_annotated_vcf(
-    mt, ref_data, clinvar, schema_cls=SeqrVariantsAndGenotypesSchema
+    mt, ref_data, clinvar, schema_cls=SeqrVariantsAndGenotypesSchemaAS
 ):
     """
     Returns a matrix table with an annotated rows where each row annotation is a previously called
