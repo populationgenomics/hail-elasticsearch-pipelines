@@ -534,11 +534,11 @@ def _add_jobs(  # pylint: disable=too-many-statements
         # Make a list of project samples to subset from the entire matrix table
         samples = samples_by_project.get(proj)
         sample_ids = [s['id'] for s in samples]
-        sample_list_path = join(tmp_bucket, f'{proj}_samples.txt')
-        sample_list_local_fpath = join(local_tmp_dir, basename(sample_list_path))
-        with open(sample_list_path, 'w') as f:
+        sample_list_gcs_path = join(tmp_bucket, f'{proj}_samples.txt')
+        sample_list_local_fpath = join(local_tmp_dir, basename(sample_list_gcs_path))
+        with open(sample_list_local_fpath, 'w') as f:
             f.write(','.join(sample_ids))
-        utils.gsutil_cp(sample_list_path, sample_list_local_fpath)
+        utils.gsutil_cp(sample_list_local_fpath, sample_list_gcs_path)
 
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         dataproc.hail_dataproc_job(
