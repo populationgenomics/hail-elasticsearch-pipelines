@@ -97,7 +97,7 @@ def main(
     mt = compute_variant_annotated_vcf(mt, ref_data=ref_data, clinvar=clinvar)
 
     mt = mt.annotate_globals(
-        sourceFilePath=','.join(vcf_path),
+        sourceFilePath=vcf_path,
         genomeVersion=GENOME_VERSION.replace('GRCh', ''),
         sampleType='WGS',
         hail_version=hl.version(),
