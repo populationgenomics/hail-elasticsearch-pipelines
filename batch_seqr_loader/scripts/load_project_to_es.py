@@ -174,12 +174,14 @@ def _cleanup(es, es_index, es_shards):
 
 def _subset_samples_and_variants(mt, subset_tsv_path: str) -> hl.MatrixTable:
     """
-    Subset the MatrixTable to the provided list of samples and to variants present in those samples
+    Subset the MatrixTable to the provided list of samples and to variants present 
+    in those samples
     :param mt: MatrixTable from VCF
-    :param subset_path: path to a TSV file with a single column 's'
+    :param subset_tsv_path: path to a TSV file with a single column 's', with no header
     :return: MatrixTable subsetted to list of samples
     """
-    subset_ht = hl.import_table(subset_tsv_path, key='s')
+    subset_ht = hl.import_table(subset_tsv_path, no_header=True)
+    subset_ht = subset_ht.transmute(s=subset_ht.f0).key_by('s')
     subset_count = subset_ht.count()
     anti_join_ht = subset_ht.anti_join(mt.cols())
     anti_join_ht_count = anti_join_ht.count()
@@ -210,7 +212,8 @@ def _remap_sample_ids(mt, remap_tsv_path: str) -> hl.MatrixTable:
     (the sample ID used within seqr).
     If the sample 's' does not have a 'seqr_id' in the remap file, 's' becomes 'seqr_id'
     :param mt: MatrixTable from VCF
-    :param remap_path: Path to a file with two columns 's' and 'seqr_id'
+    :param remap_tsv_path: Path to a file with two columns 's' and 'seqr_id', 
+        with a header
     :return: MatrixTable remapped and keyed to use seqr_id
     """
     remap_ht = hl.import_table(remap_tsv_path, key='s')
