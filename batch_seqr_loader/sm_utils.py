@@ -75,7 +75,7 @@ class SMDB:
             samples_by_project[proj] = []
             for s in samples:
                 if skip_samples and s['id'] in skip_samples:
-                    logger.info(f'Skiping sample: {s["id"]}')
+                    logger.info(f'Skipping sample: {s["id"]}')
                     continue
                 samples_by_project[proj].append(s)
         return samples_by_project
