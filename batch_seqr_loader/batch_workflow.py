@@ -1246,7 +1246,7 @@ def _make_joint_genotype_jobs(
                 if import_gvcfs_job_per_interval.get(idx):
                     genotype_vcf_job.depends_on(import_gvcfs_job_per_interval.get(idx))
 
-                if is_small_callset:
+                if not is_small_callset:
                     logger.info(f'Queueing exccess het filter job')
                     exccess_filter_job = _add_exccess_het_filter(
                         b,

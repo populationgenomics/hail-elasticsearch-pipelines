@@ -1,4 +1,4 @@
-TEST_VERSION := v2-4
+TEST_VERSION := v2-5
 PROD_VERSION := v3-0
 
 .PHONY: package
