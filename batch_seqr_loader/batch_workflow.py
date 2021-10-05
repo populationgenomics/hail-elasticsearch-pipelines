@@ -553,7 +553,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         dataproc.hail_dataproc_job(
             b,
-            f'batch_seqr_loader/scripts/load_project_to_es.py.py '
+            f'batch_seqr_loader/scripts/load_project_to_es.py '
             f'--mt-path {annotated_mt_path} '
             '--make-checkpoints '
             f'--bucket {proj_tmp_bucket} '
