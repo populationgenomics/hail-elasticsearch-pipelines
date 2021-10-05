@@ -18,6 +18,7 @@ import pandas as pd
 import click
 import hailtop.batch as hb
 from analysis_runner import dataproc
+import hail as hl
 from hailtop.batch.job import Job
 from find_inputs import sm_get_reads_data, AlignmentInput
 from vqsr import make_vqsr_jobs
@@ -500,22 +501,14 @@ def _add_jobs(  # pylint: disable=too-many-statements
         'joint_calling',
         'annotate',
     ]
+
+    anno_tmp_bucket = f'{tmp_bucket}/mt'
     if skip_anno_stage:
         annotate_job = None
     else:
-        anno_tmp_bucket = f'{tmp_bucket}/annotation'
         if utils.can_reuse(annotated_mt_path, overwrite):
             annotate_job = b.new_job(f'Make MT and annotate [reuse]')
         else:
-            sample_map_bucket_path = f'{anno_tmp_bucket}/external_id_map.tsv'
-            sample_map_local_fpath = join(
-                local_tmp_dir, basename(sample_map_bucket_path)
-            )
-            with open(sample_map_local_fpath, 'w') as f:
-                f.write('\t'.join(['s', 'seqr_id']) + '\n')
-                for s in good_samples:
-                    f.write('\t'.join([s['id'], s['external_id']]) + '\n')
-            utils.gsutil_cp(sample_map_local_fpath, sample_map_bucket_path)
             annotate_job = dataproc.hail_dataproc_job(
                 b,
                 f'batch_seqr_loader/scripts/make_annotated_mt.py '
@@ -525,7 +518,6 @@ def _add_jobs(  # pylint: disable=too-many-statements
                 f'--bucket {anno_tmp_bucket} '
                 '--disable-validation '
                 '--make-checkpoints '
-                f'--remap-tsv {sample_map_bucket_path} '
                 + (f'--vep-block-size {vep_block_size} ' if vep_block_size else ''),
                 max_age='16h',
                 packages=utils.DATAPROC_PACKAGES,
@@ -540,15 +532,19 @@ def _add_jobs(  # pylint: disable=too-many-statements
         return b
 
     for proj in output_projects:
-        proj_tmp_bucket = f'{tmp_bucket}/{proj}'
+        proj_tmp_bucket = f'{anno_tmp_bucket}/{proj}'
         # Make a list of project samples to subset from the entire matrix table
         samples = samples_by_project.get(proj)
         sample_ids = [s['id'] for s in samples]
-        sample_list_gcs_path = join(proj_tmp_bucket, f'{proj}_samples.txt')
-        sample_list_local_fpath = join(local_tmp_dir, basename(sample_list_gcs_path))
-        with open(sample_list_local_fpath, 'w') as f:
-            f.write(','.join(sample_ids))
-        utils.gsutil_cp(sample_list_local_fpath, sample_list_gcs_path)
+        subset_path = f'{proj_tmp_bucket}/samples.txt'
+        with hl.hadoop_open(subset_path, 'w') as f:
+            f.write('\n'.join(sample_ids))
+
+        remap_path = f'{proj_tmp_bucket}/external_id_map.tsv'
+        with open(remap_path, 'w') as f:
+            f.write('\t'.join(['s', 'seqr_id']) + '\n')
+            for s in samples:
+                f.write('\t'.join([s['id'], s['external_id']]) + '\n')
 
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         dataproc.hail_dataproc_job(
@@ -559,13 +555,14 @@ def _add_jobs(  # pylint: disable=too-many-statements
             f'--bucket {proj_tmp_bucket} '
             f'--es-index {proj}-{output_version}-{timestamp} '
             f'--es-index-min-num-shards 1 '
-            f'--sample-list {sample_list_gcs_path} '
+            f'--subset-tsv {subset_path} '
+            f'--remap-tsv {remap_path} '
             f'--genome-version GRCh38 '
             f'{"--prod" if prod else ""}',
             max_age='16h',
             packages=utils.DATAPROC_PACKAGES,
             num_secondary_workers=10,
-            job_name=f'{proj}: add to the ES index',
+            job_name=f'{proj}: annotate project and create ES index',
             depends_on=[annotate_job],
             scopes=['cloud-platform'],
         )

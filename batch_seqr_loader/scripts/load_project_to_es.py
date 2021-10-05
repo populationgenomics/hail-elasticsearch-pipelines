@@ -59,9 +59,14 @@ logger.setLevel(logging.INFO)
     'and a calculated value based on the matrix.',
 )
 @click.option(
-    '--sample-list',
-    'sample_list_fpath',
-    help='File with a comma-separated list of samples to subset the input matrix table to',
+    '--remap-tsv',
+    'remap_tsv_path',
+    help='Path to a TSV file with two columns: s and seqr_id.',
+)
+@click.option(
+    '--subset-tsv',
+    'subset_tsv_path',
+    help='Path to a TSV file with one column of sample IDs: s.',
 )
 @click.option(
     '--prod', is_flag=True, help='Run under the production ES credentials instead'
@@ -82,7 +87,8 @@ def main(
     es_password: str,
     es_index: str,
     es_index_min_num_shards: int,
-    sample_list_fpath: str,
+    remap_tsv_path: str,
+    subset_tsv_path: str,
     prod: bool,  # pylint: disable=unused-argument
     genome_version: str,
     make_checkpoints: bool = False,
@@ -111,20 +117,22 @@ def main(
 
     mt = hl.read_matrix_table(mt_path)
 
-    # Subsetting to requested samples
-    with hl.hadoop_open(sample_list_fpath, 'r') as f:
-        sample_list = f.read().strip().split(',')
-    mt = mt.filter_cols(hl.set(sample_list).contains(mt.s))
+    logger.info('Subsetting to the requested set of samples')
+    if subset_tsv_path:
+        mt = _subset_samples_and_variants(mt, subset_tsv_path)
 
     logger.info('Annotating genotypes')
     mt = _compute_genotype_annotated_vcf(mt)
     if make_checkpoints:
         mt = mt.checkpoint(join(work_bucket, 'annotated_genotype.mt'), overwrite=True)
 
-    row_table = SeqrGenotypesESSchema.elasticsearch_row(mt)
+    logger.info('Remapping internal IDs back to external IDs')
+    if remap_tsv_path:
+        mt = _remap_sample_ids(mt, remap_tsv_path)
 
+    logger.info('Getting rows and exporting to the ES')
+    row_table = SeqrGenotypesESSchema.elasticsearch_row(mt)
     es_shards = _mt_num_shards(mt, es_index_min_num_shards)
-    logger.info('Exporting to ES')
     es.export_table_to_elasticsearch(
         row_table,
         index_name=es_index.lower(),
@@ -162,6 +170,68 @@ def _cleanup(es, es_index, es_shards):
     # Current disk configuration requires the previous index to be deleted prior to large indices, ~1TB, transferring off loading nodes
     if es_shards < 25:
         es.wait_for_shard_transfer(es_index)
+
+
+def _subset_samples_and_variants(mt, subset_tsv_path: str) -> hl.MatrixTable:
+    """
+    Subset the MatrixTable to the provided list of samples and to variants present in those samples
+    :param mt: MatrixTable from VCF
+    :param subset_path: path to a TSV file with a single column 's'
+    :return: MatrixTable subsetted to list of samples
+    """
+    subset_ht = hl.import_table(subset_tsv_path, key='s')
+    subset_count = subset_ht.count()
+    anti_join_ht = subset_ht.anti_join(mt.cols())
+    anti_join_ht_count = anti_join_ht.count()
+
+    if anti_join_ht_count != 0:
+        missing_samples = anti_join_ht.s.collect()
+        raise Exception(
+            f'Only {subset_count-anti_join_ht_count} out of {subset_count} '
+            'subsetting-table IDs matched IDs in the variant callset.\n'
+            f'IDs that aren\'t in the callset: {missing_samples}\n'
+            f'All callset sample IDs:{mt.s.collect()}',
+            missing_samples,
+        )
+
+    mt = mt.semi_join_cols(subset_ht)
+    mt = mt.filter_rows(hl.agg.any(mt.GT.is_non_ref()))
+
+    logger.info(
+        f'Finished subsetting samples. Kept {subset_count} '
+        f'out of {mt.count()} samples in vds'
+    )
+    return mt
+
+
+def _remap_sample_ids(mt, remap_tsv_path: str) -> hl.MatrixTable:
+    """
+    Remap 's' (the MatrixTable's sample ID field) to 'seqr_id'
+    (the sample ID used within seqr).
+    If the sample 's' does not have a 'seqr_id' in the remap file, 's' becomes 'seqr_id'
+    :param mt: MatrixTable from VCF
+    :param remap_path: Path to a file with two columns 's' and 'seqr_id'
+    :return: MatrixTable remapped and keyed to use seqr_id
+    """
+    remap_ht = hl.import_table(remap_tsv_path, key='s')
+    missing_samples = remap_ht.anti_join(mt.cols()).collect()
+    remap_count = remap_ht.count()
+
+    if len(missing_samples) != 0:
+        raise Exception(
+            f'Only {remap_ht.semi_join(mt.cols()).count()} out of {remap_count} '
+            'remap IDs matched IDs in the variant callset.\n'
+            f'IDs that aren\'t in the callset: {missing_samples}\n'
+            f'All callset sample IDs:{mt.s.collect()}',
+            missing_samples,
+        )
+
+    mt = mt.annotate_cols(**remap_ht[mt.s])
+    remap_expr = hl.cond(hl.is_missing(mt.seqr_id), mt.s, mt.seqr_id)
+    mt = mt.annotate_cols(seqr_id=remap_expr, vcf_id=mt.s)
+    mt = mt.key_cols_by(s=mt.seqr_id)
+    logger.info(f'Remapped {remap_count} sample ids...')
+    return mt
 
 
 class SeqrGenotypesESSchema(SeqrGenotypesSchema):

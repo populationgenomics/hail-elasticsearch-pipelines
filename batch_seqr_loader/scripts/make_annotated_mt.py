@@ -54,16 +54,6 @@ INDEL_SCORE_CUTOFF = 0
 )
 @click.option('--disable-validation', 'disable_validation', is_flag=True)
 @click.option(
-    '--remap-tsv',
-    'remap_path',
-    help='Path to a TSV file with two columns: s and seqr_id.',
-)
-@click.option(
-    '--subset-tsv',
-    'subset_path',
-    help='Path to a TSV file with one column of sample IDs: s.',
-)
-@click.option(
     '--make-checkpoints',
     'make_checkpoints',
     is_flag=True,
@@ -76,8 +66,6 @@ def main(
     dest_path: str,
     work_bucket: str,
     disable_validation: bool,
-    remap_path: str,
-    subset_path: str,
     make_checkpoints: bool = False,
     vep_block_size: Optional[int] = None,
 ):  # pylint: disable=missing-function-docstring
@@ -95,10 +83,6 @@ def main(
         vqsr_ht, join(work_bucket, 'vqsr-with-filters.ht'), overwrite=True
     )
     mt = annotate_vqsr(mt, vqsr_ht)
-    if remap_path:
-        mt = remap_sample_ids(mt, remap_path)
-    if subset_path:
-        mt = subset_samples_and_variants(mt, subset_path)
     mt = add_37_coordinates(mt)
     if make_checkpoints:
         mt.write(join(work_bucket, 'add_37_coordinates.mt'), overwrite=True)
@@ -425,68 +409,6 @@ def validate_mt(mt, sample_type):
             )
 
     return True
-
-
-def remap_sample_ids(mt, remap_path):
-    """
-    Remap 's' (the MatrixTable's sample ID field) to 'seqr_id'
-    (the sample ID used within seqr).
-    If the sample 's' does not have a 'seqr_id' in the remap file, 's' becomes 'seqr_id'
-    :param mt: MatrixTable from VCF
-    :param remap_path: Path to a file with two columns 's' and 'seqr_id'
-    :return: MatrixTable remapped and keyed to use seqr_id
-    """
-    remap_ht = hl.import_table(remap_path, key='s')
-    missing_samples = remap_ht.anti_join(mt.cols()).collect()
-    remap_count = remap_ht.count()
-
-    if len(missing_samples) != 0:
-        raise Exception(
-            f'Only {remap_ht.semi_join(mt.cols()).count()} out of {remap_count} '
-            'remap IDs matched IDs in the variant callset.\n'
-            f'IDs that aren\'t in the callset: {missing_samples}\n'
-            f'All callset sample IDs:{mt.s.collect()}',
-            missing_samples,
-        )
-
-    mt = mt.annotate_cols(**remap_ht[mt.s])
-    remap_expr = hl.cond(hl.is_missing(mt.seqr_id), mt.s, mt.seqr_id)
-    mt = mt.annotate_cols(seqr_id=remap_expr, vcf_id=mt.s)
-    mt = mt.key_cols_by(s=mt.seqr_id)
-    logger.info(f'Remapped {remap_count} sample ids...')
-    return mt
-
-
-def subset_samples_and_variants(mt, subset_path):
-    """
-    Subset the MatrixTable to the provided list of samples and to variants present in those samples
-    :param mt: MatrixTable from VCF
-    :param subset_path: Path to a file with a single column 's'
-    :return: MatrixTable subsetted to list of samples
-    """
-    subset_ht = hl.import_table(subset_path, key='s')
-    subset_count = subset_ht.count()
-    anti_join_ht = subset_ht.anti_join(mt.cols())
-    anti_join_ht_count = anti_join_ht.count()
-
-    if anti_join_ht_count != 0:
-        missing_samples = anti_join_ht.s.collect()
-        raise Exception(
-            f'Only {subset_count-anti_join_ht_count} out of {subset_count} '
-            'subsetting-table IDs matched IDs in the variant callset.\n'
-            f'IDs that aren\'t in the callset: {missing_samples}\n'
-            f'All callset sample IDs:{mt.s.collect()}',
-            missing_samples,
-        )
-
-    mt = mt.semi_join_cols(subset_ht)
-    mt = mt.filter_rows(hl.agg.any(mt.GT.is_non_ref()))
-
-    logger.info(
-        f'Finished subsetting samples. Kept {subset_count} '
-        f'out of {mt.count()} samples in vds'
-    )
-    return mt
 
 
 def add_37_coordinates(mt):
