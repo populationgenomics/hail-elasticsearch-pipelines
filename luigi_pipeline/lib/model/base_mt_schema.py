@@ -1,12 +1,12 @@
 import logging
 
 from typing import List
-from inspect import getmembers, ismethod
+from inspect import getmembers
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 
 
 
@@ -19,7 +19,7 @@ class RowAnnotationFailed(Exception):
 
 
 class RowAnnotation:
-    def __init__(self, fn, name=None, requirements: List[str]=None):
+    def __init__(self, fn, name=None, requirements: List[str] = None):
         self.fn = fn
         self.name = name or fn.__name__
         self.requirements = requirements
@@ -29,10 +29,6 @@ class RowAnnotation:
         if self.requirements:
             requires = f' (requires: {", ".join(self.requirements)})'
         return f"{self.name}{requires}"
-
-    # probably shouldn't let this happen
-    # def __call__(self, *args, **kwargs):
-    #     return self.fn(*args, **kwargs)
 
 
 def row_annotation(name=None, fn_require=None):
@@ -57,13 +53,19 @@ def row_annotation(name=None, fn_require=None):
     :param fn_require: method names in class that are dependencies.
     :return:
     """
+
     def mt_prop_wrapper(func):
         requirements = None
         if fn_require is not None:
-            fn_requirements = fn_require if isinstance(fn_require, list) else [fn_require]
+            fn_requirements = (
+                fn_require if isinstance(fn_require, list) else [fn_require]
+            )
             for fn in fn_requirements:
                 if not isinstance(fn, RowAnnotation):
-                    raise ValueError('Schema: dependency %s is not a row annotation method.' % fn_require.__name__)
+                    raise ValueError(
+                        'Schema: dependency %s is not a row annotation method.'
+                        % fn_require.__name__
+                    )
             requirements = [fn.name for fn in fn_requirements]
 
         return RowAnnotation(func, name=name, requirements=requirements)
@@ -98,14 +100,17 @@ class BaseMTSchema:
     `TestSchema(mt).b().c_1().select_annotated_mt()` will annotate with {'a': 0, 'b': 1, 'c': 2}
 
     """
+
     def __init__(self, mt):
         self._mt = None
         self.set_mt(mt)
         self.mt_instance_meta = {
-            'row_annotations': defaultdict(lambda: {
-                'annotated': 0,
-                'result': {},
-            })
+            'row_annotations': defaultdict(
+                lambda: {
+                    'annotated': 0,
+                    'result': {},
+                }
+            )
         }
 
     @property
@@ -134,30 +139,41 @@ class BaseMTSchema:
         """
         called_annotations = set()
         rounds: List[List[RowAnnotation]] = [self.all_annotation_fns()]
-        logger.info(f'Will attempt to apply {len(rounds[0])} row annotations')
+        logger.debug(f'Will attempt to apply {len(rounds[0])} row annotations')
 
         while len(rounds) > 0:
             rnd = rounds.pop(0)
-            logger.info(f'Starting round with {len(rnd)} annotations')
+            logger.debug(f'Starting round with {len(rnd)} annotations')
             # add callers that you can't run yet to this list
             next_round = []
             annotations_to_apply = {}
             for annotation in rnd:
                 # apply each atn_fn here
-                instance_metadata = self.mt_instance_meta['row_annotations'][annotation.name]
+                instance_metadata = self.mt_instance_meta['row_annotations'][
+                    annotation.name
+                ]
                 if instance_metadata['annotated'] > 0:
                     # already called
                     continue
 
                 # MT already has annotation, so only continue if overwrite requested.
-                if annotation.name in self.mt.rows()._fields or annotation.name in annotations_to_apply:
+                if (
+                    annotation.name in self.mt.rows()._fields
+                    or annotation.name in annotations_to_apply
+                ):
                     logger.warning(
-                        'MT using schema class %s already has "%s" annotation.' % (self.__class__.__name__, annotation.name))
+                        'MT using schema class %s already has "%s" annotation.'
+                        % (self.__class__.__name__, annotation.name)
+                    )
                     if not overwrite:
                         continue
-                    logger.info('Overwriting matrix table annotation %s' % annotation.name)
+                    logger.info(
+                        'Overwriting matrix table annotation %s' % annotation.name
+                    )
 
-                if annotation.requirements and any(r not in called_annotations for r in annotation.requirements):
+                if annotation.requirements and any(
+                    r not in called_annotations for r in annotation.requirements
+                ):
                     # this annotation has unfulfilled annotations,
                     # so let's do it in the next round
                     next_round.append(annotation)
@@ -168,7 +184,7 @@ class BaseMTSchema:
                     func_ret = annotation.fn(self)
                 except RowAnnotationOmit:
                     # Do not annotate when RowAnnotationOmit raised.
-                    logger.info(f'Received RowAnnotationOmit for "{annotation.name}"')
+                    logger.debug(f'Received RowAnnotationOmit for "{annotation.name}"')
                     continue
 
                 annotations_to_apply[annotation.name] = func_ret
@@ -177,16 +193,22 @@ class BaseMTSchema:
                 instance_metadata['result'] = func_ret
 
             # update the mt
-            logger.info('Applying annotations: ' + ', '.join(annotations_to_apply.keys()))
+            logger.debug(
+                'Applying annotations: ' + ', '.join(annotations_to_apply.keys())
+            )
             self.set_mt(self.mt.annotate_rows(**annotations_to_apply))
 
-            called_annotations = called_annotations.union(set(annotations_to_apply.keys()))
+            called_annotations = called_annotations.union(
+                set(annotations_to_apply.keys())
+            )
 
             if len(next_round) > 0:
                 if len(next_round) == len(rnd):
                     # something has got stuck and it's requirements can't be fulfilled
                     failed_annotations = ', '.join(an.name for an in next_round)
-                    flattened_reqs = [inner for an in next_round for inner in (an.requirements or [])]
+                    flattened_reqs = [
+                        inner for an in next_round for inner in (an.requirements or [])
+                    ]
                     requirements = ', '.join(set(flattened_reqs))
                     raise RowAnnotationFailed(
                         f"Couldn't apply annotations {failed_annotations}, "
@@ -195,7 +217,6 @@ class BaseMTSchema:
                 rounds.append(next_round)
 
         return self
-
 
     def select_annotated_mt(self):
         """
