@@ -559,7 +559,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
             f'--bucket {proj_tmp_bucket} '
             f'--es-index {proj}-{output_version}-{timestamp} '
             f'--es-index-min-num-shards 1 '
-            f'--sample-list {sample_list_local_fpath} '
+            f'--sample-list {sample_list_gcs_path} '
             f'--genome-version GRCh38 '
             f'{"--prod" if prod else ""}',
             max_age='16h',
