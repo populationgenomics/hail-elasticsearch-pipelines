@@ -541,7 +541,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
             f.write('\n'.join(sample_ids))
 
         remap_path = f'{proj_tmp_bucket}/external_id_map.tsv'
-        with open(remap_path, 'w') as f:
+        with hl.hadoop_open(remap_path, 'w') as f:
             f.write('\t'.join(['s', 'seqr_id']) + '\n')
             for s in samples:
                 f.write('\t'.join([s['id'], s['external_id']]) + '\n')
