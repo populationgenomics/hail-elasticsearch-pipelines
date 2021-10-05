@@ -1281,22 +1281,25 @@ def _make_vqsr_jobs(
     use_as_vqsr,
     overwrite,
 ) -> Job:
-    tmp_vqsr_bucket = f'{joint_calling_tmp_bucket}/vqsr'
-    logger.info(f'Queueing VQSR job')
-    return make_vqsr_jobs(
-        b,
-        input_vcf_gathered=gathered_vcf_path,
-        is_small_callset=is_small_callset,
-        is_huge_callset=is_huge_callset,
-        work_bucket=tmp_vqsr_bucket,
-        web_bucket=tmp_vqsr_bucket,
-        depends_on=depends_on,
-        intervals=intervals,
-        scatter_count=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
-        output_vcf_path=output_path,
-        use_as_annotations=use_as_vqsr,
-        overwrite=overwrite,
-    )
+    if not utils.can_reuse(output_path, overwrite=overwrite):
+        tmp_vqsr_bucket = f'{joint_calling_tmp_bucket}/vqsr'
+        logger.info(f'Queueing VQSR job')
+        return make_vqsr_jobs(
+            b,
+            input_vcf_gathered=gathered_vcf_path,
+            is_small_callset=is_small_callset,
+            is_huge_callset=is_huge_callset,
+            work_bucket=tmp_vqsr_bucket,
+            web_bucket=tmp_vqsr_bucket,
+            depends_on=depends_on,
+            intervals=intervals,
+            scatter_count=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
+            output_vcf_path=output_path,
+            use_as_annotations=use_as_vqsr,
+            overwrite=overwrite,
+        )
+    else:
+        return b.new_job('VQSR [reuse]')
 
 
 def _add_split_intervals_job(
