@@ -5,6 +5,9 @@ from inspect import getmembers, ismethod
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
+logger.setLevel(logging.INFO)
+
 
 
 class RowAnnotationOmit(Exception):
@@ -131,11 +134,11 @@ class BaseMTSchema:
         """
         called_annotations = set()
         rounds: List[List[RowAnnotation]] = [self.all_annotation_fns()]
-        print(f'Will attempt to apply {len(rounds[0])} row annotations')
+        logger.info(f'Will attempt to apply {len(rounds[0])} row annotations')
 
         while len(rounds) > 0:
             rnd = rounds.pop(0)
-            print(f'Starting round with {len(rnd)} annotations')
+            logger.info(f'Starting round with {len(rnd)} annotations')
             # add callers that you can't run yet to this list
             next_round = []
             annotations_to_apply = {}
@@ -165,7 +168,7 @@ class BaseMTSchema:
                     func_ret = annotation.fn(self)
                 except RowAnnotationOmit:
                     # Do not annotate when RowAnnotationOmit raised.
-                    print(f'Received RowAnnotationOmit for "{annotation.name}"')
+                    logger.info(f'Received RowAnnotationOmit for "{annotation.name}"')
                     continue
 
                 annotations_to_apply[annotation.name] = func_ret
@@ -174,7 +177,7 @@ class BaseMTSchema:
                 instance_metadata['result'] = func_ret
 
             # update the mt
-            print('Applying annotations: ' + ', '.join(annotations_to_apply.keys()))
+            logger.info('Applying annotations: ' + ', '.join(annotations_to_apply.keys()))
             self.set_mt(self.mt.annotate_rows(**annotations_to_apply))
 
             called_annotations = called_annotations.union(set(annotations_to_apply.keys()))
@@ -196,8 +199,9 @@ class BaseMTSchema:
 
     def select_annotated_mt(self):
         """
-        Returns a matrix table with an annotated rows where each row annotation is a previously called
-        annotation (e.g. with the corresponding method or all in case of `annotate_all`).
+        Returns a matrix table with an annotated rows where each row annotation 
+        is a previously called annotation (e.g. with the corresponding method or 
+        all in case of `annotate_all`).
         :return: a matrix table
         """
         # Selection field is the annotation name of any function that has been called.
@@ -213,4 +217,4 @@ class BaseMTSchema:
                 continue
 
             select_fields.append(annotation.name)
-        return self.mt.select_rows(*select_fields)
+        return self.mt.select_rows()

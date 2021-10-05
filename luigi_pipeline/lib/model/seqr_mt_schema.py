@@ -6,7 +6,6 @@ from hail_scripts.v02.utils.computed_fields import vep
 
 
 class SeqrSchema(BaseMTSchema):
-
     def __init__(self, *args, ref_data, clinvar_data, hgmd_data=None, **kwargs):
         self._ref_data = ref_data
         self._clinvar_data = clinvar_data
@@ -267,15 +266,15 @@ class SeqrGenotypesSchema(BaseMTSchema):
         # Convert the mt genotype entries into num_alt, gq, ab, dp, and sample_id.
         is_called = hl.is_defined(self.mt.GT)
         return {
-            'num_alt': hl.cond(is_called, self.mt.GT.n_alt_alleles(), -1),
-            'gq': hl.cond(is_called, self.mt.GQ, hl.null(hl.tint)),
+            'num_alt': hl.if_else(is_called, self.mt.GT.n_alt_alleles(), -1),
+            'gq': hl.if_else(is_called, self.mt.GQ, hl.null(hl.tint)),
             'ab': hl.bind(
-                lambda total: hl.cond((is_called) & (total != 0) & (hl.len(self.mt.AD) > 1),
-                                      hl.float(self.mt.AD[1] / total),
-                                      hl.null(hl.tfloat)),
+                lambda total: hl.if_else((is_called) & (total != 0) & (hl.len(self.mt.AD) > 1),
+                                         hl.float(self.mt.AD[1] / total),
+                                         hl.null(hl.tfloat)),
                 hl.sum(self.mt.AD)
             ),
-            'dp': hl.cond(is_called, hl.int(hl.min(self.mt.DP, 32000)), hl.null(hl.tfloat)),
+            'dp': hl.if_else(is_called, hl.int(hl.min(self.mt.DP, 32000)), hl.null(hl.tfloat)),
             'sample_id': self.mt.s
         }
 
