@@ -230,7 +230,7 @@ def _remap_sample_ids(mt, remap_tsv_path: str) -> hl.MatrixTable:
         )
 
     mt = mt.annotate_cols(**remap_ht[mt.s])
-    remap_expr = hl.cond(hl.is_missing(mt.seqr_id), mt.s, mt.seqr_id)
+    remap_expr = hl.if_else(hl.is_missing(mt.seqr_id), mt.s, mt.seqr_id)
     mt = mt.annotate_cols(seqr_id=remap_expr, vcf_id=mt.s)
     mt = mt.key_cols_by(s=mt.seqr_id)
     logger.info(f'Remapped {remap_count} sample ids...')
