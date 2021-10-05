@@ -5,6 +5,9 @@ from inspect import getmembers
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
+logger.setLevel(logging.DEBUG)
+
 
 
 class RowAnnotationOmit(Exception):
@@ -217,8 +220,9 @@ class BaseMTSchema:
 
     def select_annotated_mt(self):
         """
-        Returns a matrix table with an annotated rows where each row annotation is a previously called
-        annotation (e.g. with the corresponding method or all in case of `annotate_all`).
+        Returns a matrix table with an annotated rows where each row annotation 
+        is a previously called annotation (e.g. with the corresponding method or 
+        all in case of `annotate_all`).
         :return: a matrix table
         """
         # Selection field is the annotation name of any function that has been called.
@@ -234,4 +238,4 @@ class BaseMTSchema:
                 continue
 
             select_fields.append(annotation.name)
-        return self.mt.select_rows(*select_fields)
+        return self.mt.select_rows()

@@ -1,4 +1,4 @@
-TEST_VERSION := v2-3
+TEST_VERSION := v2-5
 PROD_VERSION := v3-0
 
 .PHONY: package
@@ -59,7 +59,13 @@ run_seqr_loader_prod:
 	--input-project acute-care \
 	--input-project perth-neuro \
 	--output-version $(PROD_VERSION) \
-	--reuse
+	--reuse \
+	--keep-scratch \
+	--skip-check-inputs-existence \
+	--hc-shards-num 10 \
+	--skip-update-sm-db \
+	--start-from-stage annotate \
+	-S CPG13326
 
 .PHONY: run_seqr_loader_prod_test
 run_seqr_loader_prod_test:

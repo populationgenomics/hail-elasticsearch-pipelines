@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 
 """
-Hail script to submit on a dataproc cluster. Converts input multi-sample VCFs
-into a matrix table, which annotates and prepares to load into ES.
+Hail script to submit on a dataproc cluster. 
+
+Converts input multi-sample VCFs into a matrix table, and annotates it.
 """
 
 import logging
-from typing import Optional, List
+from typing import Optional
 from os.path import join
 import click
 import hail as hl
-from lib.model.seqr_mt_schema import SeqrVariantsAndGenotypesSchema
+from lib.model.seqr_mt_schema import SeqrVariantSchema
+from lib.model.base_mt_schema import row_annotation
+from gnomad.utils.sparse_mt import split_info_annotation
+from gnomad.utils.filtering import add_filters_expr
 
 logger = logging.getLogger(__file__)
 logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
@@ -23,12 +27,19 @@ SEQR_REF_BUCKET = 'gs://cpg-seqr-reference-data'
 REF_HT = f'{SEQR_REF_BUCKET}/GRCh38/all_reference_data/v2/combined_reference_data_grch38-2.0.3.ht'
 CLINVAR_HT = f'{SEQR_REF_BUCKET}/GRCh38/clinvar/clinvar.GRCh38.2020-06-15.ht'
 
+SNP_SCORE_CUTOFF = 0
+INDEL_SCORE_CUTOFF = 0
+
 
 @click.command()
 @click.option(
-    '--source-path',
-    'source_paths',
-    multiple=True,
+    '--vcf-path',
+    'vcf_path',
+    required=True,
+)
+@click.option(
+    '--site-only-vqsr-vcf-path',
+    'site_only_vqsr_vcf_path',
     required=True,
 )
 @click.option(
@@ -43,16 +54,6 @@ CLINVAR_HT = f'{SEQR_REF_BUCKET}/GRCh38/clinvar/clinvar.GRCh38.2020-06-15.ht'
 )
 @click.option('--disable-validation', 'disable_validation', is_flag=True)
 @click.option(
-    '--remap-tsv',
-    'remap_path',
-    help='Path to a TSV file with two columns: s and seqr_id.',
-)
-@click.option(
-    '--subset-tsv',
-    'subset_path',
-    help='Path to a TSV file with one column of sample IDs: s.',
-)
-@click.option(
     '--make-checkpoints',
     'make_checkpoints',
     is_flag=True,
@@ -60,26 +61,28 @@ CLINVAR_HT = f'{SEQR_REF_BUCKET}/GRCh38/clinvar/clinvar.GRCh38.2020-06-15.ht'
 )
 @click.option('--vep-block-size', 'vep_block_size')
 def main(
-    source_paths: List[str],
+    vcf_path: str,
+    site_only_vqsr_vcf_path: str,
     dest_path: str,
     work_bucket: str,
     disable_validation: bool,
-    remap_path: str,
-    subset_path: str,
     make_checkpoints: bool = False,
     vep_block_size: Optional[int] = None,
 ):  # pylint: disable=missing-function-docstring
     logger.info('Starting the seqr_load pipeline')
 
     hl.init(default_reference=GENOME_VERSION)
-    mt = import_vcf(source_paths, GENOME_VERSION)
+    mt = import_vcf(vcf_path, GENOME_VERSION)
     mt = annotate_old_and_split_multi_hts(mt)
     if not disable_validation:
         validate_mt(mt, sample_type='WGS')
-    if remap_path:
-        mt = remap_sample_ids(mt, remap_path)
-    if subset_path:
-        mt = subset_samples_and_variants(mt, subset_path)
+    vqsr_ht = load_vqsr(
+        site_only_vqsr_vcf_path, join(work_bucket, 'vqsr.ht'), overwrite=True
+    )
+    vqsr_ht = apply_vqsr_cutoffs(
+        vqsr_ht, join(work_bucket, 'vqsr-with-filters.ht'), overwrite=True
+    )
+    mt = annotate_vqsr(mt, vqsr_ht)
     mt = add_37_coordinates(mt)
     if make_checkpoints:
         mt.write(join(work_bucket, 'add_37_coordinates.mt'), overwrite=True)
@@ -91,19 +94,112 @@ def main(
     ref_data = hl.read_table(REF_HT)
     clinvar = hl.read_table(CLINVAR_HT)
 
-    mt = compute_annotated_vcf(mt, ref_data=ref_data, clinvar=clinvar)
-    if make_checkpoints:
-        mt.write(join(work_bucket, 'compute_annotated_vcf.mt'), overwrite=True)
+    mt = compute_variant_annotated_vcf(mt, ref_data=ref_data, clinvar=clinvar)
 
     mt = mt.annotate_globals(
-        sourceFilePath=','.join(source_paths),
+        sourceFilePath=vcf_path,
         genomeVersion=GENOME_VERSION.replace('GRCh', ''),
         sampleType='WGS',
         hail_version=hl.version(),
     )
 
     mt.describe()
-    mt.write(dest_path, stage_locally=True, overwrite=True)
+    mt.write(dest_path, overwrite=True)
+
+
+def annotate_vqsr(mt, vqsr_ht):
+    """
+    Assuming `vqsr_ht` is a site-only VCF from VQSR, and `mt` is a full matrix table,
+    annotates `mt` rows from `vqsr_ht`
+    """
+    mt = mt.annotate_rows(**vqsr_ht[mt.row_key])
+    mt = mt.annotate_rows(
+        score=vqsr_ht[mt.row_key].info.AS_VQSLOD,
+        positive_train_site=vqsr_ht[mt.row_key].info.POSITIVE_TRAIN_SITE,
+        negative_train_site=vqsr_ht[mt.row_key].info.NEGATIVE_TRAIN_SITE,
+        AS_culprit=vqsr_ht[mt.row_key].info.AS_culprit,
+    )
+
+    mt = mt.annotate_rows(filters=mt.filters)
+    mt = mt.annotate_globals(**vqsr_ht.index_globals())
+    return mt
+
+
+def apply_vqsr_cutoffs(vqsr_ht, output_path, overwrite):
+    """
+    Generates variant soft-filters from VQSR scores: adds `mt.filters` row-level
+    field of type set with a value "VQSR" when the AS_VQSLOD is below the threshold
+    """
+    ht = vqsr_ht
+
+    snp_cutoff_global = hl.struct(min_score=SNP_SCORE_CUTOFF)
+    indel_cutoff_global = hl.struct(min_score=INDEL_SCORE_CUTOFF)
+
+    filters = dict()
+    filters['VQSR'] = (
+        hl.is_missing(ht.info.AS_VQSLOD)
+        | (
+            hl.is_snp(ht.alleles[0], ht.alleles[1])
+            & (ht.info.AS_VQSLOD < snp_cutoff_global.min_score)
+        )
+        | (
+            ~hl.is_snp(ht.alleles[0], ht.alleles[1])
+            & (ht.info.AS_VQSLOD < indel_cutoff_global.min_score)
+        )
+    )
+    ht = ht.transmute(
+        filters=add_filters_expr(filters=filters),
+        info=ht.info,
+    )
+    ht.checkpoint(output_path, overwrite=overwrite)
+    return ht
+
+
+def load_vqsr(
+    site_only_vqsr_vcf_path,
+    output_ht_path,
+    overwrite,
+    split_multiallelic=True,
+):
+    """
+    Loads the VQSR'ed site-only VCF into a site-only hail table
+    """
+    logger.info(f'Importing VQSR annotations...')
+    mt = hl.import_vcf(
+        site_only_vqsr_vcf_path,
+        force_bgz=True,
+        reference_genome='GRCh38',
+    ).repartition(1000)
+
+    ht = mt.rows()
+
+    ht = ht.annotate(
+        info=ht.info.annotate(
+            AS_VQSLOD=ht.info.AS_VQSLOD.map(hl.float),
+            AS_QUALapprox=ht.info.AS_QUALapprox.split(r'\|')[1:].map(hl.int),
+            AS_VarDP=ht.info.AS_VarDP.split(r'\|')[1:].map(hl.int),
+            AS_SB_TABLE=ht.info.AS_SB_TABLE.split(r'\|').map(
+                lambda x: hl.if_else(
+                    x == '', hl.missing(hl.tarray(hl.tint32)), x.split(',').map(hl.int)
+                )
+            ),
+        )
+    )
+    unsplit_count = ht.count()
+
+    ht = hl.split_multi_hts(ht)
+    ht = ht.annotate(
+        info=ht.info.annotate(**split_info_annotation(ht.info, ht.a_index)),
+    )
+    if split_multiallelic:
+        ht = ht.checkpoint(output_ht_path, overwrite=overwrite)
+        logger.info(f'Wrote split HT to {output_ht_path}')
+    split_count = ht.count()
+
+    logger.info(
+        f'Found {unsplit_count} unsplit and {split_count} split variants with VQSR annotations'
+    )
+    return ht
 
 
 def import_vcf(source_paths, genome_version):
@@ -145,42 +241,64 @@ def annotate_old_and_split_multi_hts(mt):
     )
 
 
-def compute_annotated_vcf(
-    mt, ref_data, clinvar, schema_cls=SeqrVariantsAndGenotypesSchema
-):
+class SeqrVariantsASSchema(SeqrVariantSchema):
     """
-    Returns a matrix table with an annotated rows where each row annotation is a previously called
-    annotation (e.g. with the corresponding method or all in case of `annotate_all`).
-    :return: a matrix table
+    AC/AF/AN fields in a split matrix table are pure integers, not arrays
     """
-    # Annotations are declared as methods on the schema_cls.
-    # There's a strong coupling between the @row_annotation decorator
-    # and the BaseMTSchema that's impractical to refactor, so we'll just leave it.
-    #
-    #   class SomeClass(BaseMTSchema):
-    #       @row_annotation()
-    #       def a(self):
-    #           return 'a_val'
-    #
-    # This loops through all the @row_annotation decorated methods
-    # on `schema_cls` and applies them all.
-    #
-    # See https://user-images.githubusercontent.com/22381693/113672350-f9b04000-96fa-11eb-91fe-e45d34c165c0.png
-    # for a rough overview of the structure and methods declared on:
-    #
-    #               BaseMTSchema
-    #                 /       \
-    #        SeqrSchema     SeqrGenotypesSchema
-    #                |         |
-    #  SeqrVariantSchema       |
-    #                \        /
-    #        SeqrVariantsAndGenotypesSchema
-    #
-    # we can call the annotation on this class in two steps:
+
+    @row_annotation(name='AC')
+    def ac(self):  # pylint: disable=invalid-name,missing-function-docstring
+        return self.mt.info.AC
+
+    @row_annotation(name='AF')
+    def af(self):  # pylint: disable=invalid-name,missing-function-docstring
+        return self.mt.info.AF
+
+    @row_annotation(name='AN')
+    def an(self):  # pylint: disable=invalid-name,missing-function-docstring
+        return self.mt.info.AN
+
+
+def compute_variant_annotated_vcf(
+    mt, ref_data, clinvar, schema_cls=SeqrVariantsASSchema
+) -> hl.MatrixTable:
+    r"""
+    Returns a matrix table with an annotated rows where each row annotation 
+    is a previously called annotation (e.g. with the corresponding method or 
+    all in case of `annotate_all`).
+
+    Annotations are declared as methods on the schema_cls.
+
+    There's a strong coupling between the @row_annotation decorator
+    and the BaseMTSchema that's impractical to refactor, so we'll just leave it.
+
+       class SomeClass(BaseMTSchema):
+           @row_annotation()
+           def a(self):
+               return 'a_val'
+
+    This loops through all the @row_annotation decorated methods
+    on `schema_cls` and applies them all.
+    
+    See https://user-images.githubusercontent.com/22381693/113672350-f9b04000-96fa-11eb-91fe-e45d34c165c0.png
+    for a rough overview of the structure and methods declared on:
+
+                   BaseMTSchema
+                     /       \
+            SeqrSchema     SeqrGenotypesSchema
+                    |         |
+      SeqrVariantSchema       |
+                    |         |
+      SeqrVariantASSchema     |
+                    \        /
+            SeqrVariantsAndGenotypesSchema
+            
+    We apply only SeqrVariantSchema here (specifically, a modified 
+    version SeqrVariantASSchema). SeqrGenotypesSchema is applied separately
+    on the project level.
+    """
     annotation_schema = schema_cls(mt, ref_data=ref_data, clinvar_data=clinvar)
-
     mt = annotation_schema.annotate_all(overwrite=True).select_annotated_mt()
-
     return mt
 
 
@@ -289,69 +407,8 @@ def validate_mt(mt, sample_type):
                 f'Sample type validation error: dataset sample-type is specified as {sample_type} but appears to be '
                 'WES because it contains many common non-coding variants'
             )
+
     return True
-
-
-def remap_sample_ids(mt, remap_path):
-    """
-    Remap 's' (the MatrixTable's sample ID field) to 'seqr_id'
-    (the sample ID used within seqr).
-    If the sample 's' does not have a 'seqr_id' in the remap file, 's' becomes 'seqr_id'
-    :param mt: MatrixTable from VCF
-    :param remap_path: Path to a file with two columns 's' and 'seqr_id'
-    :return: MatrixTable remapped and keyed to use seqr_id
-    """
-    remap_ht = hl.import_table(remap_path, key='s')
-    missing_samples = remap_ht.anti_join(mt.cols()).collect()
-    remap_count = remap_ht.count()
-
-    if len(missing_samples) != 0:
-        raise Exception(
-            f'Only {remap_ht.semi_join(mt.cols()).count()} out of {remap_count} '
-            'remap IDs matched IDs in the variant callset.\n'
-            f'IDs that aren\'t in the callset: {missing_samples}\n'
-            f'All callset sample IDs:{mt.s.collect()}',
-            missing_samples,
-        )
-
-    mt = mt.annotate_cols(**remap_ht[mt.s])
-    remap_expr = hl.cond(hl.is_missing(mt.seqr_id), mt.s, mt.seqr_id)
-    mt = mt.annotate_cols(seqr_id=remap_expr, vcf_id=mt.s)
-    mt = mt.key_cols_by(s=mt.seqr_id)
-    logger.info(f'Remapped {remap_count} sample ids...')
-    return mt
-
-
-def subset_samples_and_variants(mt, subset_path):
-    """
-    Subset the MatrixTable to the provided list of samples and to variants present in those samples
-    :param mt: MatrixTable from VCF
-    :param subset_path: Path to a file with a single column 's'
-    :return: MatrixTable subsetted to list of samples
-    """
-    subset_ht = hl.import_table(subset_path, key='s')
-    subset_count = subset_ht.count()
-    anti_join_ht = subset_ht.anti_join(mt.cols())
-    anti_join_ht_count = anti_join_ht.count()
-
-    if anti_join_ht_count != 0:
-        missing_samples = anti_join_ht.s.collect()
-        raise Exception(
-            f'Only {subset_count-anti_join_ht_count} out of {subset_count} '
-            'subsetting-table IDs matched IDs in the variant callset.\n'
-            f'IDs that aren\'t in the callset: {missing_samples}\n'
-            f'All callset sample IDs:{mt.s.collect()}',
-            missing_samples,
-        )
-
-    mt = mt.semi_join_cols(subset_ht)
-    mt = mt.filter_rows(hl.agg.any(mt.GT.is_non_ref()))
-
-    logger.info(
-        f'Finished subsetting samples. Kept {subset_count} '
-        f'out of {mt.count()} samples in vds'
-    )
-    return mt
 
 
 def add_37_coordinates(mt):

@@ -18,17 +18,12 @@ import pandas as pd
 import click
 import hailtop.batch as hb
 from analysis_runner import dataproc
+import hail as hl
 from hailtop.batch.job import Job
-from sample_metadata import (
-    SampleApi,
-    AnalysisApi,
-    SequenceApi,
-)
-
 from find_inputs import sm_get_reads_data, AlignmentInput
 from vqsr import make_vqsr_jobs
 import utils
-import sm_utils
+from sm_utils import SMDB
 
 
 logger = logging.getLogger(__file__)
@@ -37,11 +32,6 @@ logger.setLevel(logging.INFO)
 
 
 STAGES = ['input', 'cram', 'gvcf', 'joint_calling', 'annotate', 'load_to_es']
-
-
-sapi = SampleApi()
-aapi = AnalysisApi()
-seqapi = SequenceApi()
 
 
 @click.command()
@@ -227,7 +217,7 @@ def main(
     )
     local_tmp_dir = tempfile.mkdtemp()
 
-    sm_utils.update_sm_db = update_sm_db
+    SMDB.do_update_analyses = update_sm_db
 
     b = _add_jobs(
         b=b,
@@ -288,24 +278,11 @@ def _add_jobs(  # pylint: disable=too-many-statements
     gvcf_jobs = []
     gvcf_by_sid: Dict[str, str] = dict()
 
-    samples_by_project: Dict[str, List[Dict]] = dict()
-    for proj in input_projects:
-        logger.info(f'Finding samples for project {proj}')
-        input_proj = proj
-        if output_suffix != 'main':
-            input_proj += '-test'
-        samples = sapi.get_samples(
-            body_get_samples_by_criteria_api_v1_sample_post={
-                'project_ids': [input_proj],
-                'active': True,
-            }
-        )
-        samples_by_project[proj] = []
-        for s in samples:
-            if skip_samples and s['id'] in skip_samples:
-                logger.info(f'Skiping sample: {s["id"]}')
-                continue
-            samples_by_project[proj].append(s)
+    samples_by_project = SMDB.get_samples_by_project(
+        projects=input_projects,
+        namespace=output_suffix,
+        skip_samples=skip_samples,
+    )
 
     if end_with_stage == 'input':
         logger.info(f'Latest stage is {end_with_stage}, stopping the pipeline here.')
@@ -323,18 +300,17 @@ def _add_jobs(  # pylint: disable=too-many-statements
         proj_bucket = f'gs://cpg-{proj}-{output_suffix}'
         sample_ids = [s['id'] for s in samples]
 
-        cram_analysis_per_sid = sm_utils.find_analyses_by_sid(
+        cram_analysis_per_sid = SMDB.find_analyses_by_sid(
             sample_ids=sample_ids,
             analysis_type='cram',
             analysis_project=analysis_project,
         )
-        gvcf_analysis_per_sid = sm_utils.find_analyses_by_sid(
+        gvcf_analysis_per_sid = SMDB.find_analyses_by_sid(
             sample_ids=sample_ids,
             analysis_type='gvcf',
             analysis_project=analysis_project,
         )
-        seq_infos: List[Dict] = seqapi.get_sequences_by_sample_ids(sample_ids)
-        seq_info_by_s_id = dict(zip(sample_ids, seq_infos))
+        seq_info_by_sid = SMDB.find_seq_info_by_sid(sample_ids)
 
         for s in samples:
             logger.info(f'Project {proj}. Processing sample {s["id"]}')
@@ -342,7 +318,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
             skip_cram_stage = start_from_stage is not None and start_from_stage not in [
                 'cram'
             ]
-            found_cram_path = sm_utils.process_existing_analysis(
+            found_cram_path = SMDB.process_existing_analysis(
                 sample_ids=[s['id']],
                 completed_analysis=cram_analysis_per_sid.get(s['id']),
                 analysis_type='cram',
@@ -356,7 +332,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
                     continue
                 cram_job = None
             else:
-                seq_info = seq_info_by_s_id[s['id']]
+                seq_info = seq_info_by_sid[s['id']]
                 logger.info('Checking sequence.meta:')
                 alignment_input = sm_get_reads_data(
                     seq_info['meta'], check_existence=check_inputs_existence
@@ -393,7 +369,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
                 'cram',
                 'gvcf',
             ]
-            found_gvcf_path = sm_utils.process_existing_analysis(
+            found_gvcf_path = SMDB.process_existing_analysis(
                 sample_ids=[s['id']],
                 completed_analysis=gvcf_analysis_per_sid.get(s['id']),
                 analysis_type='gvcf',
@@ -446,14 +422,23 @@ def _add_jobs(  # pylint: disable=too-many-statements
     sample_ids = list(set(s['id'] for s in good_samples))
     samples_hash = utils.hash_sample_ids(sample_ids)
     expected_jc_vcf_path = f'{tmp_bucket}/joint_calling/{samples_hash}.vcf.gz'
+    expected_vqsr_site_only_vcf_path = (
+        f'{tmp_bucket}/joint_calling/{samples_hash}-vqsr-site-only.vcf.gz'
+    )
     skip_jc_stage = start_from_stage is not None and start_from_stage not in [
         'cram',
         'gvcf',
         'joint_calling',
     ]
-    found_jc_vcf_path = sm_utils.process_existing_analysis(
+    intervals_j = _add_split_intervals_job(
+        b=b,
+        interval_list=utils.UNPADDED_INTERVALS,
+        scatter_count=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
+        ref_fasta=utils.REF_FASTA,
+    )
+    found_jc_vcf_path = SMDB.process_existing_analysis(
         sample_ids=sample_ids,
-        completed_analysis=sm_utils.find_joint_calling_analysis(
+        completed_analysis=SMDB.find_joint_calling_analysis(
             analysis_project=analysis_project,
             sample_ids=sample_ids,
         ),
@@ -463,6 +448,13 @@ def _add_jobs(  # pylint: disable=too-many-statements
         expected_output_fpath=expected_jc_vcf_path,
         skip_stage=skip_jc_stage,
     )
+    is_small_callset = len(good_samples) < 1000
+    # 1. For small callsets, we don't apply the ExcessHet filtering.
+    # 2. For small callsets, we gather the VCF shards and collect QC metrics directly.
+    # For anything larger, we need to keep the VCF sharded and gather metrics
+    # collected from them.
+    is_huge_callset = len(good_samples) >= 100000
+    # For huge callsets, we allocate more memory for the SNPs Create Model step
     if skip_jc_stage:
         if not found_jc_vcf_path:
             return None
@@ -470,8 +462,10 @@ def _add_jobs(  # pylint: disable=too-many-statements
     else:
         jc_job = _make_joint_genotype_jobs(
             b=b,
+            intervals=intervals_j.intervals,
             output_path=expected_jc_vcf_path,
             samples=good_samples,
+            is_small_callset=is_small_callset,
             genomicsdb_bucket=f'{analysis_bucket}/genomicsdbs',
             tmp_bucket=tmp_bucket,
             gvcf_by_sid=gvcf_by_sid,
@@ -479,79 +473,96 @@ def _add_jobs(  # pylint: disable=too-many-statements
             dbsnp=utils.DBSNP_VCF,
             local_tmp_dir=local_tmp_dir,
             overwrite=overwrite,
-            analysis_project=analysis_project,
-            depends_on=gvcf_jobs,
             use_gnarly=use_gnarly,
-            use_as_vqsr=use_as_vqsr,
+            depends_on=[intervals_j] + gvcf_jobs,
         )
-        found_jc_vcf_path = expected_jc_vcf_path
+    joint_calling_tmp_bucket = f'{tmp_bucket}/vqsr/{samples_hash}'
+    vqsr_job = _make_vqsr_jobs(
+        b=b,
+        gathered_vcf_path=expected_jc_vcf_path,
+        output_path=expected_vqsr_site_only_vcf_path,
+        is_small_callset=is_small_callset,
+        is_huge_callset=is_huge_callset,
+        depends_on=[jc_job],
+        intervals=intervals_j.intervals,
+        joint_calling_tmp_bucket=joint_calling_tmp_bucket,
+        use_as_vqsr=use_as_vqsr,
+        overwrite=overwrite,
+    )
 
     if end_with_stage == 'joint_calling':
         logger.info(f'Latest stage is {end_with_stage}, stopping the pipeline here.')
         return b
 
-    for project in output_projects:
-        annotated_mt_path = f'{analysis_bucket}/mt/{project}.mt'
+    annotated_mt_path = f'{analysis_bucket}/mt/seqr.mt'
+    skip_anno_stage = start_from_stage is not None and start_from_stage not in [
+        'cram',
+        'gvcf',
+        'joint_calling',
+        'annotate',
+    ]
 
-        skip_anno_stage = start_from_stage is not None and start_from_stage not in [
-            'cram',
-            'gvcf',
-            'joint_calling',
-            'annotate',
-        ]
-        if skip_anno_stage:
-            annotate_job = None
+    anno_tmp_bucket = f'{tmp_bucket}/mt'
+    if skip_anno_stage:
+        annotate_job = None
+    else:
+        if utils.can_reuse(annotated_mt_path, overwrite):
+            annotate_job = b.new_job(f'Make MT and annotate [reuse]')
         else:
-            anno_tmp_bucket = f'{tmp_bucket}/annotation/{project}'
-            if utils.can_reuse(annotated_mt_path, overwrite):
-                annotate_job = b.new_job(f'{project}: annotate [reuse]')
-            else:
-                sample_map_bucket_path = f'{anno_tmp_bucket}/external_id_map.tsv'
-                sample_map_local_fpath = join(
-                    local_tmp_dir, basename(sample_map_bucket_path)
-                )
-                with open(sample_map_local_fpath, 'w') as f:
-                    f.write('\t'.join(['s', 'seqr_id']) + '\n')
-                    for s in good_samples:
-                        f.write('\t'.join([s['id'], s['external_id']]) + '\n')
-                utils.gsutil_cp(sample_map_local_fpath, sample_map_bucket_path)
-                annotate_job = dataproc.hail_dataproc_job(
-                    b,
-                    f'batch_seqr_loader/scripts/make_annotated_mt.py '
-                    f'--source-path {found_jc_vcf_path} '
-                    f'--dest-mt-path {annotated_mt_path} '
-                    f'--bucket {anno_tmp_bucket} '
-                    '--disable-validation '
-                    '--make-checkpoints '
-                    f'--remap-tsv {sample_map_bucket_path} '
-                    + (f'--vep-block-size {vep_block_size} ' if vep_block_size else ''),
-                    max_age='16h',
-                    packages=utils.DATAPROC_PACKAGES,
-                    num_secondary_workers=utils.NUMBER_OF_DATAPROC_WORKERS,
-                    job_name=f'Annotate {project}',
-                    vep='GRCh38',
-                    depends_on=[jc_job] if jc_job else [],
-                )
-
-        if end_with_stage == 'annotate':
-            logger.info(
-                f'Latest stage is {end_with_stage}, not creating ES index for {project}'
+            annotate_job = dataproc.hail_dataproc_job(
+                b,
+                f'batch_seqr_loader/scripts/make_annotated_mt.py '
+                f'--vcf-path {expected_jc_vcf_path} '
+                f'--site-only-vqsr-vcf-path {expected_vqsr_site_only_vcf_path} '
+                f'--dest-mt-path {annotated_mt_path} '
+                f'--bucket {anno_tmp_bucket} '
+                '--disable-validation '
+                '--make-checkpoints '
+                + (f'--vep-block-size {vep_block_size} ' if vep_block_size else ''),
+                max_age='16h',
+                packages=utils.DATAPROC_PACKAGES,
+                num_secondary_workers=utils.NUMBER_OF_DATAPROC_WORKERS,
+                job_name=f'Annotating',
+                vep='GRCh38',
+                depends_on=[vqsr_job] if vqsr_job else [],
             )
-            continue
+
+    if end_with_stage == 'annotate':
+        logger.info(f'Latest stage is {end_with_stage}, not creating ES indices')
+        return b
+
+    for proj in output_projects:
+        proj_tmp_bucket = f'{anno_tmp_bucket}/{proj}'
+        # Make a list of project samples to subset from the entire matrix table
+        samples = samples_by_project.get(proj)
+        sample_ids = [s['id'] for s in samples]
+        subset_path = f'{proj_tmp_bucket}/samples.txt'
+        with hl.hadoop_open(subset_path, 'w') as f:
+            f.write('\n'.join(sample_ids))
+
+        remap_path = f'{proj_tmp_bucket}/external_id_map.tsv'
+        with hl.hadoop_open(remap_path, 'w') as f:
+            f.write('\t'.join(['s', 'seqr_id']) + '\n')
+            for s in samples:
+                f.write('\t'.join([s['id'], s['external_id']]) + '\n')
 
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         dataproc.hail_dataproc_job(
             b,
-            f'batch_seqr_loader/scripts/load_to_es.py '
+            f'batch_seqr_loader/scripts/load_project_to_es.py '
             f'--mt-path {annotated_mt_path} '
-            f'--es-index {project}-{output_version}-{timestamp} '
+            '--make-checkpoints '
+            f'--bucket {proj_tmp_bucket} '
+            f'--es-index {proj}-{output_version}-{timestamp} '
             f'--es-index-min-num-shards 1 '
+            f'--subset-tsv {subset_path} '
+            f'--remap-tsv {remap_path} '
             f'--genome-version GRCh38 '
             f'{"--prod" if prod else ""}',
             max_age='16h',
             packages=utils.DATAPROC_PACKAGES,
             num_secondary_workers=10,
-            job_name=f'{project}: add to the ES index',
+            job_name=f'{proj}: annotate project and create ES index',
             depends_on=[annotate_job],
             scopes=['cloud-platform'],
         )
@@ -697,7 +708,7 @@ def _make_realign_jobs(
     When the input is CRAM/BAM, uses Bazam to stream reads to BWA.
     """
     job_name = f'{project_name}/{sample_name}: BWA align'
-    if utils.file_exists(output_path):
+    if utils.file_exists(output_path) and utils.file_exists(output_path + '.crai'):
         return b.new_job(f'{job_name} [reuse]')
 
     logger.info(f'Submitting alignment to write {output_path} for {sample_name}. ')
@@ -793,7 +804,7 @@ set -ex
 
 (while true; do df -h; pwd; du -sh $(dirname {md_j.output_cram.cram}); sleep 600; done) &
 
-picard MarkDuplicates \\
+picard MarkDuplicates -Xms7G \\
     I={sorted_bam} O=/dev/stdout M={md_j.duplicate_metrics} \\
     TMP_DIR=$(dirname {md_j.output_cram.cram})/picard-tmp \\
     ASSUME_SORT_ORDER=coordinate | \\
@@ -805,7 +816,7 @@ df -h; pwd; du -sh $(dirname {md_j.output_cram.cram})
     """
     md_j.command(command)
     md_j.cpu(2)
-    md_j.memory('standard')
+    md_j.memory('highmem')
     md_j.storage('150G')
     b.write_output(md_j.output_cram, splitext(output_path)[0])
     b.write_output(
@@ -817,10 +828,10 @@ df -h; pwd; du -sh $(dirname {md_j.output_cram.cram})
         ),
     )
 
-    if sm_utils.update_sm_db:
+    if SMDB.do_update_analyses:
         # Interacting with the sample metadata server:
         # 1. Create a "queued" analysis
-        aid = sm_utils.create_analysis(
+        aid = SMDB.create_analysis(
             project=analysis_project,
             type_='cram',
             output=output_path,
@@ -828,7 +839,7 @@ df -h; pwd; du -sh $(dirname {md_j.output_cram.cram})
             sample_ids=[sample_name],
         )
         # 2. Queue a job that updates the status to "in-progress"
-        sm_in_progress_j = sm_utils.make_sm_in_progress_job(
+        sm_in_progress_j = SMDB.make_sm_in_progress_job(
             b,
             project=analysis_project,
             analysis_id=aid,
@@ -837,7 +848,7 @@ df -h; pwd; du -sh $(dirname {md_j.output_cram.cram})
             sample_name=sample_name,
         )
         # 2. Queue a job that updates the status to "completed"
-        sm_completed_j = sm_utils.make_sm_completed_job(
+        sm_completed_j = SMDB.make_sm_completed_job(
             b,
             project=analysis_project,
             analysis_id=aid,
@@ -952,10 +963,10 @@ def _make_produce_gvcf_jobs(
         depends_on=[hc_j],
     )
 
-    if sm_utils.update_sm_db:
+    if SMDB.do_update_analyses:
         # Interacting with the sample metadata server:
         # 1. Create a "queued" analysis
-        aid = sm_utils.create_analysis(
+        aid = SMDB.create_analysis(
             project=analysis_project,
             type_='gvcf',
             output=output_path,
@@ -963,7 +974,7 @@ def _make_produce_gvcf_jobs(
             sample_ids=[sample_name],
         )
         # 2. Queue a job that updates the status to "in-progress"
-        sm_in_progress_j = sm_utils.make_sm_in_progress_job(
+        sm_in_progress_j = SMDB.make_sm_in_progress_job(
             b,
             project=analysis_project,
             analysis_id=aid,
@@ -972,7 +983,7 @@ def _make_produce_gvcf_jobs(
             sample_name=sample_name,
         )
         # 2. Queue a job that updates the status to "completed"
-        sm_completed_j = sm_utils.make_sm_completed_job(
+        sm_completed_j = SMDB.make_sm_completed_job(
             b,
             project=analysis_project,
             analysis_id=aid,
@@ -1125,8 +1136,10 @@ def _add_subset_noalt_step(
 
 def _make_joint_genotype_jobs(
     b: hb.Batch,
+    intervals: hb.ResourceGroup,
     output_path: str,
     samples: Collection[Dict],
+    is_small_callset: bool,
     genomicsdb_bucket: str,
     tmp_bucket: str,
     gvcf_by_sid: Dict[str, str],
@@ -1134,31 +1147,21 @@ def _make_joint_genotype_jobs(
     dbsnp: str,
     local_tmp_dir: str,
     overwrite: bool,
-    depends_on: Optional[List[Job]] = None,
-    analysis_project: str = None,
     use_gnarly: bool = False,
-    use_as_vqsr: bool = False,
+    depends_on: Optional[List[Job]] = None,
 ) -> Job:
     """
     Assumes all samples have a 'file' of 'type'='gvcf' in `samples_df`.
     Adds samples to the GenomicsDB and runs joint genotyping on them.
     Outputs a multi-sample VCF under `output_vcf_path`.
     """
-    job_name = 'Joint-calling+VQSR'
+    job_name = 'Joint-calling'
     if utils.file_exists(output_path):
         return b.new_job(f'{job_name} [reuse]')
     logger.info(
         f'Not found expected result {output_path}. '
         f'Submitting the joint-calling and VQSR jobs.'
     )
-
-    is_small_callset = len(samples) < 1000
-    # 1. For small callsets, we don't apply the ExcessHet filtering.
-    # 2. For small callsets, we gather the VCF shards and collect QC metrics directly.
-    # For anything larger, we need to keep the VCF sharded and gather metrics
-    # collected from them.
-    is_huge_callset = len(samples) >= 100000
-    # For huge callsets, we allocate more memory for the SNPs Create Model step
 
     genomicsdb_path_per_interval = dict()
     for idx in range(utils.NUMBER_OF_GENOMICS_DB_INTERVALS):
@@ -1186,46 +1189,6 @@ def _make_joint_genotype_jobs(
     assert sample_names_will_be_in_db == sample_ids
     samples_hash = utils.hash_sample_ids(sample_ids)
 
-    intervals_j = _add_split_intervals_job(
-        b=b,
-        interval_list=utils.UNPADDED_INTERVALS,
-        scatter_count=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
-        ref_fasta=utils.REF_FASTA,
-    )
-
-    if sm_utils.update_sm_db:
-        # Interacting with the sample metadata server:
-        # 1. Create a "queued" analysis
-        aid = sm_utils.create_analysis(
-            project=analysis_project,
-            sample_ids=[s['id'] for s in samples],
-            type_='joint-calling',
-            output=output_path,
-            status='queued',
-        )
-        # 2. Queue a job that updates the status to "in-progress"
-        sm_in_progress_j = sm_utils.make_sm_in_progress_job(
-            b,
-            project=analysis_project,
-            analysis_id=aid,
-            analysis_type='joint-calling',
-        )
-        # 2. Queue a job that updates the status to "completed"
-        sm_completed_j = sm_utils.make_sm_completed_job(
-            b,
-            project=analysis_project,
-            analysis_id=aid,
-            analysis_type='joint-calling',
-        )
-        # Set up dependencies
-        intervals_j.depends_on(sm_in_progress_j)
-        if depends_on:
-            sm_in_progress_j.depends_on(*depends_on)
-    else:
-        if depends_on:
-            intervals_j.depends_on(*depends_on)
-        sm_completed_j = None
-
     import_gvcfs_job_per_interval = dict()
     if sample_names_to_add:
         logger.info(f'Queueing genomics-db-import jobs')
@@ -1238,18 +1201,16 @@ def _make_joint_genotype_jobs(
                 sample_names_will_be_in_db=sample_names_will_be_in_db,
                 updating_existing_db=updating_existing_db,
                 sample_map_bucket_path=sample_map_bucket_path,
-                interval=intervals_j.intervals[f'interval_{idx}'],
+                interval=intervals[f'interval_{idx}'],
                 interval_idx=idx,
                 number_of_intervals=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
-                depends_on=[intervals_j],
+                depends_on=depends_on,
             )
             import_gvcfs_job_per_interval[idx] = import_gvcfs_job
 
     scattered_vcf_by_interval: Dict[int, hb.ResourceGroup] = dict()
-
     joint_calling_tmp_bucket = f'{tmp_bucket}/joint_calling/{samples_hash}'
-    pre_vqsr_vcf_path = f'{joint_calling_tmp_bucket}/gathered.vcf.gz'
-    if not utils.can_reuse(pre_vqsr_vcf_path, overwrite):
+    if not utils.can_reuse(output_path, overwrite):
         for idx in range(utils.NUMBER_OF_GENOMICS_DB_INTERVALS):
             joint_called_vcf_path = (
                 f'{joint_calling_tmp_bucket}/by_interval/interval_{idx}.vcf.gz'
@@ -1276,7 +1237,8 @@ def _make_joint_genotype_jobs(
                     number_of_samples=len(sample_names_will_be_in_db),
                     interval_idx=idx,
                     number_of_intervals=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
-                    interval=intervals_j.intervals[f'interval_{idx}'],
+                    interval=intervals[f'interval_{idx}'],
+                    output_vcf_path=joint_called_vcf_path,
                 )
                 if import_gvcfs_job_per_interval.get(idx):
                     genotype_vcf_job.depends_on(import_gvcfs_job_per_interval.get(idx))
@@ -1287,43 +1249,54 @@ def _make_joint_genotype_jobs(
                         b,
                         input_vcf=genotype_vcf_job.output_vcf,
                         overwrite=overwrite,
-                        interval=intervals_j.intervals[f'interval_{idx}'],
+                        interval=intervals[f'interval_{idx}'],
                     )
                     last_job = exccess_filter_job
                 else:
                     last_job = genotype_vcf_job
-
                 scattered_vcf_by_interval[idx] = last_job.output_vcf
-
+    scattered_vcfs = list(scattered_vcf_by_interval.values())
     logger.info(f'Queueing gather-VCF job')
-    final_gathered_vcf_job = _add_final_gather_vcf_job(
+    gather_j = _add_final_gather_vcf_job(
         b,
-        input_vcfs=list(scattered_vcf_by_interval.values()),
+        input_vcfs=scattered_vcfs,
         overwrite=overwrite,
-        output_vcf_path=pre_vqsr_vcf_path,
-    )
-
-    tmp_vqsr_bucket = f'{joint_calling_tmp_bucket}/vqsr'
-    logger.info(f'Queueing VQSR job')
-    vqsr_job = make_vqsr_jobs(
-        b,
-        input_vcf_gathered=pre_vqsr_vcf_path,
-        input_vcfs_scattered=list(scattered_vcf_by_interval.values()),
-        is_small_callset=is_small_callset,
-        is_huge_callset=is_huge_callset,
-        work_bucket=tmp_vqsr_bucket,
-        web_bucket=tmp_vqsr_bucket,
-        depends_on=[final_gathered_vcf_job],
-        intervals=intervals_j.intervals,
-        scatter_count=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
         output_vcf_path=output_path,
-        use_as_annotations=use_as_vqsr,
     )
-    if sm_completed_j:
-        sm_completed_j.depends_on(vqsr_job)
-        return sm_completed_j
+    return gather_j
+
+
+def _make_vqsr_jobs(
+    b: hb.Batch,
+    gathered_vcf_path: str,
+    is_small_callset: bool,
+    is_huge_callset: bool,
+    output_path: str,
+    depends_on,
+    intervals,
+    joint_calling_tmp_bucket,
+    use_as_vqsr,
+    overwrite,
+) -> Job:
+    if not utils.can_reuse(output_path, overwrite=overwrite):
+        tmp_vqsr_bucket = f'{joint_calling_tmp_bucket}/vqsr'
+        logger.info(f'Queueing VQSR job')
+        return make_vqsr_jobs(
+            b,
+            input_vcf_gathered=gathered_vcf_path,
+            is_small_callset=is_small_callset,
+            is_huge_callset=is_huge_callset,
+            work_bucket=tmp_vqsr_bucket,
+            web_bucket=tmp_vqsr_bucket,
+            depends_on=depends_on,
+            intervals=intervals,
+            scatter_count=utils.NUMBER_OF_GENOMICS_DB_INTERVALS,
+            output_vcf_path=output_path,
+            use_as_annotations=use_as_vqsr,
+            overwrite=overwrite,
+        )
     else:
-        return vqsr_job
+        return b.new_job('VQSR [reuse]')
 
 
 def _add_split_intervals_job(
@@ -1456,12 +1429,12 @@ def _add_merge_gvcfs_job(
     j.command(
         f"""set -e
 
-    (while true; do df -h; pwd; du -sh $(dirname {j.output_gvcf['g.vcf.gz']}); free -m; sleep 300; done) &
+    (while true; do df -h; pwd; du -sh $(dirname {j.output_gvcf['g.vcf.gz']}); sleep 300; done) &
 
-    java -Xms{java_mem}g -jar /usr/picard/picard.jar \
-      MergeVcfs {input_cmd} OUTPUT={j.output_gvcf['g.vcf.gz']}
+    picard -Xms{java_mem}g \
+    MergeVcfs {input_cmd} OUTPUT={j.output_gvcf['g.vcf.gz']}
 
-    df -h; pwd; du -sh $(dirname {j.output_gvcf['g.vcf.gz']}); free -m
+    df -h; pwd; du -sh $(dirname {j.output_gvcf['g.vcf.gz']})
       """
     )
     if output_gvcf_path:
@@ -1618,6 +1591,9 @@ def _add_import_gvcfs_job(
     # the Hellbender (GATK engine) team!
 
     (while true; do df -h; pwd; free -m; sleep 300; done) &
+
+    export GOOGLE_APPLICATION_CREDENTIALS=/gsa-key/key.json
+    gcloud -q auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
 
     echo "Adding {len(sample_names_to_add)} samples: {', '.join(sample_names_to_add)}"
     {f'echo "Skipping adding {len(sample_names_to_skip)} samples that are already in the DB: '
@@ -1832,45 +1808,6 @@ def _add_exccess_het_filter(
     return j
 
 
-def _add_make_sites_only_job(
-    b: hb.Batch,
-    input_vcf: hb.ResourceGroup,
-    overwrite: bool,
-    output_vcf_path: Optional[str] = None,
-) -> Job:
-    """
-    Create sites-only VCF with only site-level annotations.
-    Speeds up the analysis in the AS-VQSR modeling step.
-
-    Returns: a Job object with a single output j.sites_only_vcf of type ResourceGroup
-    """
-    job_name = 'Joint genotyping: MakeSitesOnlyVcf'
-    if utils.can_reuse(output_vcf_path, overwrite):
-        return b.new_job(job_name + ' [reuse]')
-
-    j = b.new_job(job_name)
-    j.image(utils.GATK_IMAGE)
-    j.memory('8G')
-    j.storage(f'32G')
-    j.declare_resource_group(
-        output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
-    )
-
-    j.command(
-        f"""set -euo pipefail
-
-    gatk --java-options -Xms6g \\
-      MakeSitesOnlyVcf \\
-      -I {input_vcf['vcf.gz']} \\
-      -O {j.output_vcf['vcf.gz']}
-      """
-    )
-    if output_vcf_path:
-        b.write_output(j.output_vcf, output_vcf_path.replace('.vcf.gz', ''))
-
-    return j
-
-
 def _add_final_gather_vcf_job(
     b: hb.Batch,
     input_vcfs: List[hb.ResourceGroup],
@@ -1890,7 +1827,7 @@ def _add_final_gather_vcf_job(
     j.cpu(2)
     java_mem = 7
     j.memory('standard')  # ~ 4G/core ~ 7.5G
-    j.storage(f'{1 + len(input_vcfs) * 1}G')
+    j.storage(f'{1 + len(input_vcfs) * 2}G')
     j.declare_resource_group(
         output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
     )

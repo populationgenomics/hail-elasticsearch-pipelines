@@ -83,7 +83,6 @@ INDEL_RECALIBRATION_ANNOTATION_VALUES_AS = [
 def make_vqsr_jobs(
     b: hb.Batch,
     input_vcf_gathered: str,
-    input_vcfs_scattered: List[hb.ResourceGroup],
     is_small_callset: bool,
     is_huge_callset: bool,
     work_bucket: str,
@@ -93,16 +92,18 @@ def make_vqsr_jobs(
     scatter_count: int,
     output_vcf_path: str,
     use_as_annotations: bool,
+    overwrite: bool,
 ) -> Job:
     """
     Add jobs that perform the allele-specific VQSR variant QC
 
     :param b: Batch object to add jobs to
     :param input_vcf_gathered: path to an input gathered VCF
-    :param input_vcfs_scattered: list of input VCF scattered and indexed by the
-    interval ID
-    :param is_small_callset: usually < 1k samples
-    :param is_huge_callset: usually > 100k samples
+    :param is_small_callset: for small callsets, we gather the VCF shards and collect
+        QC metrics directly. For anything larger, we need to keep the VCF sharded and
+        gather metrics collected from them
+    :param is_huge_callset: For huge callsets, we allocate more memory for the SNPs
+        Create Model step
     :param work_bucket: bucket for intermediate files
     :param web_bucket: bucket for plots and evaluation results (exposed via http)
     :param depends_on: job that the created jobs should only run after
@@ -110,6 +111,7 @@ def make_vqsr_jobs(
     :param scatter_count: number of interavals
     :param output_vcf_path: path to write final recalibrated VCF to
     :param use_as_annotations: use allele-specific annotation for VQSR
+    :param overwrite: whether to not reuse intermediate files
     :return: a final Job, and a path to the VCF with VQSR annotations
     """
 
@@ -168,10 +170,21 @@ def make_vqsr_jobs(
     medium_disk = 50 if is_small_callset else (100 if not is_huge_callset else 200)
     huge_disk = 100 if is_small_callset else (500 if not is_huge_callset else 2000)
 
-    tabix_job = add_tabix_step(b, input_vcf_gathered, medium_disk)
+    site_only_j = _add_make_sites_only_job(
+        b=b,
+        input_vcf=b.read_input_group(
+            **{
+                'vcf.gz': input_vcf_gathered,
+                'vcf.gz.tbi': input_vcf_gathered + '.tbi',
+            }
+        ),
+        overwrite=overwrite,
+        disk=medium_disk,
+    )
+    gathered_vcf = site_only_j.output_vcf
+    first_job = site_only_j
     if depends_on:
-        tabix_job.depends_on(*depends_on)
-    gathered_vcf = tabix_job.combined_vcf
+        first_job.depends_on(*depends_on)
 
     indels_variant_recalibrator_job = add_indels_variant_recalibrator_job(
         b,
@@ -213,7 +226,7 @@ def make_vqsr_jobs(
         snps_recalibrator_jobs = [
             add_snps_variant_recalibrator_scattered_step(
                 b,
-                sites_only_vcf=input_vcfs_scattered[idx],
+                sites_only_vcf=gathered_vcf,
                 interval=intervals[f'interval_{idx}'],
                 model_file=model_file,
                 hapmap_resource_vcf=hapmap_resource_vcf,
@@ -237,7 +250,7 @@ def make_vqsr_jobs(
         scattered_vcfs = [
             add_apply_recalibration_step(
                 b,
-                input_vcf=input_vcfs_scattered[idx],
+                input_vcf=gathered_vcf,
                 interval=intervals[f'interval_{idx}'],
                 indels_recalibration=indels_recalibration,
                 indels_tranches=indels_tranches,
@@ -289,6 +302,47 @@ def make_vqsr_jobs(
         )
 
     return recalibrated_gathered_vcf_job
+
+
+def _add_make_sites_only_job(
+    b: hb.Batch,
+    input_vcf: hb.ResourceGroup,
+    overwrite: bool,
+    disk: int,
+    output_vcf_path: Optional[str] = None,
+) -> Job:
+    """
+    Create sites-only VCF with only site-level annotations.
+    Speeds up the analysis in the AS-VQSR modeling step.
+
+    Returns: a Job object with a single output j.sites_only_vcf of type ResourceGroup
+    """
+    job_name = 'VQSR: MakeSitesOnlyVcf'
+    if utils.can_reuse(output_vcf_path, overwrite):
+        return b.new_job(job_name + ' [reuse]')
+
+    j = b.new_job(job_name)
+    j.image(utils.GATK_IMAGE)
+    j.memory('8G')
+    j.storage(f'{disk}G')
+    j.declare_resource_group(
+        output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
+    )
+
+    j.command(
+        f"""set -euo pipefail
+
+    gatk --java-options -Xms6g \\
+      MakeSitesOnlyVcf \\
+      -I {input_vcf['vcf.gz']} \\
+      -O {j.output_vcf['vcf.gz']} \\
+      --CREATE_INDEX
+      """
+    )
+    if output_vcf_path:
+        b.write_output(j.output_vcf, output_vcf_path.replace('.vcf.gz', ''))
+
+    return j
 
 
 def add_tabix_step(
