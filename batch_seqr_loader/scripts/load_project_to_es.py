@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 
 """
-Hail script to submit on a dataproc cluster. Converts input multi-sample VCFs
-into a matrix table, which annotates and prepares to load into ES.
+Hail script to submit on a dataproc cluster. 
+
+Annotates the input matrix table with SeqrGenotypesSchema, and loads into ES.
 """
 
 import logging
 import math
 import subprocess
+from os.path import join
 
 import click
 import hail as hl
-from lib.model.seqr_mt_schema import SeqrVariantsAndGenotypesSchema
+from lib.model.seqr_mt_schema import SeqrGenotypesSchema
 from hail_scripts.v02.utils.elasticsearch_client import ElasticsearchClient
 
 logger = logging.getLogger(__file__)
@@ -23,6 +25,11 @@ logger.setLevel(logging.INFO)
 @click.option(
     '--mt-path',
     'mt_path',
+    required=True,
+)
+@click.option(
+    '--bucket',
+    'work_bucket',
     required=True,
 )
 @click.option(
@@ -60,17 +67,25 @@ logger.setLevel(logging.INFO)
     '--prod', is_flag=True, help='Run under the production ES credentials instead'
 )
 @click.option('--genome-version', 'genome_version', default='GRCh38')
+@click.option(
+    '--make-checkpoints',
+    'make_checkpoints',
+    is_flag=True,
+    help='Create checkpoints for intermediate matrix tables',
+)
 def main(
     mt_path: str,
+    work_bucket: str,
     es_host: str,
     es_port: str,
     es_username: str,
     es_password: str,
     es_index: str,
     es_index_min_num_shards: int,
-    genome_version: str,
     sample_list_fpath: str,
     prod: bool,  # pylint: disable=unused-argument
+    genome_version: str,
+    make_checkpoints: bool = False,
 ):  # pylint: disable=missing-function-docstring
     hl.init(default_reference=genome_version)
 
@@ -101,8 +116,15 @@ def main(
         sample_list = f.read().strip().split(',')
     mt = mt.filter_cols(hl.set(sample_list).contains(mt.s))
 
-    row_table = SeqrVariantsAndGenotypesSchema.elasticsearch_row(mt)
+    logger.info('Annotating genotypes')
+    mt = _compute_genotype_annotated_vcf(mt)
+    if make_checkpoints:
+        mt = mt.checkpoint(join(work_bucket, 'annotated_genotype.mt'), overwrite=True)
+
+    row_table = SeqrGenotypesESSchema.elasticsearch_row(mt)
+
     es_shards = _mt_num_shards(mt, es_index_min_num_shards)
+    logger.info('Exporting to ES')
     es.export_table_to_elasticsearch(
         row_table,
         index_name=es_index.lower(),
@@ -140,6 +162,52 @@ def _cleanup(es, es_index, es_shards):
     # Current disk configuration requires the previous index to be deleted prior to large indices, ~1TB, transferring off loading nodes
     if es_shards < 25:
         es.wait_for_shard_transfer(es_index)
+
+
+class SeqrGenotypesESSchema(SeqrGenotypesSchema):
+    """
+    Modified version of SeqrVariantsAndGenotypesSchema to just base
+    on SeqrGenotypesSchema, as we apply SeqrVariantSchema separately
+    on the cohort level
+    """
+
+    @staticmethod
+    def elasticsearch_row(ds):
+        """
+        Prepares the mt to export using ElasticsearchClient V02.
+        - Flattens nested structs
+        - drops locus and alleles key
+        """
+        # Converts a mt to the row equivalent.
+        if isinstance(ds, hl.MatrixTable):
+            ds = ds.rows()
+        # Converts nested structs into one field, e.g. {a: {b: 1}} => a.b: 1
+        table = ds.drop('vep').flatten()
+        # When flattening, the table is unkeyed, which causes problems because our locus and alleles should not
+        # be normal fields. We can also re-key, but I believe this is computational?
+        table = table.drop(table.locus, table.alleles)
+        return table
+
+
+def _compute_genotype_annotated_vcf(
+    mt, schema_cls=SeqrGenotypesESSchema
+) -> hl.MatrixTable:
+    r"""
+                   BaseMTSchema
+                     /       \
+            SeqrSchema        |
+                    |         |
+      SeqrVariantSchema     SeqrGenotypesSchema
+                    |         |
+      SeqrVariantASSchema   SeqrGenotypesESSchema
+                    \        /
+            SeqrVariantsAndGenotypesSchema
+            
+    SeqrVariantASSchema is applied on the cohort level separately.
+    """
+    annotation_schema = schema_cls(mt)
+    mt = annotation_schema.annotate_all(overwrite=True).mt
+    return mt
 
 
 if __name__ == '__main__':

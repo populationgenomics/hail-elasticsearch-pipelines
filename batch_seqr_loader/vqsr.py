@@ -83,7 +83,8 @@ INDEL_RECALIBRATION_ANNOTATION_VALUES_AS = [
 def make_vqsr_jobs(
     b: hb.Batch,
     input_vcf_gathered: str,
-    n_samples: int,
+    is_small_callset: bool,
+    is_huge_callset: bool,
     work_bucket: str,
     web_bucket: str,
     depends_on: Optional[List[Job]],
@@ -98,7 +99,11 @@ def make_vqsr_jobs(
 
     :param b: Batch object to add jobs to
     :param input_vcf_gathered: path to an input gathered VCF
-    :param n_samples: the number os samples in the input VCF
+    :param is_small_callset: for small callsets, we gather the VCF shards and collect
+        QC metrics directly. For anything larger, we need to keep the VCF sharded and
+        gather metrics collected from them
+    :param is_huge_callset: For huge callsets, we allocate more memory for the SNPs
+        Create Model step
     :param work_bucket: bucket for intermediate files
     :param web_bucket: bucket for plots and evaluation results (exposed via http)
     :param depends_on: job that the created jobs should only run after
@@ -161,14 +166,6 @@ def make_vqsr_jobs(
     )
     dbsnp_resource_vcf = dbsnp_vcf
 
-    is_small_callset = n_samples < 1000
-    # 1. For small callsets, we don't apply the ExcessHet filtering.
-    # 2. For small callsets, we gather the VCF shards and collect QC metrics directly.
-    # For anything larger, we need to keep the VCF sharded and gather metrics
-    # collected from them.
-    is_huge_callset = n_samples >= 100000
-    # For huge callsets, we allocate more memory for the SNPs Create Model step
-
     small_disk = 30 if is_small_callset else (50 if not is_huge_callset else 100)
     medium_disk = 50 if is_small_callset else (100 if not is_huge_callset else 200)
     huge_disk = 100 if is_small_callset else (500 if not is_huge_callset else 2000)
@@ -185,8 +182,6 @@ def make_vqsr_jobs(
         disk=medium_disk,
     )
     gathered_vcf = site_only_j.output_vcf
-    # tabix_job = add_tabix_step(b, input_vcf_gathered, medium_disk)
-    # gathered_vcf = tabix_job.combined_vcf
     first_job = site_only_j
     if depends_on:
         first_job.depends_on(*depends_on)

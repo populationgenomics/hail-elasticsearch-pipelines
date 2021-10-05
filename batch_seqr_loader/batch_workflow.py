@@ -447,6 +447,13 @@ def _add_jobs(  # pylint: disable=too-many-statements
         expected_output_fpath=expected_jc_vcf_path,
         skip_stage=skip_jc_stage,
     )
+    is_small_callset = len(good_samples) < 1000
+    # 1. For small callsets, we don't apply the ExcessHet filtering.
+    # 2. For small callsets, we gather the VCF shards and collect QC metrics directly.
+    # For anything larger, we need to keep the VCF sharded and gather metrics
+    # collected from them.
+    is_huge_callset = len(good_samples) >= 100000
+    # For huge callsets, we allocate more memory for the SNPs Create Model step
     if skip_jc_stage:
         if not found_jc_vcf_path:
             return None
@@ -457,6 +464,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
             intervals=intervals_j.intervals,
             output_path=expected_jc_vcf_path,
             samples=good_samples,
+            is_small_callset=is_small_callset,
             genomicsdb_bucket=f'{analysis_bucket}/genomicsdbs',
             tmp_bucket=tmp_bucket,
             gvcf_by_sid=gvcf_by_sid,
@@ -472,7 +480,8 @@ def _add_jobs(  # pylint: disable=too-many-statements
         b=b,
         gathered_vcf_path=expected_jc_vcf_path,
         output_path=expected_vqsr_site_only_vcf_path,
-        samples=good_samples,
+        is_small_callset=is_small_callset,
+        is_huge_callset=is_huge_callset,
         depends_on=[jc_job],
         intervals=intervals_j.intervals,
         joint_calling_tmp_bucket=joint_calling_tmp_bucket,
@@ -531,10 +540,11 @@ def _add_jobs(  # pylint: disable=too-many-statements
         return b
 
     for proj in output_projects:
+        proj_tmp_bucket = f'{tmp_bucket}/{proj}'
         # Make a list of project samples to subset from the entire matrix table
         samples = samples_by_project.get(proj)
         sample_ids = [s['id'] for s in samples]
-        sample_list_gcs_path = join(tmp_bucket, f'{proj}_samples.txt')
+        sample_list_gcs_path = join(proj_tmp_bucket, f'{proj}_samples.txt')
         sample_list_local_fpath = join(local_tmp_dir, basename(sample_list_gcs_path))
         with open(sample_list_local_fpath, 'w') as f:
             f.write(','.join(sample_ids))
@@ -543,8 +553,10 @@ def _add_jobs(  # pylint: disable=too-many-statements
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         dataproc.hail_dataproc_job(
             b,
-            f'batch_seqr_loader/scripts/load_to_es.py '
+            f'batch_seqr_loader/scripts/load_project_to_es.py.py '
             f'--mt-path {annotated_mt_path} '
+            '--make-checkpoints '
+            f'--bucket {proj_tmp_bucket} '
             f'--es-index {proj}-{output_version}-{timestamp} '
             f'--es-index-min-num-shards 1 '
             f'--sample-list {sample_list_local_fpath} '
@@ -1130,6 +1142,7 @@ def _make_joint_genotype_jobs(
     intervals: hb.ResourceGroup,
     output_path: str,
     samples: Collection[Dict],
+    is_small_callset: bool,
     genomicsdb_bucket: str,
     tmp_bucket: str,
     gvcf_by_sid: Dict[str, str],
@@ -1233,7 +1246,7 @@ def _make_joint_genotype_jobs(
                 if import_gvcfs_job_per_interval.get(idx):
                     genotype_vcf_job.depends_on(import_gvcfs_job_per_interval.get(idx))
 
-                if len(samples) > 1000:
+                if is_small_callset:
                     logger.info(f'Queueing exccess het filter job')
                     exccess_filter_job = _add_exccess_het_filter(
                         b,
@@ -1257,10 +1270,11 @@ def _make_joint_genotype_jobs(
 
 
 def _make_vqsr_jobs(
-    b,
-    gathered_vcf_path,
-    output_path,
-    samples,
+    b: hb.Batch,
+    gathered_vcf_path: str,
+    is_small_callset: bool,
+    is_huge_callset: bool,
+    output_path: str,
     depends_on,
     intervals,
     joint_calling_tmp_bucket,
@@ -1272,7 +1286,8 @@ def _make_vqsr_jobs(
     return make_vqsr_jobs(
         b,
         input_vcf_gathered=gathered_vcf_path,
-        n_samples=len(samples),
+        is_small_callset=is_small_callset,
+        is_huge_callset=is_huge_callset,
         work_bucket=tmp_vqsr_bucket,
         web_bucket=tmp_vqsr_bucket,
         depends_on=depends_on,

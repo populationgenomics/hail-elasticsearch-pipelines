@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 
 """
-Hail script to submit on a dataproc cluster. Converts input multi-sample VCFs
-into a matrix table, which annotates and prepares to load into ES.
+Hail script to submit on a dataproc cluster. 
+
+Converts input multi-sample VCFs into a matrix table, and annotates it.
 """
 
 import logging
@@ -10,7 +11,7 @@ from typing import Optional
 from os.path import join
 import click
 import hail as hl
-from lib.model.seqr_mt_schema import SeqrVariantsAndGenotypesSchema
+from lib.model.seqr_mt_schema import SeqrVariantSchema
 from lib.model.base_mt_schema import row_annotation
 from gnomad.utils.sparse_mt import split_info_annotation
 from gnomad.utils.filtering import add_filters_expr
@@ -109,7 +110,8 @@ def main(
     ref_data = hl.read_table(REF_HT)
     clinvar = hl.read_table(CLINVAR_HT)
 
-    mt = compute_annotated_vcf(mt, ref_data=ref_data, clinvar=clinvar)
+    mt = compute_variant_annotated_vcf(mt, ref_data=ref_data, clinvar=clinvar)
+
     mt = mt.annotate_globals(
         sourceFilePath=','.join(vcf_path),
         genomeVersion=GENOME_VERSION.replace('GRCh', ''),
@@ -255,60 +257,64 @@ def annotate_old_and_split_multi_hts(mt):
     )
 
 
-class SeqrVariantsAndGenotypesSchemaAS(SeqrVariantsAndGenotypesSchema):
+class SeqrVariantsASSchema(SeqrVariantSchema):
     """
-    Split VQSR AC/AF/AN fields are pure integers, not arrays
+    AC/AF/AN fields in a split matrix table are pure integers, not arrays
     """
 
     @row_annotation(name='AC')
-    def ac(self):
+    def ac(self):  # pylint: disable=invalid-name,missing-function-docstring
         return self.mt.info.AC
 
     @row_annotation(name='AF')
-    def af(self):
+    def af(self):  # pylint: disable=invalid-name,missing-function-docstring
         return self.mt.info.AF
 
     @row_annotation(name='AN')
-    def an(self):
+    def an(self):  # pylint: disable=invalid-name,missing-function-docstring
         return self.mt.info.AN
 
 
-def compute_annotated_vcf(
-    mt, ref_data, clinvar, schema_cls=SeqrVariantsAndGenotypesSchemaAS
-):
+def compute_variant_annotated_vcf(
+    mt, ref_data, clinvar, schema_cls=SeqrVariantsASSchema
+) -> hl.MatrixTable:
+    r"""
+    Returns a matrix table with an annotated rows where each row annotation 
+    is a previously called annotation (e.g. with the corresponding method or 
+    all in case of `annotate_all`).
+
+    Annotations are declared as methods on the schema_cls.
+
+    There's a strong coupling between the @row_annotation decorator
+    and the BaseMTSchema that's impractical to refactor, so we'll just leave it.
+
+       class SomeClass(BaseMTSchema):
+           @row_annotation()
+           def a(self):
+               return 'a_val'
+
+    This loops through all the @row_annotation decorated methods
+    on `schema_cls` and applies them all.
+    
+    See https://user-images.githubusercontent.com/22381693/113672350-f9b04000-96fa-11eb-91fe-e45d34c165c0.png
+    for a rough overview of the structure and methods declared on:
+
+                   BaseMTSchema
+                     /       \
+            SeqrSchema     SeqrGenotypesSchema
+                    |         |
+      SeqrVariantSchema       |
+                    |         |
+      SeqrVariantASSchema     |
+                    \        /
+            SeqrVariantsAndGenotypesSchema
+            
+    We apply only SeqrVariantSchema here (specifically, a modified 
+    version SeqrVariantASSchema). SeqrGenotypesSchema is applied separately
+    on the project level.
     """
-    Returns a matrix table with an annotated rows where each row annotation is a previously called
-    annotation (e.g. with the corresponding method or all in case of `annotate_all`).
-    :return: a matrix table
-    """
-    # Annotations are declared as methods on the schema_cls.
-    # There's a strong coupling between the @row_annotation decorator
-    # and the BaseMTSchema that's impractical to refactor, so we'll just leave it.
-    #
-    #   class SomeClass(BaseMTSchema):
-    #       @row_annotation()
-    #       def a(self):
-    #           return 'a_val'
-    #
-    # This loops through all the @row_annotation decorated methods
-    # on `schema_cls` and applies them all.
-    #
-    # See https://user-images.githubusercontent.com/22381693/113672350-f9b04000-96fa-11eb-91fe-e45d34c165c0.png
-    # for a rough overview of the structure and methods declared on:
-    #
-    #               BaseMTSchema
-    #                 /       \
-    #        SeqrSchema     SeqrGenotypesSchema
-    #                |         |
-    #  SeqrVariantSchema       |
-    #                \        /
-    #        SeqrVariantsAndGenotypesSchema
-    #
-    # we can call the annotation on this class in two steps:
     annotation_schema = schema_cls(mt, ref_data=ref_data, clinvar_data=clinvar)
-
     mt = annotation_schema.annotate_all(overwrite=True).select_annotated_mt()
-
     return mt
 
 
@@ -417,6 +423,7 @@ def validate_mt(mt, sample_type):
                 f'Sample type validation error: dataset sample-type is specified as {sample_type} but appears to be '
                 'WES because it contains many common non-coding variants'
             )
+
     return True
 
 
