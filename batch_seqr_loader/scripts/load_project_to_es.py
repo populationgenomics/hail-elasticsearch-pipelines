@@ -14,7 +14,7 @@ from os.path import join
 import click
 import hail as hl
 from lib.model.seqr_mt_schema import SeqrGenotypesSchema
-from hail_scripts.v02.utils.elasticsearch_client import ElasticsearchClient
+from hail_scripts.shared.elasticsearch_client_v7 import ElasticsearchClient
 
 logger = logging.getLogger(__file__)
 logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
