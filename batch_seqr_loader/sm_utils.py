@@ -61,9 +61,9 @@ class SMDB:
         Returns a dictionary of samples per input projects
         """
         samples_by_project: Dict[str, List[Dict]] = dict()
-        for proj in projects:
-            logger.info(f'Finding samples for project {proj}')
-            input_proj = proj
+        for proj_name in projects:
+            logger.info(f'Finding samples for project {proj_name}')
+            input_proj = proj_name
             if namespace != 'main':
                 input_proj += '-test'
             samples = cls.sapi.get_samples(
@@ -72,12 +72,12 @@ class SMDB:
                     'active': True,
                 }
             )
-            samples_by_project[proj] = []
+            samples_by_project[proj_name] = []
             for s in samples:
                 if skip_samples and s['id'] in skip_samples:
                     logger.info(f'Skipping sample: {s["id"]}')
                     continue
-                samples_by_project[proj].append(s)
+                samples_by_project[proj_name].append(s)
         return samples_by_project
 
     @classmethod
@@ -263,6 +263,7 @@ class SMDB:
         analysis_sample_ids: Collection[str],
         expected_output_fpath: str,
         skip_stage: bool,
+        check_existence: bool,
     ) -> Optional[str]:
         """
         Checks whether existing analysis exists, and output matches the expected output
@@ -306,7 +307,7 @@ class SMDB:
                     f'{expected_output_fpath}'
                 )
                 found_output_fpath = None
-            elif not utils.file_exists(found_output_fpath):
+            elif check_existence and not utils.file_exists(found_output_fpath):
                 logger.error(
                     f'Found a completed analysis {label}, '
                     f'but the "output" file {found_output_fpath} does not exist'
@@ -318,6 +319,9 @@ class SMDB:
             if found_output_fpath:
                 logger.info(f'Skipping stage, picking existing {found_output_fpath}')
                 return found_output_fpath
+            elif utils.file_exists(expected_output_fpath):
+                logger.info(f'Skipping stage, picking existing {expected_output_fpath}')
+                return expected_output_fpath
             else:
                 logger.info(
                     f'Skipping stage, and expected {expected_output_fpath} not found, '

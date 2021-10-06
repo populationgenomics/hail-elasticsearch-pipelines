@@ -78,6 +78,12 @@ logger.setLevel(logging.INFO)
     is_flag=True,
     help='Create checkpoints for intermediate matrix tables',
 )
+@click.option(
+    '--overwrite',
+    'overwrite',
+    is_flag=True,
+    help='Reuse intermediate files',
+)
 def main(
     mt_path: str,
     work_bucket: str,
@@ -92,6 +98,7 @@ def main(
     prod: bool,  # pylint: disable=unused-argument
     genome_version: str,
     make_checkpoints: bool = False,
+    overwrite: bool = False,
 ):  # pylint: disable=missing-function-docstring
     hl.init(default_reference=genome_version)
 
@@ -122,9 +129,13 @@ def main(
         mt = _subset_samples_and_variants(mt, subset_tsv_path)
 
     logger.info('Annotating genotypes')
-    mt = _compute_genotype_annotated_vcf(mt)
-    if make_checkpoints:
-        mt = mt.checkpoint(join(work_bucket, 'annotated_genotype.mt'), overwrite=True)
+    out_path = join(work_bucket, 'annotated_genotype.mt')
+    if not overwrite and hl.hadoop_exists(out_path):
+        mt = hl.read_matrix_table(out_path)
+    else:
+        mt = _compute_genotype_annotated_vcf(mt)
+        if make_checkpoints:
+            mt = mt.checkpoint(out_path, overwrite=True)
 
     logger.info('Remapping internal IDs back to external IDs')
     if remap_tsv_path:
@@ -174,7 +185,7 @@ def _cleanup(es, es_index, es_shards):
 
 def _subset_samples_and_variants(mt, subset_tsv_path: str) -> hl.MatrixTable:
     """
-    Subset the MatrixTable to the provided list of samples and to variants present 
+    Subset the MatrixTable to the provided list of samples and to variants present
     in those samples
     :param mt: MatrixTable from VCF
     :param subset_tsv_path: path to a TSV file with a single column 's', with no header
@@ -212,7 +223,7 @@ def _remap_sample_ids(mt, remap_tsv_path: str) -> hl.MatrixTable:
     (the sample ID used within seqr).
     If the sample 's' does not have a 'seqr_id' in the remap file, 's' becomes 'seqr_id'
     :param mt: MatrixTable from VCF
-    :param remap_tsv_path: Path to a file with two columns 's' and 'seqr_id', 
+    :param remap_tsv_path: Path to a file with two columns 's' and 'seqr_id',
         with a header
     :return: MatrixTable remapped and keyed to use seqr_id
     """

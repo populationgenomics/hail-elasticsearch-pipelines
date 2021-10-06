@@ -22,7 +22,7 @@ GATK_VERSION = '4.2.2.0-cpgfix00'  # Our fork with a couple of fixes:
 # https://github.com/populationgenomics/production-pipelines/tree/initial/dockers/gatk
 GATK_IMAGE = f'{AR_REPO}/gatk:{GATK_VERSION}'
 PICARD_IMAGE = f'{AR_REPO}/picard_samtools:v0'
-ALIGNMENT_IMAGE = f'{AR_REPO}/alignment:v3'
+ALIGNMENT_IMAGE = f'{AR_REPO}/bwa:v0'
 SOMALIER_IMAGE = f'{AR_REPO}/somalier:latest'
 PEDDY_IMAGE = f'{AR_REPO}/peddy:0.4.8--pyh5e36f6f_0'
 GNARLY_IMAGE = f'{AR_REPO}/gnarly_genotyper:hail_ukbb_300K'

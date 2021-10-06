@@ -289,15 +289,16 @@ def _add_jobs(  # pylint: disable=too-many-statements
         return b
 
     all_samples = []
-    for proj, samples in samples_by_project.items():
+    for proj_name, samples in samples_by_project.items():
         all_samples.extend(samples)
 
     # after dropping samples with incorrect metadata, missing inputs, etc
     good_samples: List[Dict] = []
     hc_intervals_j = None
-    for proj, samples in samples_by_project.items():
-        logger.info(f'Processing project {proj}')
-        proj_bucket = f'gs://cpg-{proj}-{output_suffix}'
+    for proj_name, samples in samples_by_project.items():
+        proj_bucket = f'gs://cpg-{proj_name}-{output_suffix}'
+        proj_name = proj_name if output_suffix == 'main' else f'{proj_name}-test'
+        logger.info(f'Processing project {proj_name}')
         sample_ids = [s['id'] for s in samples]
 
         cram_analysis_per_sid = SMDB.find_analyses_by_sid(
@@ -313,7 +314,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
         seq_info_by_sid = SMDB.find_seq_info_by_sid(sample_ids)
 
         for s in samples:
-            logger.info(f'Project {proj}. Processing sample {s["id"]}')
+            logger.info(f'Project {proj_name}. Processing sample {s["id"]}')
             expected_cram_path = f'{proj_bucket}/cram/{s["id"]}.cram'
             skip_cram_stage = start_from_stage is not None and start_from_stage not in [
                 'cram'
@@ -326,36 +327,30 @@ def _add_jobs(  # pylint: disable=too-many-statements
                 analysis_sample_ids=[s['id']],
                 expected_output_fpath=expected_cram_path,
                 skip_stage=skip_cram_stage,
+                check_existence=check_inputs_existence,
             )
-            if skip_cram_stage:
-                if not found_cram_path:
+            if not found_cram_path:
+                if skip_cram_stage:
                     continue
                 cram_job = None
             else:
                 seq_info = seq_info_by_sid[s['id']]
-                logger.info('Checking sequence.meta:')
+                logger.info(f'Checking sequence.meta in {seq_info}:')
                 alignment_input = sm_get_reads_data(
                     seq_info['meta'], check_existence=check_inputs_existence
                 )
                 if not alignment_input:
-                    logger.info('Checking sample.meta:')
-                    alignment_input = sm_get_reads_data(
-                        s['meta'], check_existence=check_inputs_existence
-                    )
-                if alignment_input:
-                    cram_job = _make_realign_jobs(
-                        b=b,
-                        output_path=expected_cram_path,
-                        sample_name=s['id'],
-                        project_name=proj,
-                        alignment_input=alignment_input,
-                        reference=bwa_reference,
-                        analysis_project=analysis_project,
-                    )
-                else:
-                    cram_job = b.new_job(
-                        'BWA [reuse: no input found, but output exists]'
-                    )
+                    logger.critical(f'Could not find read data for sample {s["id"]}')
+                    continue
+                cram_job = _make_realign_jobs(
+                    b=b,
+                    output_path=expected_cram_path,
+                    sample_name=s['id'],
+                    project_name=proj_name,
+                    alignment_input=alignment_input,
+                    reference=bwa_reference,
+                    analysis_project=analysis_project,
+                )
                 found_cram_path = expected_cram_path
 
             if end_with_stage == 'cram':
@@ -377,9 +372,10 @@ def _add_jobs(  # pylint: disable=too-many-statements
                 analysis_sample_ids=[s['id']],
                 expected_output_fpath=expected_gvcf_path,
                 skip_stage=skip_gvcf_stage,
+                check_existence=check_inputs_existence,
             )
-            if skip_gvcf_stage:
-                if not found_gvcf_path:
+            if not found_gvcf_path:
+                if skip_gvcf_stage:
                     continue
             else:
                 if hc_intervals_j is None and hc_shards_num > 1:
@@ -393,7 +389,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
                     b=b,
                     output_path=expected_gvcf_path,
                     sample_name=s['id'],
-                    project_name=proj,
+                    project_name=proj_name,
                     cram_path=found_cram_path,
                     intervals_j=hc_intervals_j,
                     number_of_intervals=hc_shards_num,
@@ -447,6 +443,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
         analysis_sample_ids=sample_ids,
         expected_output_fpath=expected_jc_vcf_path,
         skip_stage=skip_jc_stage,
+        check_existence=check_inputs_existence,
     )
     is_small_callset = len(good_samples) < 1000
     # 1. For small callsets, we don't apply the ExcessHet filtering.
@@ -518,6 +515,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
                 f'--bucket {anno_tmp_bucket} '
                 '--disable-validation '
                 '--make-checkpoints '
+                + ('--overwrite ' if overwrite else '')
                 + (f'--vep-block-size {vep_block_size} ' if vep_block_size else ''),
                 max_age='16h',
                 packages=utils.DATAPROC_PACKAGES,
@@ -531,10 +529,11 @@ def _add_jobs(  # pylint: disable=too-many-statements
         logger.info(f'Latest stage is {end_with_stage}, not creating ES indices')
         return b
 
-    for proj in output_projects:
-        proj_tmp_bucket = f'{anno_tmp_bucket}/{proj}'
+    for proj_name in output_projects:
+        samples = samples_by_project.get(proj_name)
+        proj_name = proj_name if output_suffix == 'main' else f'{proj_name}-test'
+        proj_tmp_bucket = f'{anno_tmp_bucket}/{proj_name}'
         # Make a list of project samples to subset from the entire matrix table
-        samples = samples_by_project.get(proj)
         sample_ids = [s['id'] for s in samples]
         subset_path = f'{proj_tmp_bucket}/samples.txt'
         with hl.hadoop_open(subset_path, 'w') as f:
@@ -552,8 +551,9 @@ def _add_jobs(  # pylint: disable=too-many-statements
             f'batch_seqr_loader/scripts/load_project_to_es.py '
             f'--mt-path {annotated_mt_path} '
             '--make-checkpoints '
-            f'--bucket {proj_tmp_bucket} '
-            f'--es-index {proj}-{output_version}-{timestamp} '
+            + ('--overwrite ' if overwrite else '')
+            + f'--bucket {proj_tmp_bucket} '
+            f'--es-index {proj_name}-{output_version}-{timestamp} '
             f'--es-index-min-num-shards 1 '
             f'--subset-tsv {subset_path} '
             f'--remap-tsv {remap_path} '
@@ -562,7 +562,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
             max_age='16h',
             packages=utils.DATAPROC_PACKAGES,
             num_secondary_workers=10,
-            job_name=f'{proj}: annotate project and create ES index',
+            job_name=f'{proj_name}: annotate project and create ES index',
             depends_on=[annotate_job],
             scopes=['cloud-platform'],
         )
@@ -708,9 +708,6 @@ def _make_realign_jobs(
     When the input is CRAM/BAM, uses Bazam to stream reads to BWA.
     """
     job_name = f'{project_name}/{sample_name}: BWA align'
-    if utils.file_exists(output_path) and utils.file_exists(output_path + '.crai'):
-        return b.new_job(f'{job_name} [reuse]')
-
     logger.info(f'Submitting alignment to write {output_path} for {sample_name}. ')
     j = b.new_job(job_name)
     j.image(utils.ALIGNMENT_IMAGE)
@@ -775,6 +772,12 @@ def _make_realign_jobs(
     command = f"""
 set -o pipefail
 set -ex
+
+# If the output file exists, not running the job
+export GOOGLE_APPLICATION_CREDENTIALS=/gsa-key/key.json
+gcloud -q auth activate-service-account \\
+--key-file=$GOOGLE_APPLICATION_CREDENTIALS
+gsutil ls {' '.join(output_path)} && exit 0 || echo "Running command"
 
 (while true; do df -h; pwd; du -sh $(dirname {j.sorted_bam}); sleep 600; done) &
 
@@ -896,14 +899,6 @@ def _make_produce_gvcf_jobs(
     HaplotypeCaller is run in an interval-based sharded way, with per-interval
     HaplotypeCaller jobs defined in a nested loop.
     """
-    job_name = f'{project_name}/{sample_name}: make GVCF'
-    if utils.file_exists(output_path):
-        return b.new_job(f'{job_name} [reuse]')
-    logger.info(
-        f'Not found expected result {output_path} for {sample_name}. '
-        f'Submitting the variant calling jobs.'
-    )
-
     hc_gvcf_path = join(tmp_bucket, 'haplotypecaller', f'{sample_name}.g.vcf.gz')
     haplotype_caller_jobs = []
     if intervals_j is not None:
