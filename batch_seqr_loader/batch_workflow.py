@@ -1111,7 +1111,6 @@ def _add_subset_noalt_step(
     bcftools view \\
         {input_gvcf['g.vcf.gz']} \\
         -T {noalt_regions} \\
-        | bcftools annotate -x INFO/DS \\
         -o {j.output_gvcf['g.vcf.gz']} \\
         -Oz
 
