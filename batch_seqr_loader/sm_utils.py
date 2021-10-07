@@ -3,6 +3,7 @@ Functions to find the pipeline inputs and communicate with the SM server
 """
 
 import logging
+import traceback
 from dataclasses import dataclass
 from textwrap import dedent
 from typing import List, Dict, Optional, Set, Collection
@@ -90,14 +91,32 @@ class SMDB:
         return seq_info_by_sid
 
     @classmethod
-    def update_analysis(cls, analysis: Analysis, status: str):
+    def update_analysis(
+        cls,
+        analysis: Analysis,
+        status: Optional[str] = None,
+        output: Optional[str] = None,
+    ):
         """
         Update "status" of an Analysis entry
         """
         if not cls.do_update_analyses:
             return
-        cls.aapi.update_analysis_status(analysis.id, AnalysisUpdateModel(status=status))
-        analysis.status = status
+        try:
+            cls.aapi.update_analysis_status(
+                analysis.id,
+                AnalysisUpdateModel(
+                    status=status or analysis.status,
+                    output=output or analysis.output,
+                ),
+            )
+        except exceptions.ApiException:
+            traceback.print_exc()
+        else:
+            if status:
+                analysis.status = status
+            if output:
+                analysis.output = output
 
     @classmethod
     def find_joint_calling_analysis(
@@ -281,6 +300,7 @@ class SMDB:
             to sit on the bucket (will invalidate the analysis if it doesn't match)
         :param skip_stage: if not skip_stage and analysis output is not as expected,
             we invalidate the analysis and set its status to failure
+        :param check_existence: check if the files are on the bucket
         :return: path to the output if it can be reused, otherwise None
         """
         label = f'type={analysis_type}'
@@ -306,6 +326,10 @@ class SMDB:
                     f'{found_output_fpath} does not match the expected path '
                     f'{expected_output_fpath}'
                 )
+                logger.info(
+                    f'Updating analysis {completed_analysis.id}: {completed_analysis}'
+                )
+                SMDB.update_analysis(completed_analysis, output=expected_output_fpath)
                 found_output_fpath = None
             elif check_existence and not utils.file_exists(found_output_fpath):
                 logger.error(

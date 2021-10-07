@@ -172,14 +172,17 @@ def main(
         tmp_bucket_suffix = 'main-tmp'
 
     if output_namespace in ['test', 'main']:
-        output_suffix = output_namespace
+        out_bucket_suffix = output_namespace
         web_bucket_suffix = f'{output_namespace}-web'
     else:
-        output_suffix = 'test-tmp'
+        out_bucket_suffix = 'test-tmp'
         web_bucket_suffix = 'test-tmp'
 
     tmp_bucket = (
         f'gs://cpg-seqr-{tmp_bucket_suffix}/{analysis_project}/{output_version}'
+    )
+    out_bucket = (
+        f'gs://cpg-seqr-{out_bucket_suffix}/{analysis_project}/{output_version}'
     )
     web_bucket = (
         f'gs://cpg-seqr-{web_bucket_suffix}/{analysis_project}/{output_version}'
@@ -223,7 +226,8 @@ def main(
         b=b,
         tmp_bucket=tmp_bucket,
         web_bucket=web_bucket,
-        output_suffix=output_suffix,
+        out_bucket=out_bucket,
+        output_suffix=out_bucket_suffix,
         local_tmp_dir=local_tmp_dir,
         output_version=output_version,
         overwrite=overwrite,
@@ -249,6 +253,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
     b: hb.Batch,
     tmp_bucket,
     web_bucket,  # pylint: disable=unused-argument
+    out_bucket,
     output_suffix,
     local_tmp_dir,
     output_version: str,
@@ -267,11 +272,8 @@ def _add_jobs(  # pylint: disable=too-many-statements
     check_inputs_existence: bool,
 ) -> Optional[hb.Batch]:
 
-    analysis_bucket = (
-        f'gs://cpg-seqr-{output_suffix}/{analysis_project}/{output_version}'
-    )
     # pylint: disable=unused-variable
-    fingerprints_bucket = f'{analysis_bucket}/fingerprints'
+    fingerprints_bucket = f'{out_bucket}/fingerprints'
 
     reference, bwa_reference, noalt_regions = utils.get_refs(b)
 
@@ -329,11 +331,10 @@ def _add_jobs(  # pylint: disable=too-many-statements
                 skip_stage=skip_cram_stage,
                 check_existence=check_inputs_existence,
             )
+            cram_job = None
             if not found_cram_path:
                 if skip_cram_stage:
                     continue
-                cram_job = None
-            else:
                 seq_info = seq_info_by_sid[s['id']]
                 logger.info(f'Checking sequence.meta in {seq_info}:')
                 alignment_input = sm_get_reads_data(
@@ -377,7 +378,6 @@ def _add_jobs(  # pylint: disable=too-many-statements
             if not found_gvcf_path:
                 if skip_gvcf_stage:
                     continue
-            else:
                 if hc_intervals_j is None and hc_shards_num > 1:
                     hc_intervals_j = _add_split_intervals_job(
                         b=b,
@@ -402,8 +402,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
                 )
                 gvcf_jobs.append(gvcf_job)
                 found_gvcf_path = expected_gvcf_path
-            if found_gvcf_path:
-                gvcf_by_sid[s['id']] = found_gvcf_path
+            gvcf_by_sid[s['id']] = found_gvcf_path
             good_samples.append(s)
 
     if end_with_stage == 'gvcf':
@@ -463,7 +462,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
             output_path=expected_jc_vcf_path,
             samples=good_samples,
             is_small_callset=is_small_callset,
-            genomicsdb_bucket=f'{analysis_bucket}/genomicsdbs',
+            genomicsdb_bucket=f'{out_bucket}/genomicsdbs',
             tmp_bucket=tmp_bucket,
             gvcf_by_sid=gvcf_by_sid,
             reference=reference,
@@ -491,7 +490,6 @@ def _add_jobs(  # pylint: disable=too-many-statements
         logger.info(f'Latest stage is {end_with_stage}, stopping the pipeline here.')
         return b
 
-    annotated_mt_path = f'{analysis_bucket}/mt/seqr.mt'
     skip_anno_stage = start_from_stage is not None and start_from_stage not in [
         'cram',
         'gvcf',
@@ -500,6 +498,8 @@ def _add_jobs(  # pylint: disable=too-many-statements
     ]
 
     anno_tmp_bucket = f'{tmp_bucket}/mt'
+    annotated_mt_path = f'{anno_tmp_bucket}/combined.mt'
+    checkpoints_bucket = f'{anno_tmp_bucket}/checkpoints'
     if skip_anno_stage:
         annotate_job = None
     else:
@@ -512,7 +512,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
                 f'--vcf-path {expected_jc_vcf_path} '
                 f'--site-only-vqsr-vcf-path {expected_vqsr_site_only_vcf_path} '
                 f'--dest-mt-path {annotated_mt_path} '
-                f'--bucket {anno_tmp_bucket} '
+                f'--bucket {checkpoints_bucket} '
                 '--disable-validation '
                 '--make-checkpoints '
                 + ('--overwrite ' if overwrite else '')
@@ -532,7 +532,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
     for proj_name in output_projects:
         samples = samples_by_project.get(proj_name)
         proj_name = proj_name if output_suffix == 'main' else f'{proj_name}-test'
-        proj_tmp_bucket = f'{anno_tmp_bucket}/{proj_name}'
+        proj_tmp_bucket = f'{anno_tmp_bucket}/projects/{proj_name}'
         # Make a list of project samples to subset from the entire matrix table
         sample_ids = [s['id'] for s in samples]
         subset_path = f'{proj_tmp_bucket}/samples.txt'
@@ -772,12 +772,6 @@ def _make_realign_jobs(
     command = f"""
 set -o pipefail
 set -ex
-
-# If the output file exists, not running the job
-export GOOGLE_APPLICATION_CREDENTIALS=/gsa-key/key.json
-gcloud -q auth activate-service-account \\
---key-file=$GOOGLE_APPLICATION_CREDENTIALS
-gsutil ls {' '.join(output_path)} && exit 0 || echo "Running command"
 
 (while true; do df -h; pwd; du -sh $(dirname {j.sorted_bam}); sleep 600; done) &
 
