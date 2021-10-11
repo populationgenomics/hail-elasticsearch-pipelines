@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from os.path import join, basename, splitext
 from typing import Optional, List, Dict, Tuple
 import pandas as pd
-from utils import file_exists
+from seqr_loader.utils import file_exists
 
 logger = logging.getLogger(__file__)
 logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
@@ -299,30 +299,12 @@ def sm_get_reads_data(  # pylint: disable=too-many-return-statements
     Verify the meta.reads object in a sample db entry
     """
     reads_data = meta.get('reads')
-    reads_type = meta.get('reads_type')
     if not reads_data:
-        logger.error(f'No "meta/reads" field in meta')
-        return None
-    if not reads_type:
-        logger.error(f'No "meta/reads_type" field in meta')
-        return None
-    supported_types = ('fastq', 'bam', 'cram')
-    if reads_type not in supported_types:
-        logger.error(f'ERROR: "reads_type" is expected to be one of {supported_types}')
+        logger.error(f'No "meta/reads" field in meta: {meta}')
         return None
 
-    if reads_type in ('bam', 'cram'):
-        if len(reads_data) > 1:
-            logger.error('Supporting only single bam/cram input')
-            return None
-
+    try:
         bam_path = reads_data[0]['location']
-        if not (bam_path.endswith('.cram') or bam_path.endswith('.bam')):
-            logger.error(
-                f'ERROR: expected the file to have an extention .cram or .bam,'
-                f'got: {bam_path}'
-            )
-            return None
         if check_existence and not file_exists(bam_path):
             logger.error(f'ERROR: index file doesn\'t exist: {bam_path}')
             return None
@@ -350,8 +332,7 @@ def sm_get_reads_data(  # pylint: disable=too-many-return-statements
             return None
 
         return AlignmentInput(bam_or_cram_path=bam_path, index_path=index_path)
-
-    else:
+    except Exception:  # pylint: disable=broad-except
         fqs1 = []
         fqs2 = []
         for lane_data in reads_data:

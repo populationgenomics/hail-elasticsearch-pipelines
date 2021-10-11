@@ -3,6 +3,7 @@ Functions to find the pipeline inputs and communicate with the SM server
 """
 
 import logging
+import traceback
 from dataclasses import dataclass
 from textwrap import dedent
 from typing import List, Dict, Optional, Set, Collection
@@ -18,7 +19,7 @@ from sample_metadata import (
     exceptions,
 )
 
-import utils
+from seqr_loader import utils
 
 
 logger = logging.getLogger(__file__)
@@ -61,9 +62,9 @@ class SMDB:
         Returns a dictionary of samples per input projects
         """
         samples_by_project: Dict[str, List[Dict]] = dict()
-        for proj in projects:
-            logger.info(f'Finding samples for project {proj}')
-            input_proj = proj
+        for proj_name in projects:
+            logger.info(f'Finding samples for project {proj_name}')
+            input_proj = proj_name
             if namespace != 'main':
                 input_proj += '-test'
             samples = cls.sapi.get_samples(
@@ -72,12 +73,12 @@ class SMDB:
                     'active': True,
                 }
             )
-            samples_by_project[proj] = []
+            samples_by_project[proj_name] = []
             for s in samples:
                 if skip_samples and s['id'] in skip_samples:
                     logger.info(f'Skipping sample: {s["id"]}')
                     continue
-                samples_by_project[proj].append(s)
+                samples_by_project[proj_name].append(s)
         return samples_by_project
 
     @classmethod
@@ -90,14 +91,32 @@ class SMDB:
         return seq_info_by_sid
 
     @classmethod
-    def update_analysis(cls, analysis: Analysis, status: str):
+    def update_analysis(
+        cls,
+        analysis: Analysis,
+        status: Optional[str] = None,
+        output: Optional[str] = None,
+    ):
         """
         Update "status" of an Analysis entry
         """
         if not cls.do_update_analyses:
             return
-        cls.aapi.update_analysis_status(analysis.id, AnalysisUpdateModel(status=status))
-        analysis.status = status
+        try:
+            cls.aapi.update_analysis_status(
+                analysis.id,
+                AnalysisUpdateModel(
+                    status=status or analysis.status,
+                    output=output or analysis.output,
+                ),
+            )
+        except exceptions.ApiException:
+            traceback.print_exc()
+        else:
+            if status:
+                analysis.status = status
+            if output:
+                analysis.output = output
 
     @classmethod
     def find_joint_calling_analysis(
@@ -250,7 +269,7 @@ class SMDB:
             sample_ids=sample_ids,
         )
         aid = cls.aapi.create_new_analysis(project=project, analysis_model=am)
-        logger.info(f'Queueing joint-calling with analysis ID: {aid}')
+        logger.info(f'Created analysis of type={type_} status={status} with ID: {aid}')
         return aid
 
     @classmethod
@@ -263,6 +282,7 @@ class SMDB:
         analysis_sample_ids: Collection[str],
         expected_output_fpath: str,
         skip_stage: bool,
+        check_existence: bool,
     ) -> Optional[str]:
         """
         Checks whether existing analysis exists, and output matches the expected output
@@ -280,6 +300,7 @@ class SMDB:
             to sit on the bucket (will invalidate the analysis if it doesn't match)
         :param skip_stage: if not skip_stage and analysis output is not as expected,
             we invalidate the analysis and set its status to failure
+        :param check_existence: check if the files are on the bucket
         :return: path to the output if it can be reused, otherwise None
         """
         label = f'type={analysis_type}'
@@ -305,8 +326,12 @@ class SMDB:
                     f'{found_output_fpath} does not match the expected path '
                     f'{expected_output_fpath}'
                 )
+                logger.info(
+                    f'Updating analysis {completed_analysis.id}: {completed_analysis}'
+                )
+                SMDB.update_analysis(completed_analysis, output=expected_output_fpath)
                 found_output_fpath = None
-            elif not utils.file_exists(found_output_fpath):
+            elif check_existence and not utils.file_exists(found_output_fpath):
                 logger.error(
                     f'Found a completed analysis {label}, '
                     f'but the "output" file {found_output_fpath} does not exist'
@@ -318,6 +343,9 @@ class SMDB:
             if found_output_fpath:
                 logger.info(f'Skipping stage, picking existing {found_output_fpath}')
                 return found_output_fpath
+            elif utils.file_exists(expected_output_fpath):
+                logger.info(f'Skipping stage, picking existing {expected_output_fpath}')
+                return expected_output_fpath
             else:
                 logger.info(
                     f'Skipping stage, and expected {expected_output_fpath} not found, '

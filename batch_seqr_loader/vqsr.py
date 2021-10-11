@@ -7,8 +7,8 @@ from typing import List, Optional, Dict
 import logging
 import hailtop.batch as hb
 from hailtop.batch.job import Job
-import utils
-from utils import BROAD_REF_BUCKET
+from seqr_loader import utils
+from seqr_loader.utils import BROAD_REF_BUCKET
 
 logger = logging.getLogger('VQSR')
 logger.setLevel('INFO')
@@ -166,9 +166,28 @@ def make_vqsr_jobs(
     )
     dbsnp_resource_vcf = dbsnp_vcf
 
-    small_disk = 30 if is_small_callset else (50 if not is_huge_callset else 100)
-    medium_disk = 50 if is_small_callset else (100 if not is_huge_callset else 200)
-    huge_disk = 100 if is_small_callset else (500 if not is_huge_callset else 2000)
+    # To fit only a site-only VCF
+    if is_small_callset:
+        small_disk = 50
+    elif not is_huge_callset:
+        small_disk = 100
+    else:
+        small_disk = 200
+
+    # To fit a joint-called VCF
+    if is_small_callset:
+        medium_disk = 100
+    elif not is_huge_callset:
+        medium_disk = 200
+    else:
+        medium_disk = 500
+
+    if is_small_callset:
+        huge_disk = 200
+    elif not is_huge_callset:
+        huge_disk = 500
+    else:
+        huge_disk = 2000
 
     site_only_j = _add_make_sites_only_job(
         b=b,

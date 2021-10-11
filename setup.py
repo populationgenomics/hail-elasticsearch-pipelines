@@ -13,14 +13,18 @@ PKG = 'seqr-loader'
 setuptools.setup(
     name='seqr-loader',
     # This tag is automatically updated by bump2version
-    version='1.1.0',
+    version='1.1.2',
     description='The hail scripts in this repo can be used to pre-process variant callsets and export them to elasticsearch',
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',
     url=f'https://github.com/populationgenomics/hail-elasticsearch-pipelines',
     license='MIT',
-    packages=['hail_scripts', 'lib', 'lib.model'],
-    package_dir={'lib': 'luigi_pipeline/lib', 'lib.model': 'luigi_pipeline/lib/model'},
+    packages=['hail_scripts', 'lib', 'lib.model', 'seqr_loader'],
+    package_dir={
+        'lib': 'luigi_pipeline/lib',
+        'lib.model': 'luigi_pipeline/lib/model',
+        'seqr_loader': 'batch_seqr_loader/seqr_loader',
+    },
     include_package_data=True,
     zip_safe=False,
     keywords='bioinformatics',

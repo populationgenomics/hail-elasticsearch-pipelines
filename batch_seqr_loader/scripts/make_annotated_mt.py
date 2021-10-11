@@ -15,6 +15,7 @@ from lib.model.seqr_mt_schema import SeqrVariantSchema
 from lib.model.base_mt_schema import row_annotation
 from gnomad.utils.sparse_mt import split_info_annotation
 from gnomad.utils.filtering import add_filters_expr
+from seqr_loader import utils
 
 logger = logging.getLogger(__file__)
 logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
@@ -59,6 +60,12 @@ INDEL_SCORE_CUTOFF = 0
     is_flag=True,
     help='Create checkpoints for intermediate matrix tables',
 )
+@click.option(
+    '--overwrite',
+    'overwrite',
+    is_flag=True,
+    help='Reuse intermediate files',
+)
 @click.option('--vep-block-size', 'vep_block_size')
 def main(
     vcf_path: str,
@@ -66,43 +73,57 @@ def main(
     dest_path: str,
     work_bucket: str,
     disable_validation: bool,
-    make_checkpoints: bool = False,
-    vep_block_size: Optional[int] = None,
+    make_checkpoints: bool,
+    overwrite: bool,
+    vep_block_size: Optional[int],
 ):  # pylint: disable=missing-function-docstring
     logger.info('Starting the seqr_load pipeline')
 
     hl.init(default_reference=GENOME_VERSION)
+
     mt = import_vcf(vcf_path, GENOME_VERSION)
     mt = annotate_old_and_split_multi_hts(mt)
     if not disable_validation:
         validate_mt(mt, sample_type='WGS')
-    vqsr_ht = load_vqsr(
-        site_only_vqsr_vcf_path, join(work_bucket, 'vqsr.ht'), overwrite=True
-    )
-    vqsr_ht = apply_vqsr_cutoffs(
-        vqsr_ht, join(work_bucket, 'vqsr-with-filters.ht'), overwrite=True
-    )
-    mt = annotate_vqsr(mt, vqsr_ht)
-    mt = add_37_coordinates(mt)
-    if make_checkpoints:
-        mt.write(join(work_bucket, 'add_37_coordinates.mt'), overwrite=True)
 
-    mt = hl.vep(mt, block_size=vep_block_size or 1000)
-    if make_checkpoints:
-        mt.write(join(work_bucket, 'run_vep.mt'), overwrite=True)
+    out_path = join(work_bucket, 'vqsr_and_37_coords.mt')
+    if utils.can_reuse(out_path, overwrite):
+        mt = hl.read_matrix_table(out_path)
+    else:
+        vqsr_ht = _load_vqsr(
+            site_only_vqsr_vcf_path,
+            output_ht_path=join(work_bucket, 'vqsr.ht'),
+            overwrite=overwrite,
+        )
+        vqsr_ht = _apply_vqsr_cutoffs(
+            vqsr_ht,
+            output_ht_path=join(work_bucket, 'vqsr-with-filters.ht'),
+            overwrite=overwrite,
+        )
+        mt = annotate_vqsr(mt, vqsr_ht)
+        mt = add_37_coordinates(mt)
+        if make_checkpoints:
+            mt.write(out_path, overwrite=True)
+            mt = hl.read_matrix_table(out_path)
+
+    out_path = join(work_bucket, 'vqsr_and_37_coords.vep.mt')
+    if utils.can_reuse(out_path, overwrite):
+        mt = hl.read_matrix_table(out_path)
+    else:
+        mt = hl.vep(mt, block_size=vep_block_size or 1000)
+        if make_checkpoints:
+            mt.write(out_path, overwrite=True)
+            mt = hl.read_matrix_table(out_path)
 
     ref_data = hl.read_table(REF_HT)
     clinvar = hl.read_table(CLINVAR_HT)
-
     mt = compute_variant_annotated_vcf(mt, ref_data=ref_data, clinvar=clinvar)
-
     mt = mt.annotate_globals(
         sourceFilePath=vcf_path,
         genomeVersion=GENOME_VERSION.replace('GRCh', ''),
         sampleType='WGS',
         hail_version=hl.version(),
     )
-
     mt.describe()
     mt.write(dest_path, overwrite=True)
 
@@ -125,11 +146,18 @@ def annotate_vqsr(mt, vqsr_ht):
     return mt
 
 
-def apply_vqsr_cutoffs(vqsr_ht, output_path, overwrite):
+def _apply_vqsr_cutoffs(
+    vqsr_ht,
+    output_ht_path,
+    overwrite: bool = True,
+):
     """
     Generates variant soft-filters from VQSR scores: adds `mt.filters` row-level
     field of type set with a value "VQSR" when the AS_VQSLOD is below the threshold
     """
+    if utils.can_reuse(output_ht_path, overwrite):
+        return hl.read_table(output_ht_path)
+
     ht = vqsr_ht
 
     snp_cutoff_global = hl.struct(min_score=SNP_SCORE_CUTOFF)
@@ -151,19 +179,22 @@ def apply_vqsr_cutoffs(vqsr_ht, output_path, overwrite):
         filters=add_filters_expr(filters=filters),
         info=ht.info,
     )
-    ht.checkpoint(output_path, overwrite=overwrite)
+    ht.write(output_ht_path, overwrite=True)
+    ht = hl.read_table(output_ht_path)
     return ht
 
 
-def load_vqsr(
+def _load_vqsr(
     site_only_vqsr_vcf_path,
     output_ht_path,
-    overwrite,
-    split_multiallelic=True,
+    overwrite: bool = False,
 ):
     """
     Loads the VQSR'ed site-only VCF into a site-only hail table
     """
+    if utils.can_reuse(output_ht_path, overwrite):
+        return hl.read_table(output_ht_path)
+
     logger.info(f'Importing VQSR annotations...')
     mt = hl.import_vcf(
         site_only_vqsr_vcf_path,
@@ -191,11 +222,10 @@ def load_vqsr(
     ht = ht.annotate(
         info=ht.info.annotate(**split_info_annotation(ht.info, ht.a_index)),
     )
-    if split_multiallelic:
-        ht = ht.checkpoint(output_ht_path, overwrite=overwrite)
-        logger.info(f'Wrote split HT to {output_ht_path}')
+    ht.write(output_ht_path, overwrite=True)
+    ht = hl.read_table(output_ht_path)
+    logger.info(f'Wrote split HT to {output_ht_path}')
     split_count = ht.count()
-
     logger.info(
         f'Found {unsplit_count} unsplit and {split_count} split variants with VQSR annotations'
     )
@@ -298,7 +328,7 @@ def compute_variant_annotated_vcf(
     on the project level.
     """
     annotation_schema = schema_cls(mt, ref_data=ref_data, clinvar_data=clinvar)
-    mt = annotation_schema.annotate_all(overwrite=True).select_annotated_mt()
+    mt = annotation_schema.annotate_all(overwrite=True).mt
     return mt
 
 
@@ -419,7 +449,7 @@ def add_37_coordinates(mt):
     rg37 = hl.get_reference('GRCh37')
     rg38 = hl.get_reference('GRCh38')
     rg38.add_liftover(join(REF_BUCKET, 'liftover/grch38_to_grch37.over.chain.gz'), rg37)
-    mt = mt.annotate_rows(rg37_locus=hl.liftover(mt.locus, 'GRCh37'))
+    mt = mt.annotate_rows(rg37_locus=mt.locus)
     return mt
 
 
