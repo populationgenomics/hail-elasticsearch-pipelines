@@ -920,11 +920,6 @@ def _make_produce_gvcf_jobs(
             )
         first_job = haplotype_caller_jobs[0]
         gvcfs = [j.output_gvcf for j in haplotype_caller_jobs]
-        # else:
-        #     gvcfs = [b.read_input_group(**{
-        #         'g.vcf.gz': f'gs://cpg-seqr-main-tmp/seqr/v4-0/hail/batch/4ae18f/{i}/output_gvcf-CPG54254.g.vcf.gz',
-        #         f'g.vcf.gz.tbi': f'gs://cpg-seqr-main-tmp/seqr/v4-0/hail/batch/4ae18f/{i}/output_gvcf-CPG54254.g.vcf.gz.tbi'
-        #     }) for i in range(712, 712 + 10)]
         hc_j = _add_merge_gvcfs_job(
             b=b,
             sample_name=sample_name,

@@ -446,9 +446,9 @@ def add_37_coordinates(mt):
     :param mt: MatrixTable from VCF
     :return: MatrixTable annotated with GRCh37 coordinates
     """
-    # rg37 = hl.get_reference('GRCh37')
-    # rg38 = hl.get_reference('GRCh38')
-    # rg38.add_liftover(join(REF_BUCKET, 'liftover/grch38_to_grch37.over.chain.gz'), rg37)
+    rg37 = hl.get_reference('GRCh37')
+    rg38 = hl.get_reference('GRCh38')
+    rg38.add_liftover(join(REF_BUCKET, 'liftover/grch38_to_grch37.over.chain.gz'), rg37)
     mt = mt.annotate_rows(rg37_locus=mt.locus)
     return mt
 
