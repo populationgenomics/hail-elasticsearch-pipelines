@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from os.path import join, basename, splitext
 from typing import Optional, List, Dict, Tuple
 import pandas as pd
-from utils import file_exists
+from seqr_loader.utils import file_exists
 
 logger = logging.getLogger(__file__)
 logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')

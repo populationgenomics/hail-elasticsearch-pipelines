@@ -7,8 +7,8 @@ from typing import List, Optional, Dict
 import logging
 import hailtop.batch as hb
 from hailtop.batch.job import Job
-import utils
-from utils import BROAD_REF_BUCKET
+from seqr_loader import utils
+from seqr_loader.utils import BROAD_REF_BUCKET
 
 logger = logging.getLogger('VQSR')
 logger.setLevel('INFO')
@@ -83,7 +83,6 @@ INDEL_RECALIBRATION_ANNOTATION_VALUES_AS = [
 def make_vqsr_jobs(
     b: hb.Batch,
     input_vcf_gathered: str,
-    n_samples: int,
     is_small_callset: bool,
     is_huge_callset: bool,
     work_bucket: str,

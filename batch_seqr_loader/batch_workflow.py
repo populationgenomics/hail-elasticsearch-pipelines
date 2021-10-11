@@ -22,8 +22,8 @@ import hail as hl
 from hailtop.batch.job import Job
 from find_inputs import sm_get_reads_data, AlignmentInput
 from vqsr import make_vqsr_jobs
-import utils
-from sm_utils import SMDB
+from seqr_loader import utils
+from seqr_loader.sm_utils import SMDB
 
 
 logger = logging.getLogger(__file__)
