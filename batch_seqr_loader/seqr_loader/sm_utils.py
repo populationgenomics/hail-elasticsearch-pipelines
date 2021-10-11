@@ -19,7 +19,7 @@ from sample_metadata import (
     exceptions,
 )
 
-import utils
+from seqr_loader import utils
 
 
 logger = logging.getLogger(__file__)
