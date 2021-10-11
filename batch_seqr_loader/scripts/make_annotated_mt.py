@@ -15,6 +15,7 @@ from lib.model.seqr_mt_schema import SeqrVariantSchema
 from lib.model.base_mt_schema import row_annotation
 from gnomad.utils.sparse_mt import split_info_annotation
 from gnomad.utils.filtering import add_filters_expr
+from seqr_loader import utils
 
 logger = logging.getLogger(__file__)
 logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
@@ -72,9 +73,9 @@ def main(
     dest_path: str,
     work_bucket: str,
     disable_validation: bool,
-    make_checkpoints: bool = False,
-    overwrite: bool = False,
-    vep_block_size: Optional[int] = None,
+    make_checkpoints: bool,
+    overwrite: bool,
+    vep_block_size: Optional[int],
 ):  # pylint: disable=missing-function-docstring
     logger.info('Starting the seqr_load pipeline')
 
@@ -86,7 +87,7 @@ def main(
         validate_mt(mt, sample_type='WGS')
 
     out_path = join(work_bucket, 'vqsr_and_37_coords.mt')
-    if not overwrite and hl.hadoop_exists(out_path):
+    if utils.can_reuse(out_path, overwrite):
         mt = hl.read_matrix_table(out_path)
     else:
         vqsr_ht = _load_vqsr(
@@ -102,15 +103,17 @@ def main(
         mt = annotate_vqsr(mt, vqsr_ht)
         mt = add_37_coordinates(mt)
         if make_checkpoints:
-            mt = mt.checkpoint(out_path, overwrite=True)
+            mt.write(out_path, overwrite=True)
+            mt = hl.read_matrix_table(out_path)
 
     out_path = join(work_bucket, 'vqsr_and_37_coords.vep.mt')
-    if not overwrite and hl.hadoop_exists(out_path):
+    if utils.can_reuse(out_path, overwrite):
         mt = hl.read_matrix_table(out_path)
     else:
         mt = hl.vep(mt, block_size=vep_block_size or 1000)
         if make_checkpoints:
             mt.write(out_path, overwrite=True)
+            mt = hl.read_matrix_table(out_path)
 
     ref_data = hl.read_table(REF_HT)
     clinvar = hl.read_table(CLINVAR_HT)
@@ -152,7 +155,7 @@ def _apply_vqsr_cutoffs(
     Generates variant soft-filters from VQSR scores: adds `mt.filters` row-level
     field of type set with a value "VQSR" when the AS_VQSLOD is below the threshold
     """
-    if not overwrite and hl.hadoop_exists(output_ht_path):
+    if utils.can_reuse(output_ht_path, overwrite):
         return hl.read_table(output_ht_path)
 
     ht = vqsr_ht
@@ -176,7 +179,8 @@ def _apply_vqsr_cutoffs(
         filters=add_filters_expr(filters=filters),
         info=ht.info,
     )
-    ht.checkpoint(output_ht_path, overwrite=True)
+    ht.write(output_ht_path, overwrite=True)
+    ht = hl.read_table(output_ht_path)
     return ht
 
 
@@ -188,7 +192,7 @@ def _load_vqsr(
     """
     Loads the VQSR'ed site-only VCF into a site-only hail table
     """
-    if not overwrite and hl.hadoop_exists(output_ht_path):
+    if utils.can_reuse(output_ht_path, overwrite):
         return hl.read_table(output_ht_path)
 
     logger.info(f'Importing VQSR annotations...')
@@ -218,7 +222,8 @@ def _load_vqsr(
     ht = ht.annotate(
         info=ht.info.annotate(**split_info_annotation(ht.info, ht.a_index)),
     )
-    ht = ht.checkpoint(output_ht_path, overwrite=True)
+    ht.write(output_ht_path, overwrite=True)
+    ht = hl.read_table(output_ht_path)
     logger.info(f'Wrote split HT to {output_ht_path}')
     split_count = ht.count()
     logger.info(
@@ -323,7 +328,7 @@ def compute_variant_annotated_vcf(
     on the project level.
     """
     annotation_schema = schema_cls(mt, ref_data=ref_data, clinvar_data=clinvar)
-    mt = annotation_schema.annotate_all(overwrite=True).select_annotated_mt()
+    mt = annotation_schema.annotate_all(overwrite=True).mt
     return mt
 
 
@@ -441,10 +446,10 @@ def add_37_coordinates(mt):
     :param mt: MatrixTable from VCF
     :return: MatrixTable annotated with GRCh37 coordinates
     """
-    rg37 = hl.get_reference('GRCh37')
-    rg38 = hl.get_reference('GRCh38')
-    rg38.add_liftover(join(REF_BUCKET, 'liftover/grch38_to_grch37.over.chain.gz'), rg37)
-    mt = mt.annotate_rows(rg37_locus=hl.liftover(mt.locus, 'GRCh37'))
+    # rg37 = hl.get_reference('GRCh37')
+    # rg38 = hl.get_reference('GRCh38')
+    # rg38.add_liftover(join(REF_BUCKET, 'liftover/grch38_to_grch37.over.chain.gz'), rg37)
+    mt = mt.annotate_rows(rg37_locus=mt.locus)
     return mt
 
 

@@ -269,7 +269,7 @@ class SMDB:
             sample_ids=sample_ids,
         )
         aid = cls.aapi.create_new_analysis(project=project, analysis_model=am)
-        logger.info(f'Queueing joint-calling with analysis ID: {aid}')
+        logger.info(f'Created analysis of type={type_} status={status} with ID: {aid}')
         return aid
 
     @classmethod

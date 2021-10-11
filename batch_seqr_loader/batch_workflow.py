@@ -479,6 +479,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
         output_path=expected_vqsr_site_only_vcf_path,
         is_small_callset=is_small_callset,
         is_huge_callset=is_huge_callset,
+        n_samples=len(good_samples),
         depends_on=[jc_job],
         intervals=intervals_j.intervals,
         joint_calling_tmp_bucket=joint_calling_tmp_bucket,
@@ -895,6 +896,7 @@ def _make_produce_gvcf_jobs(
     """
     hc_gvcf_path = join(tmp_bucket, 'haplotypecaller', f'{sample_name}.g.vcf.gz')
     haplotype_caller_jobs = []
+    first_job = None
     if intervals_j is not None:
         # Splitting variant calling by intervals
         for idx in range(number_of_intervals):
@@ -916,11 +918,18 @@ def _make_produce_gvcf_jobs(
                     depends_on=depends_on,
                 )
             )
+        first_job = haplotype_caller_jobs[0]
+        gvcfs = [j.output_gvcf for j in haplotype_caller_jobs]
+        # else:
+        #     gvcfs = [b.read_input_group(**{
+        #         'g.vcf.gz': f'gs://cpg-seqr-main-tmp/seqr/v4-0/hail/batch/4ae18f/{i}/output_gvcf-CPG54254.g.vcf.gz',
+        #         f'g.vcf.gz.tbi': f'gs://cpg-seqr-main-tmp/seqr/v4-0/hail/batch/4ae18f/{i}/output_gvcf-CPG54254.g.vcf.gz.tbi'
+        #     }) for i in range(712, 712 + 10)]
         hc_j = _add_merge_gvcfs_job(
             b=b,
             sample_name=sample_name,
             project_name=project_name,
-            gvcfs=[j.output_gvcf for j in haplotype_caller_jobs],
+            gvcfs=gvcfs,
             output_gvcf_path=hc_gvcf_path,
         )
     else:
@@ -939,6 +948,7 @@ def _make_produce_gvcf_jobs(
             output_gvcf_path=hc_gvcf_path,
         )
         haplotype_caller_jobs.append(hc_j)
+    first_job = first_job or hc_j
 
     postproc_job = _make_postproc_gvcf_jobs(
         b=b,
@@ -949,7 +959,7 @@ def _make_produce_gvcf_jobs(
         reference=reference,
         noalt_regions=noalt_regions,
         overwrite=overwrite,
-        depends_on=[hc_j],
+        depends_on=[hc_j] if hc_j else [],
     )
 
     if SMDB.do_update_analyses:
@@ -981,13 +991,13 @@ def _make_produce_gvcf_jobs(
             sample_name=sample_name,
         )
         # Set up dependencies
-        haplotype_caller_jobs[0].depends_on(sm_in_progress_j)
+        first_job.depends_on(sm_in_progress_j)
         if depends_on:
             sm_in_progress_j.depends_on(*depends_on)
         logger.info(f'Queueing GVCF analysis')
     else:
         if depends_on:
-            haplotype_caller_jobs[0].depends_on(*depends_on)
+            first_job.depends_on(*depends_on)
         sm_completed_j = None
 
     if sm_completed_j:
@@ -1259,6 +1269,7 @@ def _make_vqsr_jobs(
     gathered_vcf_path: str,
     is_small_callset: bool,
     is_huge_callset: bool,
+    n_samples: int,
     output_path: str,
     depends_on,
     intervals,
@@ -1274,6 +1285,7 @@ def _make_vqsr_jobs(
             input_vcf_gathered=gathered_vcf_path,
             is_small_callset=is_small_callset,
             is_huge_callset=is_huge_callset,
+            n_samples=n_samples,
             work_bucket=tmp_vqsr_bucket,
             web_bucket=tmp_vqsr_bucket,
             depends_on=depends_on,
@@ -1815,7 +1827,7 @@ def _add_final_gather_vcf_job(
     j.cpu(2)
     java_mem = 7
     j.memory('standard')  # ~ 4G/core ~ 7.5G
-    j.storage(f'{1 + len(input_vcfs) * 2}G')
+    j.storage(f'{50 + len(input_vcfs) * 1}G')
     j.declare_resource_group(
         output_vcf={'vcf.gz': '{root}.vcf.gz', 'vcf.gz.tbi': '{root}.vcf.gz.tbi'}
     )
