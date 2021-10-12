@@ -3,19 +3,16 @@
 """
 Hail script to submit on a dataproc cluster. 
 
-Annotates the input matrix table with SeqrGenotypesSchema, and loads into ES.
+Loads the matrix table into ES.
 """
 
 import logging
 import math
 import subprocess
-from os.path import join
 import click
 import hail as hl
 
-from lib.model.seqr_mt_schema import SeqrGenotypesSchema
 from hail_scripts.v02.utils.elasticsearch_client import ElasticsearchClient
-from seqr_loader import utils
 
 logger = logging.getLogger(__file__)
 logging.basicConfig(format='%(levelname)s (%(name)s %(lineno)s): %(message)s')
@@ -60,48 +57,19 @@ logger.setLevel(logging.INFO)
     'and a calculated value based on the matrix.',
 )
 @click.option(
-    '--remap-tsv',
-    'remap_tsv_path',
-    help='Path to a TSV file with two columns: s and seqr_id.',
-)
-@click.option(
-    '--subset-tsv',
-    'subset_tsv_path',
-    help='Path to a TSV file with one column of sample IDs: s.',
-)
-@click.option(
     '--prod', is_flag=True, help='Run under the production ES credentials instead'
-)
-@click.option('--genome-version', 'genome_version', default='GRCh38')
-@click.option(
-    '--make-checkpoints',
-    'make_checkpoints',
-    is_flag=True,
-    help='Create checkpoints for intermediate matrix tables',
-)
-@click.option(
-    '--overwrite',
-    'overwrite',
-    is_flag=True,
-    help='Reuse intermediate files',
 )
 def main(
     mt_path: str,
-    work_bucket: str,
     es_host: str,
     es_port: str,
     es_username: str,
     es_password: str,
     es_index: str,
     es_index_min_num_shards: int,
-    remap_tsv_path: str,
-    subset_tsv_path: str,
     prod: bool,  # pylint: disable=unused-argument
-    genome_version: str,
-    make_checkpoints: bool = False,
-    overwrite: bool = False,
 ):  # pylint: disable=missing-function-docstring
-    hl.init(default_reference=genome_version)
+    hl.init(default_reference='GRCh38')
 
     if not all([es_host, es_port, es_username, es_password]):
         if any([es_host, es_port, es_username, es_password]):
@@ -125,35 +93,8 @@ def main(
 
     mt = hl.read_matrix_table(mt_path)
 
-    logger.info('Subsetting to the requested set of samples')
-    if subset_tsv_path:
-        mt = _subset_samples_and_variants(mt, subset_tsv_path)
-        mt.describe()
-
-    logger.info('Annotating genotypes')
-    out_path = join(work_bucket, 'annotated_genotype.mt')
-    if utils.can_reuse(out_path, True):
-        mt = hl.read_matrix_table(out_path)
-        mt.describe()
-    else:
-        mt = _compute_genotype_annotated_vcf(mt)
-        mt.describe()
-        if make_checkpoints:
-            mt = mt.checkpoint(out_path, overwrite=True)
-
-    logger.info('Remapping internal IDs back to external IDs')
-    if remap_tsv_path:
-        mt = _remap_sample_ids(mt, remap_tsv_path)
-        mt.describe()
-
-    mt = mt.annotate_rows(
-        info=hl.struct(
-            AS_MQ=hl.if_else(~hl.is_nan(mt.info.AS_MQ), mt.info.AS_MQ, 0),
-        )
-    )
-
     logger.info('Getting rows and exporting to the ES')
-    row_table = SeqrGenotypesESSchema.elasticsearch_row(mt)
+    row_table = elasticsearch_row(mt)
     es_shards = _mt_num_shards(mt, es_index_min_num_shards)
     es.export_table_to_elasticsearch(
         row_table,
@@ -162,6 +103,23 @@ def main(
         write_null_values=True,
     )
     _cleanup(es, es_index, es_shards)
+
+
+def elasticsearch_row(mt: hl.MatrixTable):
+    """
+    Prepares the mt to export using ElasticsearchClient V02.
+    - Flattens nested structs
+    - drops locus and alleles key
+    """
+    # Converts a mt to the row equivalent.
+    ht = mt.rows()
+    ht.describe()
+    # Converts nested structs into one field, e.g. {a: {b: 1}} => a.b: 1
+    table = ht.drop('vep').flatten()
+    # When flattening, the table is unkeyed, which causes problems because our locus and alleles should not
+    # be normal fields. We can also re-key, but I believe this is computational?
+    table = table.drop(table.locus, table.alleles)
+    return table
 
 
 def _read_es_password(
@@ -192,120 +150,6 @@ def _cleanup(es, es_index, es_shards):
     # Current disk configuration requires the previous index to be deleted prior to large indices, ~1TB, transferring off loading nodes
     if es_shards < 25:
         es.wait_for_shard_transfer(es_index)
-
-
-def _subset_samples_and_variants(mt, subset_tsv_path: str) -> hl.MatrixTable:
-    """
-    Subset the MatrixTable to the provided list of samples and to variants present
-    in those samples
-    :param mt: MatrixTable from VCF
-    :param subset_tsv_path: path to a TSV file with a single column 's', with no header
-    :return: MatrixTable subsetted to list of samples
-    """
-    count_before = mt.count_cols()
-
-    subset_ht = hl.import_table(subset_tsv_path, no_header=True)
-    subset_ht = subset_ht.transmute(s=subset_ht.f0).key_by('s')
-    subset_count = subset_ht.count()
-    anti_join_ht = subset_ht.anti_join(mt.cols())
-    anti_join_ht_count = anti_join_ht.count()
-
-    if anti_join_ht_count != 0:
-        missing_samples = anti_join_ht.s.collect()
-        raise Exception(
-            f'Only {subset_count - anti_join_ht_count} out of {count_before} '
-            'subsetting-table IDs matched IDs in the variant callset.\n'
-            f'IDs that aren\'t in the callset: {missing_samples}\n'
-            f'All callset sample IDs:{mt.s.collect()}',
-            missing_samples,
-        )
-
-    mt = mt.semi_join_cols(subset_ht)
-    mt = mt.filter_rows(hl.agg.any(mt.GT.is_non_ref()))
-
-    logger.info(
-        f'Finished subsetting to {subset_count} samples. Kept {mt.count_cols()} '
-        f'out of {count_before} samples in vds'
-    )
-    return mt
-
-
-def _remap_sample_ids(mt, remap_tsv_path: str) -> hl.MatrixTable:
-    """
-    Remap 's' (the MatrixTable's sample ID field) to 'seqr_id'
-    (the sample ID used within seqr).
-    If the sample 's' does not have a 'seqr_id' in the remap file, 's' becomes 'seqr_id'
-    :param mt: MatrixTable from VCF
-    :param remap_tsv_path: Path to a file with two columns 's' and 'seqr_id',
-        with a header
-    :return: MatrixTable remapped and keyed to use seqr_id
-    """
-    remap_ht = hl.import_table(remap_tsv_path, key='s')
-    missing_samples = remap_ht.anti_join(mt.cols()).collect()
-    remap_count = remap_ht.count()
-
-    if len(missing_samples) != 0:
-        raise Exception(
-            f'Only {remap_ht.semi_join(mt.cols()).count()} out of {remap_count} '
-            'remap IDs matched IDs in the variant callset.\n'
-            f'IDs that aren\'t in the callset: {missing_samples}\n'
-            f'All callset sample IDs:{mt.s.collect()}',
-            missing_samples,
-        )
-
-    mt = mt.annotate_cols(**remap_ht[mt.s])
-    remap_expr = hl.if_else(hl.is_missing(mt.seqr_id), mt.s, mt.seqr_id)
-    mt = mt.annotate_cols(seqr_id=remap_expr, vcf_id=mt.s)
-    mt = mt.key_cols_by(s=mt.seqr_id)
-    logger.info(f'Remapped {remap_count} sample ids...')
-    return mt
-
-
-class SeqrGenotypesESSchema(SeqrGenotypesSchema):
-    """
-    Modified version of SeqrVariantsAndGenotypesSchema to just base
-    on SeqrGenotypesSchema, as we apply SeqrVariantSchema separately
-    on the cohort level
-    """
-
-    @staticmethod
-    def elasticsearch_row(ds):
-        """
-        Prepares the mt to export using ElasticsearchClient V02.
-        - Flattens nested structs
-        - drops locus and alleles key
-        """
-        # Converts a mt to the row equivalent.
-        if isinstance(ds, hl.MatrixTable):
-            ds = ds.rows()
-        ds.describe()
-        # Converts nested structs into one field, e.g. {a: {b: 1}} => a.b: 1
-        table = ds.drop('vep').flatten()
-        # When flattening, the table is unkeyed, which causes problems because our locus and alleles should not
-        # be normal fields. We can also re-key, but I believe this is computational?
-        table = table.drop(table.locus, table.alleles)
-        return table
-
-
-def _compute_genotype_annotated_vcf(
-    mt, schema_cls=SeqrGenotypesESSchema
-) -> hl.MatrixTable:
-    r"""
-                   BaseMTSchema
-                     /       \
-            SeqrSchema        |
-                    |         |
-      SeqrVariantSchema     SeqrGenotypesSchema
-                    |         |
-      SeqrVariantASSchema   SeqrGenotypesESSchema
-                    \        /
-            SeqrVariantsAndGenotypesSchema
-            
-    SeqrVariantASSchema is applied on the cohort level separately.
-    """
-    annotation_schema = schema_cls(mt)
-    mt = annotation_schema.annotate_all(overwrite=True).mt
-    return mt
 
 
 if __name__ == '__main__':

@@ -502,12 +502,12 @@ def _add_jobs(  # pylint: disable=too-many-statements
     annotated_mt_path = f'{anno_tmp_bucket}/combined.mt'
     checkpoints_bucket = f'{anno_tmp_bucket}/checkpoints'
     if skip_anno_stage:
-        annotate_job = None
+        annotate_combined_j = None
     else:
         if utils.can_reuse(annotated_mt_path, overwrite):
-            annotate_job = b.new_job(f'Make MT and annotate [reuse]')
+            annotate_combined_j = b.new_job(f'Make MT and annotate [reuse]')
         else:
-            annotate_job = dataproc.hail_dataproc_job(
+            annotate_combined_j = dataproc.hail_dataproc_job(
                 b,
                 f'batch_seqr_loader/scripts/make_annotated_mt.py '
                 f'--vcf-path {expected_jc_vcf_path} '
@@ -521,7 +521,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
                 max_age='16h',
                 packages=utils.DATAPROC_PACKAGES,
                 num_secondary_workers=utils.NUMBER_OF_DATAPROC_WORKERS,
-                job_name=f'Annotating',
+                job_name=f'Annotate joint-called callset',
                 vep='GRCh38',
                 depends_on=[vqsr_job] if vqsr_job else [],
             )
@@ -534,30 +534,39 @@ def _add_jobs(  # pylint: disable=too-many-statements
         samples = samples_by_project.get(proj_name)
         proj_name = proj_name if output_suffix == 'main' else f'{proj_name}-test'
         proj_tmp_bucket = f'{anno_tmp_bucket}/projects/{proj_name}'
+        project_mt_path = f'{proj_tmp_bucket}/{proj_name}.mt'
         # Make a list of project samples to subset from the entire matrix table
         sample_ids = [s['id'] for s in samples]
         subset_path = f'{proj_tmp_bucket}/samples.txt'
         with hl.hadoop_open(subset_path, 'w') as f:
             f.write('\n'.join(sample_ids))
 
+        annotate_project_j = dataproc.hail_dataproc_job(
+            b,
+            f'batch_seqr_loader/scripts/split_and_annotate_project.py '
+            f'--mt-path {annotated_mt_path} '
+            f'--out-mt-path {project_mt_path}'
+            f'--subset-tsv {subset_path}',
+            max_age='8h',
+            packages=utils.DATAPROC_PACKAGES,
+            num_secondary_workers=utils.NUMBER_OF_DATAPROC_WORKERS,
+            job_name=f'{proj_name}: annotate project',
+            depends_on=[annotate_combined_j],
+        )
+
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         dataproc.hail_dataproc_job(
             b,
             f'batch_seqr_loader/scripts/load_project_to_es.py '
-            f'--mt-path {annotated_mt_path} '
-            '--make-checkpoints '
-            + ('--overwrite ' if overwrite else '')
-            + f'--bucket {proj_tmp_bucket} '
+            f'--mt-path {project_mt_path} '
             f'--es-index {proj_name}-{output_version}-{timestamp} '
             f'--es-index-min-num-shards 1 '
-            f'--subset-tsv {subset_path} '
-            f'--genome-version GRCh38 '
             f'{"--prod" if prod else ""}',
             max_age='16h',
             packages=utils.DATAPROC_PACKAGES,
             num_secondary_workers=10,
-            job_name=f'{proj_name}: annotate project and create ES index',
-            depends_on=[annotate_job],
+            job_name=f'{proj_name}: create ES index',
+            depends_on=[annotate_project_j],
             scopes=['cloud-platform'],
         )
     return b

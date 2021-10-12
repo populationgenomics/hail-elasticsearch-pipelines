@@ -10,6 +10,7 @@ from os.path import join
 from typing import Iterable, Tuple, Optional, List
 import logging
 from google.cloud import storage
+
 import hailtop.batch as hb
 
 logger = logging.getLogger(__file__)
