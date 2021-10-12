@@ -43,7 +43,13 @@ def main(
     logger.info('Subsetting to the requested set of samples')
     if subset_tsv_path:
         mt = _subset_samples_and_variants(mt, subset_tsv_path)
-        mt.describe()
+        # Recalculate AC/AN/AF fields on the project level
+        mt = mt.variant_qc()
+        mt = mt.annotate_rows(
+            AF=mt.variant_qc.AF[mt.a_index - 1],
+            AC=mt.variant_qc.AC[mt.a_index - 1],
+            AN=mt.variant_qc.AN,
+        )
 
     logger.info('Annotating genotypes')
     mt = _compute_genotype_annotated_vcf(mt)
@@ -58,6 +64,7 @@ def main(
             ),
         )
     )
+
     mt.describe()
     mt.write(out_mt_path, overwrite=True)
 
