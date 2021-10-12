@@ -540,12 +540,6 @@ def _add_jobs(  # pylint: disable=too-many-statements
         with hl.hadoop_open(subset_path, 'w') as f:
             f.write('\n'.join(sample_ids))
 
-        remap_path = f'{proj_tmp_bucket}/external_id_map.tsv'
-        with hl.hadoop_open(remap_path, 'w') as f:
-            f.write('\t'.join(['s', 'seqr_id']) + '\n')
-            for s in samples:
-                f.write('\t'.join([s['id'], s['external_id']]) + '\n')
-
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         dataproc.hail_dataproc_job(
             b,
@@ -557,7 +551,6 @@ def _add_jobs(  # pylint: disable=too-many-statements
             f'--es-index {proj_name}-{output_version}-{timestamp} '
             f'--es-index-min-num-shards 1 '
             f'--subset-tsv {subset_path} '
-            f'--remap-tsv {remap_path} '
             f'--genome-version GRCh38 '
             f'{"--prod" if prod else ""}',
             max_age='16h',

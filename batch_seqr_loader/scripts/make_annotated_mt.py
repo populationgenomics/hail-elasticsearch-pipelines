@@ -97,7 +97,7 @@ def main(
         )
         vqsr_ht = _apply_vqsr_cutoffs(
             vqsr_ht,
-            output_ht_path=join(work_bucket, 'vqsr-with-filters.ht'),
+            output_ht_path=join(work_bucket, 'vqsr_with_filters.ht'),
             overwrite=overwrite,
         )
         mt = annotate_vqsr(mt, vqsr_ht)
@@ -273,7 +273,7 @@ def annotate_old_and_split_multi_hts(mt):
 
 class SeqrVariantsASSchema(SeqrVariantSchema):
     """
-    AC/AF/AN fields in a split matrix table are pure integers, not arrays
+    AC/AF/AN fields in a split matrix table are numbers, not arrays
     """
 
     @row_annotation(name='AC')
@@ -282,7 +282,7 @@ class SeqrVariantsASSchema(SeqrVariantSchema):
 
     @row_annotation(name='AF')
     def af(self):  # pylint: disable=invalid-name,missing-function-docstring
-        return self.mt.info.AF
+        return self.mt.info.AF[self.mt.a_index - 1]
 
     @row_annotation(name='AN')
     def an(self):  # pylint: disable=invalid-name,missing-function-docstring
