@@ -508,7 +508,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
         else:
             annotate_combined_j = dataproc.hail_dataproc_job(
                 b,
-                f'batch_seqr_loader/scripts/make_annotated_mt.py '
+                f'batch_seqr_loader/scripts/vcf_to_mt.py '
                 f'--vcf-path {expected_jc_vcf_path} '
                 f'--site-only-vqsr-vcf-path {expected_vqsr_site_only_vcf_path} '
                 f'--dest-mt-path {annotated_mt_path} '
@@ -542,7 +542,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
 
         annotate_project_j = dataproc.hail_dataproc_job(
             b,
-            f'batch_seqr_loader/scripts/split_and_annotate_project.py '
+            f'batch_seqr_loader/scripts/mt_to_projectmt.py '
             f'--mt-path {annotated_mt_path} '
             f'--out-mt-path {project_mt_path}'
             f'--subset-tsv {subset_path}',
@@ -556,7 +556,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         dataproc.hail_dataproc_job(
             b,
-            f'batch_seqr_loader/scripts/load_project_to_es.py '
+            f'batch_seqr_loader/scripts/projectmt_to_es.py '
             f'--mt-path {project_mt_path} '
             f'--es-index {proj_name}-{output_version}-{timestamp} '
             f'--es-index-min-num-shards 1 '
@@ -1169,6 +1169,7 @@ def _make_joint_genotype_jobs(
         sample_names_to_add,
         sample_names_will_be_in_db,
         sample_names_already_added,
+        sample_names_to_remove,
         updating_existing_db,
         sample_map_bucket_path,
     ) = _samples_to_add_to_db(
@@ -1192,6 +1193,7 @@ def _make_joint_genotype_jobs(
                 genomicsdb_gcs_path=genomicsdb_path_per_interval[idx],
                 sample_names_to_add=sample_names_to_add,
                 sample_names_to_skip=sample_names_already_added,
+                sample_names_to_remove=sample_names_to_remove,
                 sample_names_will_be_in_db=sample_names_will_be_in_db,
                 updating_existing_db=updating_existing_db,
                 sample_map_bucket_path=sample_map_bucket_path,
@@ -1443,7 +1445,7 @@ def _samples_to_add_to_db(
     samples,
     tmp_bucket: str,
     gvcf_by_sid: Dict[str, str],
-) -> Tuple[Set[str], Set[str], Set[str], bool, str]:
+) -> Tuple[Set[str], Set[str], Set[str], Set[str], bool, str]:
     if utils.file_exists(join(genomicsdb_gcs_path, 'callset.json')):
         # Checking if samples exists in the DB already
         genomicsdb_metadata = join(local_tmp_dir, f'callset-{interval_idx}.json')
@@ -1502,6 +1504,7 @@ def _samples_to_add_to_db(
         sample_names_already_added = set()
         sample_names_to_add = {s['id'] for s in samples}
         sample_names_will_be_in_db = sample_names_to_add
+        sample_names_to_remove = set()
         updating_existing_db = False
         logger.info(
             f'GenomicDB {genomicsdb_gcs_path} doesn\'t exist, so creating a new one '
@@ -1519,6 +1522,7 @@ def _samples_to_add_to_db(
         sample_names_to_add,
         sample_names_will_be_in_db,
         sample_names_already_added,
+        sample_names_to_remove,
         updating_existing_db,
         sample_map_bucket_path,
     )
@@ -1529,6 +1533,7 @@ def _add_import_gvcfs_job(
     genomicsdb_gcs_path: str,
     sample_names_to_add: Set[str],
     sample_names_to_skip: Set[str],
+    sample_names_to_remove: Set[str],
     sample_names_will_be_in_db: Set[str],
     updating_existing_db: bool,
     sample_map_bucket_path: str,
@@ -1541,14 +1546,30 @@ def _add_import_gvcfs_job(
     Add GVCFs to a genomics database (or create a new instance if it doesn't exist)
     Returns a Job, or None if no new samples to add
     """
+    rm_cmd = ''
+    msg = ''
+
     if updating_existing_db:
         # Update existing DB
         genomicsdb_param = f'--genomicsdb-update-workspace-path {genomicsdb_gcs_path}'
         job_name = 'Adding to GenomicsDB'
+        msg = f'Adding {len(sample_names_to_add)} samples: {", ".join(sample_names_to_add)}'
+        if sample_names_to_skip:
+            msg += (
+                f'Skipping adding {len(sample_names_to_skip)} samples that are already '
+                f'in the DB: {", ".join(sample_names_to_skip)}"'
+            )
     else:
         # Initiate new DB
         genomicsdb_param = f'--genomicsdb-workspace-path {genomicsdb_gcs_path}'
         job_name = 'Creating GenomicsDB'
+        if sample_names_to_remove:
+            # Need to remove the existing database
+            rm_cmd = f'gsutil -q rm -rf {genomicsdb_gcs_path}'
+        msg = (
+            f'Creating a new DB with {len(sample_names_to_add)} samples: '
+            f'{", ".join(sample_names_to_add)}'
+        )
 
     sample_map = b.read_input(sample_map_bucket_path)
 
@@ -1589,9 +1610,9 @@ def _add_import_gvcfs_job(
     export GOOGLE_APPLICATION_CREDENTIALS=/gsa-key/key.json
     gcloud -q auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
 
-    echo "Adding {len(sample_names_to_add)} samples: {', '.join(sample_names_to_add)}"
-    {f'echo "Skipping adding {len(sample_names_to_skip)} samples that are already in the DB: '
-     f'{", ".join(sample_names_to_skip)}"' if sample_names_to_skip else ''}
+    echo "{msg}"
+    
+    {rm_cmd}
 
     gatk --java-options -Xms{java_mem}g \\
       GenomicsDBImport \\
