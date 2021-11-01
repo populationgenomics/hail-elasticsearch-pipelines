@@ -1,4 +1,4 @@
-TEST_VERSION := v2-6
+TEST_VERSION := v2-5
 PROD_VERSION := v4-0
 
 .PHONY: package
@@ -61,9 +61,7 @@ run_seqr_loader_prod:
 	--output-version $(PROD_VERSION) \
 	--reuse \
 	--keep-scratch \
-	--hc-shards-num 10 \
-	--skip-update-sm-db \
-	-S CPG13326
+	--hc-shards-num 10
 
 .PHONY: run_seqr_loader_prod_test
 run_seqr_loader_prod_test:

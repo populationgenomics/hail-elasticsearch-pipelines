@@ -313,6 +313,13 @@ def _add_jobs(  # pylint: disable=too-many-statements
             analysis_type='gvcf',
             analysis_project=analysis_project,
         )
+        for sid, a in gvcf_analysis_per_sid.items():
+            a.output = a.output.replace('-test/', f'-{output_suffix}/')
+            a.output = a.output.replace('-main/', f'-{output_suffix}/')
+        for sid, a in cram_analysis_per_sid.items():
+            a.output = a.output.replace('-test/', f'-{output_suffix}/')
+            a.output = a.output.replace('-main/', f'-{output_suffix}/')
+
         seq_info_by_sid = SMDB.find_seq_info_by_sid(sample_ids)
 
         for s in samples:
@@ -532,11 +539,12 @@ def _add_jobs(  # pylint: disable=too-many-statements
     for proj_name in output_projects:
         samples = samples_by_project.get(proj_name)
         proj_name = proj_name if output_suffix == 'main' else f'{proj_name}-test'
-        proj_tmp_bucket = f'{anno_tmp_bucket}/projects/{proj_name}'
-        project_mt_path = f'{proj_tmp_bucket}/{proj_name}.mt'
+        proj_bucket = f'gs://cpg-{proj_name}-{output_suffix}'
+        proj_tmp_bucket = f'gs://cpg-{proj_name}-{output_suffix}-tmp'
+        project_mt_path = f'{proj_bucket}/mt/{proj_name}.mt'
         # Make a list of project samples to subset from the entire matrix table
         sample_ids = [s['id'] for s in samples]
-        subset_path = f'{proj_tmp_bucket}/samples.txt'
+        subset_path = f'{proj_tmp_bucket}/seqr-samples.txt'
         with hl.hadoop_open(subset_path, 'w') as f:
             f.write('\n'.join(sample_ids))
 
