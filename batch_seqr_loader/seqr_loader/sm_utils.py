@@ -87,7 +87,10 @@ class SMDB:
         Return a dict of "Sequence" entries by sample ID
         """
         seq_infos: List[Dict] = cls.seqapi.get_sequences_by_sample_ids(sample_ids)
-        seq_info_by_sid = dict(zip(sample_ids, seq_infos))
+        seq_info_by_sid = dict()
+        for seq_info in seq_infos:
+            sample_id = seq_info['sample_id']
+            seq_info_by_sid[sample_id] = seq_info
         return seq_info_by_sid
 
     @classmethod
