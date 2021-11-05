@@ -4,8 +4,17 @@ import hailtop.batch as hb
 from os.path import join
 import sys, os
 
+hail_bucket = os.getenv('HAIL_BUCKET')
+billing_project = os.getenv('HAIL_BILLING_PROJECT')
+hail_token = os.getenv('HAIL_TOKEN')
+
 backend = hb.ServiceBackend()
 batch = hb.Batch(backend=backend, name='test-batch')
+backend = hb.ServiceBackend(
+    billing_project=billing_project,
+    bucket=hail_bucket.replace('gs://', ''),
+    token=hail_token,
+)
 
 j = batch.new_job(name='test-job-from-analysis-runner')
 j.command(
