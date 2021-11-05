@@ -84,6 +84,12 @@ STAGES = ['input', 'cram', 'gvcf', 'joint_calling', 'annotate', 'load_to_es']
     help='Don\'t process specified samples. Can be set multiple times.',
 )
 @click.option(
+    '--force-sample',
+    'force_sample',
+    multiple=True,
+    help='Force reprocessing these samples. Can be set multiple times.',
+)
+@click.option(
     '--output-version',
     'output_version',
     type=str,
@@ -153,6 +159,7 @@ def main(
     start_from_stage: str,
     end_with_stage: str,
     skip_samples: Collection[str],
+    force_sample: Collection[str],
     output_version: str,
     keep_scratch: bool,
     overwrite: bool,
@@ -239,6 +246,7 @@ def main(
         start_from_stage=start_from_stage,
         end_with_stage=end_with_stage,
         skip_samples=skip_samples,
+        force_sample=force_sample,
         use_gnarly=use_gnarly,
         use_as_vqsr=use_as_vqsr,
         hc_shards_num=hc_shards_num,
@@ -266,6 +274,7 @@ def _add_jobs(  # pylint: disable=too-many-statements
     start_from_stage: Optional[str],
     end_with_stage: Optional[str],
     skip_samples: Collection[str],
+    force_sample: Collection[str],
     use_gnarly: bool,
     use_as_vqsr: bool,
     hc_shards_num: int,
@@ -339,9 +348,11 @@ def _add_jobs(  # pylint: disable=too-many-statements
                 check_existence=check_inputs_existence,
             )
             cram_job = None
-            if not found_cram_path:
+            if not found_cram_path or s['id'] in force_sample:
                 if skip_cram_stage:
                     continue
+                if s['id'] in force_sample:
+                    logger.info(f'Force rerunning sample {s["id"]}')
                 seq_info = seq_info_by_sid[s['id']]
                 logger.info(f'Checking sequence.meta in {seq_info}:')
                 alignment_input = sm_get_reads_data(
@@ -382,9 +393,11 @@ def _add_jobs(  # pylint: disable=too-many-statements
                 skip_stage=skip_gvcf_stage,
                 check_existence=check_inputs_existence,
             )
-            if not found_gvcf_path:
+            if not found_gvcf_path or s['id'] in force_sample:
                 if skip_gvcf_stage:
                     continue
+                if s['id'] in force_sample:
+                    logger.info(f'Force rerunning sample {s["id"]}')
                 if hc_intervals_j is None and hc_shards_num > 1:
                     hc_intervals_j = _add_split_intervals_job(
                         b=b,
@@ -734,7 +747,7 @@ def _make_realign_jobs(
         assert alignment_input.index_path
         assert not alignment_input.fqs1 and not alignment_input.fqs2
         j.storage(
-            '400G' if alignment_input.bam_or_cram_path.endswith('.cram') else '1000G'
+            '350G' if alignment_input.bam_or_cram_path.endswith('.cram') else '500G'
         )
 
         if alignment_input.bam_or_cram_path.startswith('gs://'):
