@@ -1568,7 +1568,6 @@ def _add_import_gvcfs_job(
     Returns a Job, or None if no new samples to add
     """
     rm_cmd = ''
-    msg = ''
 
     if updating_existing_db:
         # Update existing DB
@@ -1595,7 +1594,7 @@ def _add_import_gvcfs_job(
     sample_map = b.read_input(sample_map_bucket_path)
 
     if interval_idx is not None:
-        job_name += f' {interval_idx}/{number_of_intervals}'
+        job_name += f' {interval_idx + 1}/{number_of_intervals}'
 
     j = b.new_job(job_name)
     j.image(utils.GATK_IMAGE)
@@ -1606,7 +1605,6 @@ def _add_import_gvcfs_job(
     if depends_on:
         j.depends_on(*depends_on)
 
-    j.declare_resource_group(output={'tar': '{root}.tar'})
     j.command(
         f"""set -e
 
