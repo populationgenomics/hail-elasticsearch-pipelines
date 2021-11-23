@@ -6,10 +6,13 @@ from hail_scripts.v02.utils.computed_fields import vep
 
 
 class SeqrSchema(BaseMTSchema):
-    def __init__(self, *args, ref_data, clinvar_data, hgmd_data=None, **kwargs):
+    def __init__(
+        self, *args, ref_data, clinvar_data, hgmd_data=None, nagim_data=None, **kwargs
+    ):
         self._ref_data = ref_data
         self._clinvar_data = clinvar_data
         self._hgmd_data = hgmd_data
+        self._nagim_data = nagim_data
 
         # See _selected_ref_data
         self._selected_ref_data_cache = None
@@ -236,6 +239,16 @@ class SeqrSchema(BaseMTSchema):
                 'gold_stars': self._clinvar_data[self.mt.row_key].gold_stars,
             }
         )
+
+    @row_annotation
+    def nagim(self):
+        """
+        Expects self._nagim_data to have structure {'AC': <>, 'AF': <>}
+        """
+        if self._nagim_data is None:
+            raise RowAnnotationOmit
+
+        return self._nagim_data[self.mt.row_key]
 
 
 class SeqrVariantSchema(SeqrSchema):
