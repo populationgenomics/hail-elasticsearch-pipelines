@@ -243,7 +243,8 @@ class SeqrSchema(BaseMTSchema):
     @row_annotation
     def nagim(self):
         """
-        Expects self._nagim_data to have structure {'AC': <>, 'AF': <>}
+        Expects self._nagim_data to have keys:
+            ac, af, an, filter_af, hemi, het, hom, id
         """
         if self._nagim_data is None:
             raise RowAnnotationOmit
