@@ -27,6 +27,8 @@ BROAD_REF_BUCKET = f'{REF_BUCKET}/hg38/v1'
 SEQR_REF_BUCKET = 'gs://cpg-seqr-reference-data'
 REF_HT = f'{SEQR_REF_BUCKET}/GRCh38/all_reference_data/v2/combined_reference_data_grch38-2.0.3.ht'
 CLINVAR_HT = f'{SEQR_REF_BUCKET}/GRCh38/clinvar/clinvar.GRCh38.2020-06-15.ht'
+# TODO: update this path to actual location
+NAGIM_HT = f'{SEQR_REF_BUCKET}/GRCh38/nagim/nagim.GRch38.<date>.ht'
 
 SNP_SCORE_CUTOFF = 0
 INDEL_SCORE_CUTOFF = 0
@@ -117,7 +119,10 @@ def main(
 
     ref_data = hl.read_table(REF_HT)
     clinvar = hl.read_table(CLINVAR_HT)
-    mt = compute_variant_annotated_vcf(mt, ref_data=ref_data, clinvar=clinvar)
+    nagim = hl.read_table(NAGIM_HT)
+    mt = compute_variant_annotated_vcf(
+        mt, ref_data=ref_data, clinvar=clinvar, nagim=nagim
+    )
     mt = mt.annotate_globals(
         sourceFilePath=vcf_path,
         genomeVersion=GENOME_VERSION.replace('GRCh', ''),
@@ -290,7 +295,7 @@ class SeqrVariantsASSchema(SeqrVariantSchema):
 
 
 def compute_variant_annotated_vcf(
-    mt, ref_data, clinvar, schema_cls=SeqrVariantsASSchema
+    mt, ref_data, clinvar, nagim, schema_cls=SeqrVariantsASSchema
 ) -> hl.MatrixTable:
     r"""
     Returns a matrix table with an annotated rows where each row annotation 
@@ -327,7 +332,9 @@ def compute_variant_annotated_vcf(
     version SeqrVariantASSchema). SeqrGenotypesSchema is applied separately
     on the project level.
     """
-    annotation_schema = schema_cls(mt, ref_data=ref_data, clinvar_data=clinvar)
+    annotation_schema = schema_cls(
+        mt, ref_data=ref_data, clinvar_data=clinvar, nagim_data=nagim
+    )
     mt = annotation_schema.annotate_all(overwrite=True).mt
     return mt
 
