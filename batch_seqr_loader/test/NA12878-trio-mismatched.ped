@@ -1,5 +1,0 @@
-Family ID	Individual ID	Paternal ID	Maternal ID	Sex	Affected	Population	Other.info
-1463	NA12878	NA12891	SS6004470	1	0	CEU	mother
-1463	NA12891	0	0	1	0	CEU	mat grandfather
-1463	SS6004470	0	0	0	0	just some random sample
-broken	NA12892	0	0	2	0	CEU	mat grandmather
