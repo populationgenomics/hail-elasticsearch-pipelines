@@ -1,10 +1,18 @@
+# A simple usage guide:
+# $ cd <path-to>/hail_elasticsearch_pipelines/sv_pipeline/genome
+# $ export JAVA_HOME=<path-to>/Java/JavaVirtualMachines/jdk1.8.0_261.jdk/Contents/Home
+# $ PYTHONPATH=.:../../ python load_data.py <input_data.vcf.bgz> --strvctvre <strvctvre_data.vcf.bgz> --project-guid <project_guid> --es-nodes-wan-only --gencode-path <folder-for-mt> <other options>
+# Example:
+# $ PYTHONPATH=.:../../ python load_data.py vcf/phase2.annotated.svid.fixChrX.sampleIDs.vcf.gz --strvctvre vcf/phase2.annotated.fixChrX.sampleIDs.STRVCTRE.fixed.vcf.bgz --project-guid R0485_cmg_beggs_wgs --es-nodes-wan-only --gencode-path ./vcf
+#
+
 import argparse
 import hail as hl
 import logging
 import os
 import time
 
-from hail_scripts.v02.utils.elasticsearch_client import ElasticsearchClient
+from hail_scripts.elasticsearch.hail_elasticsearch_client import HailElasticsearchClient
 
 from sv_pipeline.utils.common import get_sample_subset, get_sample_remap, get_es_index_name, CHROM_TO_XPOS_OFFSET
 from sv_pipeline.genome.utils.mapping_gene_ids import load_gencode
@@ -20,6 +28,8 @@ SV_TYPE = 'sv_type'
 MAJOR_CONSEQ = 'major_consequence'
 GQ_BIN_SIZE = 10
 WGS_SAMPLE_TYPE = 'WGS'
+VARIANT_ID = 'variantId'
+BOTHSIDES_SUPPORT = 'BOTHSIDES_SUPPORT'
 
 INTERVAL_TYPE = 'array<struct{type: str, chrom: str, start: int32, end: int32}>'
 
@@ -29,13 +39,17 @@ CORE_FIELDS = {
     'sf': lambda rows: rows.info.AF[0],
     'sn': lambda rows: rows.info.AN,
     'start': lambda rows: rows.locus.position,
-    'end': lambda rows: hl.if_else(hl.is_defined(rows.info.END2), rows.info.END2, rows.info.END),
+    'end': lambda rows: rows.info.END,
     'sv_callset_Het': lambda rows: rows.info.N_HET,
     'sv_callset_Hom': lambda rows: rows.info.N_HOMALT,
-    'gnomad_svs_ID': lambda rows: rows.info.gnomAD_V2_SVID,
+    'gnomad_svs_ID': lambda rows: hl.if_else(hl.is_defined(rows.info.gnomAD_V2_SVID),
+                                             rows.info.gnomAD_V2_SVID[0],
+                                             hl.missing(hl.tstr)),
     'gnomad_svs_AF': lambda rows: rows.info.gnomAD_V2_AF,
     'pos': lambda rows: rows.locus.position,
-    'filters': lambda rows: hl.array(rows.filters.filter(lambda x: x != 'PASS')),
+    'filters': lambda rows: hl.array(rows.filters.filter(lambda x: (x != 'PASS') & (x != BOTHSIDES_SUPPORT))),
+    'bothsides_support': lambda rows: rows.filters.any(lambda x: x == BOTHSIDES_SUPPORT),
+    'algorithms': lambda rows: rows.info.ALGORITHMS,
     'xpos': lambda rows: get_xpos(rows.locus.contig, rows.locus.position),
     'cpx_intervals': lambda rows: hl.if_else(hl.is_defined(rows.info.CPX_INTERVALS),
                                              rows.info.CPX_INTERVALS.map(lambda x: get_cpx_interval(x)),
@@ -61,7 +75,7 @@ DERIVED_FIELDS = {
 
 SAMPLES_GQ_FIELDS = {'samples_gq_sv_{}_to_{}'.format(i, i+GQ_BIN_SIZE): i for i in range(0, 1000, GQ_BIN_SIZE)}
 
-FIELDS = list(CORE_FIELDS.keys()) + list(DERIVED_FIELDS.keys()) + ['variantId', SORTED_TRANS_CONSEQ, 'genotypes'] +\
+FIELDS = list(CORE_FIELDS.keys()) + list(DERIVED_FIELDS.keys()) + [VARIANT_ID, SORTED_TRANS_CONSEQ, 'genotypes'] +\
     list(SAMPLES_GQ_FIELDS.keys())
 
 
@@ -158,7 +172,7 @@ def annotate_fields(mt, gencode_release, gencode_path):
 
     rows = rows.annotate(**{k: get_sample_in_gq_range(rows, i, i+GQ_BIN_SIZE) for k, i in SAMPLES_GQ_FIELDS.items()})
 
-    rows = rows.rename({'rsid': 'variantId'})
+    rows = rows.rename({'rsid': VARIANT_ID})
 
     return rows.key_by().select(*FIELDS)
 
@@ -176,7 +190,7 @@ def export_to_es(rows, input_dataset, project_guid, es_host, es_port, block_size
     rows = rows.annotate_globals(**meta)
 
     es_password = os.environ.get('PIPELINE_ES_PASSWORD', '')
-    es_client = ElasticsearchClient(host=es_host, port=es_port, es_password=es_password)
+    es_client = HailElasticsearchClient(host=es_host, port=es_port, es_password=es_password)
 
     es_client.export_table_to_elasticsearch(
         rows,
@@ -188,6 +202,13 @@ def export_to_es(rows, input_dataset, project_guid, es_host, es_port, block_size
         verbose=True,
         elasticsearch_config={'es.nodes.wan.only': es_nodes_wan_only}
     )
+
+
+def add_strvctvre(rows, filename):
+    src_rows = load_mt(filename, None, False).rows()
+    src_rows = src_rows.key_by('rsid')
+
+    return rows.annotate(StrVCTVRE_score=hl.parse_float(src_rows[rows[VARIANT_ID]].info.StrVCTVRE))
 
 
 def main():
@@ -206,6 +227,7 @@ def main():
     p.add_argument('--block-size', type=int, default=2000)
     p.add_argument('--es-nodes-wan-only', action='store_true')
     p.add_argument('--id-file', help='The full path (can start with gs://) of the id file. Should only be used for testing purposes, not intended for use in production')
+    p.add_argument('--strvctvre', help='input VCF file for StrVCTVRE data')
 
     args = p.parse_args()
 
@@ -220,6 +242,9 @@ def main():
                    id_file=args.id_file)
 
     rows = annotate_fields(mt, args.gencode_release, args.gencode_path)
+
+    if args.strvctvre:
+        rows = add_strvctvre(rows, args.strvctvre)
 
     export_to_es(rows, args.input_dataset, args.project_guid, args.es_host, args.es_port, args.block_size,
                  args.num_shards, 'true' if args.es_nodes_wan_only else 'false')

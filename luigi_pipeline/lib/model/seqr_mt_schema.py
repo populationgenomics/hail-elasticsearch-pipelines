@@ -1,8 +1,8 @@
 import hail as hl
 
-from .base_mt_schema import BaseMTSchema, row_annotation, RowAnnotationOmit
-from hail_scripts.v02.utils.computed_fields import variant_id
-from hail_scripts.v02.utils.computed_fields import vep
+from lib.model.base_mt_schema import BaseMTSchema, row_annotation, RowAnnotationOmit
+from hail_scripts.computed_fields import variant_id
+from hail_scripts.computed_fields import vep
 
 
 class SeqrSchema(BaseMTSchema):
@@ -48,15 +48,15 @@ class SeqrSchema(BaseMTSchema):
     def filters(self):
         return self.mt.filters
 
-    @row_annotation()
+    @row_annotation(disable_index=True)
     def aIndex(self):
         return self.mt.a_index
-
-    @row_annotation()
+    
+    @row_annotation(disable_index=True)
     def wasSplit(self):
         return self.mt.was_split
 
-    @row_annotation()
+    @row_annotation(disable_index=True)
     def originalAltAlleles(self):
         # TODO: This assumes we annotate `locus_old` in this code because `split_multi_hts` drops the proper `old_locus`.
         # If we can get it to not drop it, we should revert this to `old_locus`
@@ -68,7 +68,7 @@ class SeqrSchema(BaseMTSchema):
     def sorted_transcript_consequences(self):
         return vep.get_expr_for_vep_sorted_transcript_consequences_array(self.mt.vep)
 
-    @row_annotation(name='docId')
+    @row_annotation(name='docId', disable_index=True)
     def doc_id(self, length=512):
         return variant_id.get_expr_for_variant_id(self.mt, length)
 
@@ -76,27 +76,27 @@ class SeqrSchema(BaseMTSchema):
     def variant_id(self):
         return variant_id.get_expr_for_variant_id(self.mt)
 
-    @row_annotation()
+    @row_annotation(disable_index=True)
     def contig(self):
         return variant_id.get_expr_for_contig(self.mt.locus)
 
-    @row_annotation()
+    @row_annotation(disable_index=True)
     def pos(self):
         return variant_id.get_expr_for_start_pos(self.mt)
 
-    @row_annotation()
+    @row_annotation(disable_index=True)
     def start(self):
         return variant_id.get_expr_for_start_pos(self.mt)
 
-    @row_annotation()
+    @row_annotation(disable_index=True)
     def end(self):
         return variant_id.get_expr_for_end_pos(self.mt)
 
-    @row_annotation()
+    @row_annotation(disable_index=True)
     def ref(self):
         return variant_id.get_expr_for_ref_allele(self.mt)
 
-    @row_annotation()
+    @row_annotation(disable_index=True)
     def alt(self):
         return variant_id.get_expr_for_alt_allele(self.mt)
 
@@ -104,11 +104,11 @@ class SeqrSchema(BaseMTSchema):
     def xpos(self):
         return variant_id.get_expr_for_xpos(self.mt.locus)
 
-    @row_annotation()
+    @row_annotation(disable_index=True)
     def xstart(self):
         return variant_id.get_expr_for_xpos(self.mt.locus)
 
-    @row_annotation()
+    @row_annotation(disable_index=True)
     def xstop(self):
         return (
             variant_id.get_expr_for_xpos(self.mt.locus)
@@ -122,7 +122,7 @@ class SeqrSchema(BaseMTSchema):
             raise RowAnnotationOmit
         return self.mt.rg37_locus
 
-    @row_annotation(fn_require=sorted_transcript_consequences)
+    @row_annotation(disable_index=True, fn_require=sorted_transcript_consequences)
     def domains(self):
         return vep.get_expr_for_vep_protein_domains_set_from_sorted(
             self.mt.sortedTranscriptConsequences
@@ -136,13 +136,13 @@ class SeqrSchema(BaseMTSchema):
             self.mt.sortedTranscriptConsequences
         )
 
-    @row_annotation(name='transcriptIds', fn_require=sorted_transcript_consequences)
+    @row_annotation(name='transcriptIds', disable_index=True, fn_require=sorted_transcript_consequences)
     def transcript_ids(self):
         return vep.get_expr_for_vep_transcript_ids_set(
             self.mt.sortedTranscriptConsequences
         )
 
-    @row_annotation(name='mainTranscript', fn_require=sorted_transcript_consequences)
+    @row_annotation(name='mainTranscript', disable_index=True, fn_require=sorted_transcript_consequences)
     def main_transcript(self):
         return vep.get_expr_for_worst_transcript_consequence_annotations_struct(
             self.mt.sortedTranscriptConsequences
@@ -152,7 +152,7 @@ class SeqrSchema(BaseMTSchema):
     def gene_ids(self):
         return vep.get_expr_for_vep_gene_ids_set(self.mt.sortedTranscriptConsequences)
 
-    @row_annotation(name='codingGeneIds', fn_require=sorted_transcript_consequences)
+    @row_annotation(name='codingGeneIds', disable_index=True, fn_require=sorted_transcript_consequences)
     def coding_gene_ids(self):
         return vep.get_expr_for_vep_gene_ids_set(
             self.mt.sortedTranscriptConsequences, only_coding_genes=True
@@ -166,7 +166,7 @@ class SeqrSchema(BaseMTSchema):
     def dbnsfp(self):
         return self._selected_ref_data.dbnsfp
 
-    @row_annotation()
+    @row_annotation(disable_index=True)
     def geno2mp(self):
         return self._selected_ref_data.geno2mp
 
@@ -174,7 +174,7 @@ class SeqrSchema(BaseMTSchema):
     def gnomad_exomes(self):
         return self._selected_ref_data.gnomad_exomes
 
-    @row_annotation()
+    @row_annotation(disable_index=True)
     def gnomad_exome_coverage(self):
         return self._selected_ref_data.gnomad_exome_coverage
 
@@ -182,7 +182,7 @@ class SeqrSchema(BaseMTSchema):
     def gnomad_genomes(self):
         return self._selected_ref_data.gnomad_genomes
 
-    @row_annotation()
+    @row_annotation(disable_index=True)
     def gnomad_genome_coverage(self):
         return self._selected_ref_data.gnomad_genome_coverage
 
@@ -247,7 +247,7 @@ class SeqrVariantSchema(SeqrSchema):
     def af(self):
         return self.mt.info.AF[self.mt.a_index - 1]
 
-    @row_annotation(name='AN')
+    @row_annotation(name='AN', disable_index=True)
     def an(self):
         return self.mt.info.AN
 
@@ -308,8 +308,8 @@ class SeqrGenotypesSchema(BaseMTSchema):
         # Convert the mt genotype entries into num_alt, gq, ab, dp, and sample_id.
         is_called = hl.is_defined(self.mt.GT)
         return {
-            'num_alt': hl.if_else(is_called, self.mt.GT.n_alt_alleles(), -1),
-            'gq': hl.if_else(is_called, self.mt.GQ, hl.null(hl.tint)),
+            'num_alt': hl.cond(is_called, self.mt.GT.n_alt_alleles(), -1),
+            'gq': hl.cond(is_called, self.mt.GQ, 0),
             'ab': hl.bind(
                 lambda total: hl.if_else(
                     (is_called) & (total != 0) & (hl.len(self.mt.AD) > 1),
