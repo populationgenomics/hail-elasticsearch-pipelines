@@ -196,7 +196,7 @@ class HailElasticsearchClient(ElasticsearchClient):
         )
 
         hl.export_elasticsearch(
-            table, self._host, int(self._port), index_name, block_size, elasticsearch_config, verbose
+            table, self._host, index_name, block_size, elasticsearch_config, verbose
         )
 
         """

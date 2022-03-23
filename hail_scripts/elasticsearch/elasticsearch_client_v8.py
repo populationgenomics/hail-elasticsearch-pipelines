@@ -33,8 +33,6 @@ class ElasticsearchClient:
             es_use_ssl (bool): Whether to use SSL for ElasticSearch connections
         """
 
-        self._host = host
-        self._port = port
         self._es_username = es_username
         self._es_password = es_password
         self._es_use_ssl = es_use_ssl
@@ -44,7 +42,8 @@ class ElasticsearchClient:
         if not host.startswith('http://') or not host.startswith('https://'):
             scheme = 'https' if es_use_ssl else 'http'
             host = f'{scheme}://{host}'
-        self.es = elasticsearch.Elasticsearch(f'{host}:{port}', basic_auth=auth)
+        self._host = f'{host}:{port}'
+        self.es = elasticsearch.Elasticsearch(self._host, basic_auth=auth)
 
         # check connection
         logger.info(pformat(self.es.info()))
