@@ -4,7 +4,7 @@ from pprint import pformat
 
 import hail as hl
 
-from hail_scripts.elasticsearch.elasticsearch_client_v7 import ElasticsearchClient
+from hail_scripts.elasticsearch.elasticsearch_client_v8 import ElasticsearchClient
 from hail_scripts.elasticsearch.elasticsearch_utils import (
     ELASTICSEARCH_INDEX,
     ELASTICSEARCH_UPDATE,
@@ -196,7 +196,7 @@ class HailElasticsearchClient(ElasticsearchClient):
         )
 
         hl.export_elasticsearch(
-            table, self._host, int(self._port), index_name, index_type_name, block_size, elasticsearch_config, verbose
+            table, self._host, int(self._port), index_name, block_size, elasticsearch_config, verbose
         )
 
         """
