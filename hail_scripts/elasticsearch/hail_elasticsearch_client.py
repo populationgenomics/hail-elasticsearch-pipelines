@@ -27,7 +27,6 @@ class HailElasticsearchClient(ElasticsearchClient):
         self,
         table: hl.Table,
         index_name :str = "data",
-        index_type_name :str = '_doc',
         block_size :int = 5000,
         num_shards :int = 10,
         delete_index_before_exporting :bool = True,
@@ -49,7 +48,6 @@ class HailElasticsearchClient(ElasticsearchClient):
         Args:
             table (Table): hail Table
             index_name (string): elasticsearch index name
-            index_type_name (string): elasticsearch index type
             block_size (int): number of records to write in one bulk insert
             num_shards (int): number of shards to use for this index
                 (see https://www.elastic.co/guide/en/elasticsearch/guide/current/overallocation.html)
@@ -196,7 +194,7 @@ class HailElasticsearchClient(ElasticsearchClient):
         )
 
         hl.export_elasticsearch(
-            table, self._host, int(self._port), index_name, index_type_name, block_size, elasticsearch_config, verbose
+            table, self._host, int(self._port), index_name, '', block_size, elasticsearch_config, verbose
         )
 
         """
