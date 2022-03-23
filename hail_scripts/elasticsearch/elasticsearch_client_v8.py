@@ -39,11 +39,12 @@ class ElasticsearchClient:
         self._es_password = es_password
         self._es_use_ssl = es_use_ssl
 
-        http_auth =  (self._es_username, self._es_password) if self._es_password else None
+        auth = (self._es_username, self._es_password) if self._es_password else None
         
         if not host.startswith('http://') or not host.startswith('https://'):
-            host = f'http://{host}'
-        self.es = elasticsearch.Elasticsearch(f'{host}:{port}', http_auth=http_auth)
+            scheme = 'https' if es_use_ssl else 'http'
+            host = f'{scheme}://{host}'
+        self.es = elasticsearch.Elasticsearch(f'{host}:{port}', basic_auth=auth)
 
         # check connection
         logger.info(pformat(self.es.info()))
